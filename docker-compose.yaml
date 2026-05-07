@@ -1,0 +1,125 @@
+# Sovereign Voice Stack - Docker Compose
+# Ultra-low-latency Voice AI on single L40S GPU
+
+version: "3.8"
+
+services:
+  # ============================================
+  # vLLM Server - The Brain (Llama-3.1-8B-Instruct)
+  # ============================================
+  vllm-server:
+    image: vllm/vllm-openai:latest
+    container_name: sovereign-vllm
+    runtime: nvidia
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=0
+      - HF_TOKEN=${HF_TOKEN:-}
+    volumes:
+      - vllm-cache:/root/.cache/huggingface
+    command: >
+      --model meta-llama/Llama-3.1-8B-Instruct
+      --dtype auto
+      --quantization fp8
+      --gpu-memory-utilization 0.7
+      --max-model-len 8192
+      --enforce-eager
+      --host 0.0.0.0
+      --port 8000
+      --trust-remote-code
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 120s
+
+  # ============================================
+  # Voice Agent - STT/TTS/Orchestration
+  # ============================================
+  voice-agent:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    container_name: sovereign-voice-agent
+    runtime: nvidia
+    restart: unless-stopped
+    depends_on:
+      vllm-server:
+        condition: service_healthy
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=0
+      - CUDA_VISIBLE_DEVICES=0
+      - VLLM_BASE_URL=http://vllm-server:8000/v1
+      - LIVEKIT_URL=${LIVEKIT_URL}
+      - LIVEKIT_API_KEY=${LIVEKIT_API_KEY}
+      - LIVEKIT_API_SECRET=${LIVEKIT_API_SECRET}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    volumes:
+      - ./:/app:ro
+      - agent-cache:/root/.cache
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    # Use remaining ~30% of GPU memory (14.4GB on L40S)
+    # STT (Whisper large-v3-turbo): ~3GB
+    # TTS (Kokoro ONNX): ~1GB
+    # Buffers/Overhead: ~10GB
+
+  # ============================================
+  # LiveKit Server (Optional - for local testing)
+  # ============================================
+  livekit:
+    image: livekit/livekit-server:latest
+    container_name: sovereign-livekit
+    restart: unless-stopped
+    ports:
+      - "7880:7880" # HTTP API
+      - "7881:7881" # RTC (WebRTC)
+      - "7882:7882/udp" # RTC UDP
+    environment:
+      - LIVEKIT_KEYS=${LIVEKIT_API_KEY}:${LIVEKIT_API_SECRET}
+    command: --dev --bind 0.0.0.0
+    profiles:
+      - local-testing
+
+  # ============================================
+  # Redis (for LiveKit state, optional)
+  # ============================================
+  redis:
+    image: redis:7-alpine
+    container_name: sovereign-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    profiles:
+      - local-testing
+
+volumes:
+  vllm-cache:
+    driver: local
+  agent-cache:
+    driver: local
+  redis-data:
+    driver: local
+
+networks:
+  default:
+    name: sovereign-voice-network
+    driver: bridge
