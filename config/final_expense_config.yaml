@@ -1,0 +1,89 @@
+# Final Expense Specific Configuration
+
+qualification:
+  # Order in which qualification steps should be completed
+  order:
+    - identity_and_interest
+    - age
+    - location
+    - health_snapshot
+
+  # Age boundaries for qualification
+  disqualifier_age_min: 45
+  disqualifier_age_max: 85
+
+  # Maximum number of gentle objection-handling attempts before gracefully ending
+  max_objection_attempts: 2
+
+transfer:
+  # Requirements that must be met before transferring to a licensed agent
+  requirements:
+    - identity_confirmed
+    - age_qualified
+    - state_qualified
+    - health_snapshot_clear
+  # Whether to summarize qualification before transfer
+  summarize_before_transfer: true
+  # Maximum hold time before offering callback (seconds)
+  max_hold_time_sec: 120
+
+callback:
+  # Window in hours during which callbacks can be scheduled
+  window_hours: 72
+  # Earliest callback time (24h format)
+  earliest_hour: 9
+  # Latest callback time (24h format)
+  latest_hour: 20
+
+supported_states:
+  - AL
+  - AK
+  - AZ
+  - AR
+  - CA
+  - CO
+  - CT
+  - DE
+  - FL
+  - GA
+  - HI
+  - ID
+  - IL
+  - IN
+  - IA
+  - KS
+  - KY
+  - LA
+  - ME
+  - MD
+  - MA
+  - MI
+  - MN
+  - MS
+  - MO
+  - MT
+  - NE
+  - NV
+  - NH
+  - NJ
+  - NM
+  - NY
+  - NC
+  - ND
+  - OH
+  - OK
+  - OR
+  - PA
+  - RI
+  - SC
+  - SD
+  - TN
+  - TX
+  - UT
+  - VT
+  - VA
+  - WA
+  - WV
+  - WI
+  - WY
+  - DC

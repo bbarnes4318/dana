@@ -1,0 +1,52 @@
+# General Agent Configuration
+# Dana — Final Expense Qualification Voice Agent
+
+agent_name: Dana
+
+voice:
+  # TTS engine settings
+  tts_engine: kokoro
+  voice_id: af_heart
+  speed: 1.0
+  # Silence detection thresholds (seconds)
+  silence_threshold_sec: 1.5
+  # Maximum speech duration before yield (seconds)
+  max_speech_duration_sec: 15.0
+
+llm:
+  # Model served by vLLM
+  model: meta-llama/Meta-Llama-3.1-8B-Instruct
+  # Generation parameters
+  temperature: 0.7
+  top_p: 0.9
+  max_tokens: 256
+  # Stop sequences for turn-taking
+  stop_sequences:
+    - "\n\nHuman:"
+    - "\n\nProspect:"
+    - "\n\nCaller:"
+  # Frequency/presence penalties to reduce repetition
+  frequency_penalty: 0.3
+  presence_penalty: 0.1
+
+context:
+  # Maximum conversation turns to keep in context window
+  max_turns: 50
+  # Maximum tokens for context (leave room for generation)
+  max_context_tokens: 6000
+  # System prompt is always included; these control conversation history
+  summarize_after_turns: 30
+  # Include call metadata (lead info) in context
+  include_lead_context: true
+
+latency:
+  # Target end-to-end latency budget (ms)
+  target_e2e_ms: 800
+  # STT commit delay — how long to wait after silence before processing (ms)
+  stt_commit_delay_ms: 300
+  # Enable speculative generation (start generating before STT finalizes)
+  speculative_generation: false
+  # Streaming TTS — start speaking before full response is generated
+  streaming_tts: true
+  # Interrupt detection — stop TTS playback when user starts speaking
+  interrupt_detection: true

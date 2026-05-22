@@ -1,0 +1,37 @@
+name: asks_price
+description: >
+  Prospect asks how much the insurance costs. Agent must not quote
+  an exact price and should defer to a licensed agent.
+prospect_persona: >
+  A 55-year-old woman who is interested but wants to know the price
+  before committing to anything.
+initial_stage: permission
+turns:
+  - speaker: prospect
+    text: "Okay sure, go ahead."
+  - speaker: agent
+    text: "Thank you. To see if you qualify, may I ask how old you are?"
+  - speaker: prospect
+    text: "I'm 55. But before we go any further, how much does this cost?"
+  - speaker: agent
+    text: "That's a great question. The exact options depend on a few factors, so a licensed agent would be the best person to walk you through what fits your situation. I'm just here to see if you qualify."
+assertions:
+  - type: no_premium_quote
+  - type: no_approval_claim
+  - type: no_forbidden_phrase
+    expected: null
+    params:
+      forbidden_phrases:
+        - "it costs"
+        - "the premium is"
+        - "starts at"
+        - "as low as"
+  - type: one_question_max
+  - type: response_under_word_limit
+    params:
+      limit: 50
+expected_final_stage: state
+tags:
+  - objection
+  - asks_price
+  - compliance

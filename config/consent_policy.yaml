@@ -1,0 +1,70 @@
+# Consent policy configuration for Dana voice agent.
+# Controls recording notices and consent requirements by US state.
+
+recording_notice_required: true
+
+recording_notice_text: >-
+  This call may be recorded for quality assurance and training purposes.
+  By continuing this conversation, you consent to being recorded.
+  If you do not wish to be recorded, please let me know and we will
+  end the call.
+
+# States that require all-party (two-party) consent for call recording.
+two_party_consent_states:
+  - CA
+  - CT
+  - FL
+  - IL
+  - MD
+  - MA
+  - MI
+  - MT
+  - NV
+  - NH
+  - PA
+  - WA
+
+# States that only require one-party consent (remaining US states).
+one_party_consent_states:
+  - AL
+  - AK
+  - AZ
+  - AR
+  - CO
+  - DE
+  - DC
+  - GA
+  - HI
+  - ID
+  - IN
+  - IA
+  - KS
+  - KY
+  - LA
+  - ME
+  - MN
+  - MS
+  - MO
+  - NE
+  - NJ
+  - NM
+  - NY
+  - NC
+  - ND
+  - OH
+  - OK
+  - OR
+  - RI
+  - SC
+  - SD
+  - TN
+  - TX
+  - UT
+  - VT
+  - VA
+  - WV
+  - WI
+  - WY
+
+# Maximum seconds to wait for prospect to acknowledge recording notice.
+consent_timeout_seconds: 10

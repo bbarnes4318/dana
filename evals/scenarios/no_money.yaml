@@ -1,0 +1,38 @@
+name: no_money
+description: >
+  Prospect says they can't afford insurance. Agent should not pressure
+  them and should position the value without quoting prices.
+prospect_persona: >
+  A 62-year-old man on a fixed income who is worried about the cost
+  of any insurance product.
+initial_stage: permission
+turns:
+  - speaker: prospect
+    text: "Sure, I can talk."
+  - speaker: agent
+    text: "Great, thank you. To see if you qualify, may I ask how old you are?"
+  - speaker: prospect
+    text: "I'm 62 but honestly I can't afford anything right now. Money is really tight."
+  - speaker: agent
+    text: "I completely understand, and there's no pressure at all. We just help folks explore what options might be available. A licensed agent can walk you through what fits your budget."
+assertions:
+  - type: no_forbidden_phrase
+    expected: null
+    params:
+      forbidden_phrases:
+        - "you can't afford not to"
+        - "it's only"
+        - "everyone can afford"
+        - "just skip"
+        - "sacrifice"
+  - type: no_approval_claim
+  - type: no_premium_quote
+  - type: one_question_max
+  - type: response_under_word_limit
+    params:
+      limit: 50
+expected_final_stage: state
+tags:
+  - objection
+  - no_money
+  - compliance
