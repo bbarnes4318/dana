@@ -61,35 +61,38 @@ class ProvisioningOrchestrator:
 
     def _write_outputs(self, details: dict, status: str):
         """Write env output file and metadata JSON file."""
-        env_file = self._determine_env_file()
-        try:
-            # Prepare env contents
-            env_lines = [
-                f"TELNYX_CONNECTION_ID={details.get('connection_id') or ''}",
-                f"TELNYX_OUTBOUND_VOICE_PROFILE_ID={details.get('outbound_voice_profile_id') or ''}",
-                f"TELNYX_PHONE_NUMBER_ID={details.get('phone_number_id') or ''}",
-                f"TELNYX_OUTBOUND_NUMBER={details.get('outbound_number') or ''}",
-                f"TELNYX_SIP_ADDRESS={details.get('sip_address') or 'sip.telnyx.com'}",
-                f"TELNYX_SIP_USERNAME={details.get('sip_username') or ''}",
-                f"TELNYX_SIP_PASSWORD={details.get('sip_password') or ''}",
-                f"LIVEKIT_SIP_OUTBOUND_TRUNK_ID={details.get('livekit_sip_outbound_trunk_id') or ''}",
-                f"DANA_DEFAULT_CALLER_ID={details.get('outbound_number') or ''}",
-                "DANA_ROOM_PREFIX=dana-call"
-            ]
-            
-            with open(env_file, "w", encoding="utf-8") as f:
-                f.write("\n".join(env_lines) + "\n")
-            
-            # chmod 600 immediately
+        if status == "provisioned_successfully":
+            env_file = self._determine_env_file()
             try:
-                os.chmod(env_file, 0o600)
-            except Exception as ce:
-                logger.warning("Could not set file permissions (chmod 600) on %s: %s", env_file, ce)
+                # Prepare env contents
+                env_lines = [
+                    f"TELNYX_CONNECTION_ID={details.get('connection_id') or ''}",
+                    f"TELNYX_OUTBOUND_VOICE_PROFILE_ID={details.get('outbound_voice_profile_id') or ''}",
+                    f"TELNYX_PHONE_NUMBER_ID={details.get('phone_number_id') or ''}",
+                    f"TELNYX_OUTBOUND_NUMBER={details.get('outbound_number') or ''}",
+                    f"TELNYX_SIP_ADDRESS={details.get('sip_address') or 'sip.telnyx.com'}",
+                    f"TELNYX_SIP_USERNAME={details.get('sip_username') or ''}",
+                    f"TELNYX_SIP_PASSWORD={details.get('sip_password') or ''}",
+                    f"LIVEKIT_SIP_OUTBOUND_TRUNK_ID={details.get('livekit_sip_outbound_trunk_id') or ''}",
+                    f"DANA_DEFAULT_CALLER_ID={details.get('outbound_number') or ''}",
+                    "DANA_ROOM_PREFIX=dana-call"
+                ]
                 
-            self.report["env_written"] = "yes"
-            logger.info("Saved secret environment variables to: %s (permissions set to 600)", env_file)
-        except Exception as e:
-            logger.error("Failed to write env output file: %s", e)
+                with open(env_file, "w", encoding="utf-8") as f:
+                    f.write("\n".join(env_lines) + "\n")
+                
+                # chmod 600 immediately
+                try:
+                    os.chmod(env_file, 0o600)
+                except Exception as ce:
+                    logger.warning("Could not set file permissions (chmod 600) on %s: %s", env_file, ce)
+                    
+                self.report["env_written"] = "yes"
+                logger.info("Saved secret environment variables to: %s (permissions set to 600)", env_file)
+            except Exception as e:
+                logger.error("Failed to write env output file: %s", e)
+        else:
+            logger.info("Skipping writing secret env output file because status is '%s'. Only 'provisioned_successfully' allowed.", status)
 
         # Write resources JSON (no secrets allowed)
         json_file = "telephony/provisioned_resources.json"
@@ -124,6 +127,35 @@ class ProvisioningOrchestrator:
         print(f"8. Remaining operator action: {self.report['operator_action']}")
         print("=========================================================================\n")
 
+    def assert_real_success(self, details: dict):
+        """Validates that all res_details contain genuine provisioned values."""
+        errors = []
+        
+        # Check required fields are non-empty and not replace_me
+        checks = {
+            "connection_id": details.get("connection_id"),
+            "outbound_voice_profile_id": details.get("outbound_voice_profile_id"),
+            "phone_number_id": details.get("phone_number_id"),
+            "outbound_number": details.get("outbound_number"),
+            "sip_username": details.get("sip_username"),
+            "sip_password": details.get("sip_password"),
+            "livekit_sip_outbound_trunk_id": details.get("livekit_sip_outbound_trunk_id"),
+        }
+        
+        for k, v in checks.items():
+            if not v or v == "replace_me" or v == "unknown_order_pending":
+                errors.append(f"Missing or invalid final detail: {k} (val: {v})")
+
+        # Check report statuses
+        invalid_statuses = ("failed", "missing", "unverified", "planned", "dry_run", "skipped")
+        for k, status in self.report.items():
+            if k in ("voice_profile", "connection", "phone_number", "livekit_trunk"):
+                if status in invalid_statuses:
+                    errors.append(f"Report status for '{k}' is invalid: {status}")
+
+        if errors:
+            raise ValueError(f"Success validation failed: {'; '.join(errors)}")
+
     async def run(self):
         logger.info("Starting provisioner in '%s' mode...", self.mode)
 
@@ -155,7 +187,7 @@ class ProvisioningOrchestrator:
         print("\n--- Planned Actions ---")
         
         if self.config.telnyx_connection_id:
-            print(f"- Will reuse existing Telnyx credential connection ID: {self.config.telnyx_connection_id}")
+            print(f"- Will verify and reuse Telnyx credential connection ID: {self.config.telnyx_connection_id}")
         else:
             print("- Will search for existing credential connection named 'dana-sip-connection'")
             if self.config.dana_confirm_telnyx_mutation:
@@ -164,7 +196,7 @@ class ProvisioningOrchestrator:
                 print("  -> If not found, WILL fail (requires DANA_CONFIRM_TELNYX_MUTATION=yes)")
 
         if self.config.telnyx_outbound_voice_profile_id:
-            print(f"- Will reuse existing Outbound Voice Profile ID: {self.config.telnyx_outbound_voice_profile_id}")
+            print(f"- Will verify and reuse Outbound Voice Profile ID: {self.config.telnyx_outbound_voice_profile_id}")
         else:
             print("- Will search for existing outbound voice profile named 'dana-voice-profile'")
             if self.config.dana_confirm_telnyx_mutation:
@@ -184,7 +216,7 @@ class ProvisioningOrchestrator:
                 print("- If none found, WILL fail (number purchase not confirmed)")
 
         if self.config.livekit_sip_outbound_trunk_id:
-            print(f"- Will reuse existing LiveKit Outbound Trunk ID: {self.config.livekit_sip_outbound_trunk_id}")
+            print(f"- Will verify and reuse LiveKit Outbound Trunk ID: {self.config.livekit_sip_outbound_trunk_id}")
         else:
             print("- Will check if matching trunk exists in LiveKit (prevents duplicates)")
             if self.config.dana_confirm_create_livekit_trunk:
@@ -195,6 +227,7 @@ class ProvisioningOrchestrator:
         print("=========================================================================\n")
         self.print_report("planned")
         sys.exit(0)
+        return
 
     async def _run_inspect(self):
         logger.info("Executing inspect mode...")
@@ -204,6 +237,7 @@ class ProvisioningOrchestrator:
             self.report["operator_action"] = "Set DANA_CONFIRM_TELNYX_READ=yes in environment."
             self.print_report("failed_requires_operator_action")
             sys.exit(1)
+            return
 
         try:
             self.config.validate_for_telnyx(write_required=False)
@@ -212,6 +246,7 @@ class ProvisioningOrchestrator:
             self.report["operator_action"] = str(e)
             self.print_report("failed_requires_operator_action")
             sys.exit(1)
+            return
 
         print("\n=========================================================================")
         print("PROVISIONING INSPECT MODE (Read-Only API Inspection)")
@@ -286,6 +321,7 @@ class ProvisioningOrchestrator:
         print("=========================================================================\n")
         self.print_report("inspected")
         sys.exit(0)
+        return
 
     async def _run_apply(self):
         logger.info("Executing apply mode...")
@@ -303,19 +339,28 @@ class ProvisioningOrchestrator:
             telnyx_mutations = []
             if not self.config.telnyx_outbound_voice_profile_id:
                 telnyx_mutations.append("- Will search or create Outbound Voice Profile named 'dana-voice-profile'")
+            else:
+                telnyx_mutations.append(f"- Will verify and reuse Outbound Voice Profile: {self.config.telnyx_outbound_voice_profile_id}")
+            
             if not self.config.telnyx_connection_id:
                 telnyx_mutations.append("- Will search or create Credential Connection named 'dana-sip-connection'")
+            else:
+                telnyx_mutations.append(f"- Will verify and reuse Credential Connection: {self.config.telnyx_connection_id}")
+                
             if not self.config.telnyx_outbound_number:
                 if self.config.dana_confirm_purchase_number:
                     telnyx_mutations.append(f"- Will search & purchase a phone number in country: '{self.config.telnyx_purchase_country or 'US'}'")
                 else:
                     telnyx_mutations.append("- Will reuse an existing owned number assigned/unassigned")
+            else:
+                telnyx_mutations.append(f"- Will verify ownership of number: {self.config.telnyx_outbound_number}")
+
             telnyx_mutations.append("- Will link outbound voice profile and connection, and assign the phone number")
             
             print(f"Telnyx Resource Mutations:\n" + "\n".join(telnyx_mutations))
             
             if self.config.dana_confirm_create_livekit_trunk:
-                print("LiveKit Trunk Mutations:\n- Will create LiveKit outbound SIP trunk if not matching")
+                print("LiveKit Trunk Mutations:\n- Will create/reuse LiveKit outbound SIP trunk")
             else:
                 print("LiveKit Trunk Mutations:\n- None (not confirmed)")
             
@@ -323,13 +368,15 @@ class ProvisioningOrchestrator:
             self.report["operator_action"] = "Set DANA_PROVISION_APPLY_CONFIRM=yes to confirm mutations."
             self.print_report("failed_requires_operator_action")
             sys.exit(1)
+            return
 
         # 2. Check read confirmation
         if not self.config.dana_confirm_telnyx_read:
-            logger.error("DANA_CONFIRM_TELNYX_READ=yes is required to list existing resources.")
+            logger.error("DANA_CONFIRM_TELNYX_READ=yes is required to list/inspect existing resources.")
             self.report["operator_action"] = "Set DANA_CONFIRM_TELNYX_READ=yes in environment."
             self.print_report("failed_requires_operator_action")
             sys.exit(1)
+            return
 
         # 3. Validate credentials
         try:
@@ -339,6 +386,7 @@ class ProvisioningOrchestrator:
             self.report["operator_action"] = str(e)
             self.print_report("failed_requires_operator_action")
             sys.exit(1)
+            return
 
         # Output resource dictionary mapping
         res_details = {
@@ -353,13 +401,36 @@ class ProvisioningOrchestrator:
         }
 
         # 4. Outbound Voice Profile logic
-        if not res_details["outbound_voice_profile_id"]:
+        if res_details["outbound_voice_profile_id"]:
+            # Verify existing profile ID
+            logger.info("Verifying provided Outbound Voice Profile ID: %s...", res_details["outbound_voice_profile_id"])
+            profiles = await self.client.list_outbound_voice_profiles()
+            if profiles is None:
+                logger.error("API Call to list voice profiles failed.")
+                self.print_report("failed_api_error")
+                sys.exit(1)
+                return
+            
+            self.report["inspected"] = "yes"
+            match = next((p for p in profiles if p.get("id") == res_details["outbound_voice_profile_id"]), None)
+            if match:
+                self.report["voice_profile"] = "reused"
+                logger.info("Successfully verified provided Voice Profile: %s (ID: %s)", match.get("name"), match.get("id"))
+            else:
+                logger.error("Provided TELNYX_OUTBOUND_VOICE_PROFILE_ID '%s' was not found on the account.", res_details["outbound_voice_profile_id"])
+                self.report["voice_profile"] = "failed"
+                self.report["operator_action"] = f"Verify TELNYX_OUTBOUND_VOICE_PROFILE_ID value '{res_details['outbound_voice_profile_id']}' exists in Telnyx dashboard."
+                self.print_report("failed_requires_operator_action")
+                sys.exit(1)
+                return
+        else:
             logger.info("Listing existing Outbound Voice Profiles...")
             profiles = await self.client.list_outbound_voice_profiles()
             if profiles is None:
                 logger.error("API Call to list voice profiles failed.")
                 self.print_report("failed_api_error")
                 sys.exit(1)
+                return
             
             self.report["inspected"] = "yes"
             match = next((p for p in profiles if p.get("name") == "dana-voice-profile"), None)
@@ -380,24 +451,48 @@ class ProvisioningOrchestrator:
                         self.report["voice_profile"] = "failed"
                         self.print_report("failed_api_error")
                         sys.exit(1)
+                        return
                 else:
                     logger.error("Outbound Voice Profile 'dana-voice-profile' not found and DANA_CONFIRM_TELNYX_MUTATION is not yes.")
                     self.report["voice_profile"] = "failed"
                     self.report["operator_action"] = "Create outbound voice profile named 'dana-voice-profile' or enable DANA_CONFIRM_TELNYX_MUTATION=yes."
                     self.print_report("failed_requires_operator_action")
                     sys.exit(1)
-        else:
-            self.report["voice_profile"] = "reused"
+                    return
 
         # 5. SIP Connection logic
         sip_password_generated = False
-        if not res_details["connection_id"]:
+        if res_details["connection_id"]:
+            # Verify existing connection ID
+            logger.info("Verifying provided SIP Connection ID: %s...", res_details["connection_id"])
+            connections = await self.client.list_credential_connections()
+            if connections is None:
+                logger.error("API Call to list connections failed.")
+                self.print_report("failed_api_error")
+                sys.exit(1)
+                return
+            
+            self.report["inspected"] = "yes"
+            match = next((c for c in connections if c.get("id") == res_details["connection_id"]), None)
+            if match:
+                self.report["connection"] = "reused"
+                res_details["sip_username"] = match.get("username") or match.get("sip_username") or match.get("user_name")
+                logger.info("Successfully verified provided SIP Connection name: %s (ID: %s)", match.get("connection_name"), match.get("id"))
+            else:
+                logger.error("Provided TELNYX_CONNECTION_ID '%s' was not found on the account.", res_details["connection_id"])
+                self.report["connection"] = "failed"
+                self.report["operator_action"] = f"Verify TELNYX_CONNECTION_ID value '{res_details['connection_id']}' exists in Telnyx dashboard."
+                self.print_report("failed_requires_operator_action")
+                sys.exit(1)
+                return
+        else:
             logger.info("Listing existing Credential Connections...")
             connections = await self.client.list_credential_connections()
             if connections is None:
                 logger.error("API Call to list connections failed.")
                 self.print_report("failed_api_error")
                 sys.exit(1)
+                return
 
             self.report["inspected"] = "yes"
             match = next((c for c in connections if c.get("connection_name") == "dana-sip-connection"), None)
@@ -423,14 +518,14 @@ class ProvisioningOrchestrator:
                         self.report["connection"] = "failed"
                         self.print_report("failed_api_error")
                         sys.exit(1)
+                        return
                 else:
                     logger.error("Credential connection 'dana-sip-connection' not found and DANA_CONFIRM_TELNYX_MUTATION is not yes.")
                     self.report["connection"] = "failed"
                     self.report["operator_action"] = "Create SIP connection 'dana-sip-connection' or enable DANA_CONFIRM_TELNYX_MUTATION=yes."
                     self.print_report("failed_requires_operator_action")
                     sys.exit(1)
-        else:
-            self.report["connection"] = "reused"
+                    return
 
         # 6. Retrieve/validate SIP username & password
         if not sip_password_generated:
@@ -442,30 +537,120 @@ class ProvisioningOrchestrator:
                 self.report["operator_action"] = "Telnyx SIP password could not be retrieved. Create/reset SIP credentials in Telnyx and provide TELNYX_SIP_USERNAME/TELNYX_SIP_PASSWORD."
                 self.print_report("failed_requires_operator_action")
                 sys.exit(1)
+                return
             else:
                 self.report["sip_credentials"] = "env"
 
-        # 7. Outbound voice profile linkage update
-        if self.config.dana_confirm_telnyx_mutation:
-            logger.info("Ensuring SIP connection is linked to Outbound Voice Profile...")
-            update_res = await self.client.update_credential_connection(
-                res_details["connection_id"],
-                {"outbound_voice_profile_id": res_details["outbound_voice_profile_id"]}
-            )
-            if not update_res:
-                logger.warning("Could not associate credential connection with Outbound Voice Profile ID via API.")
+        # 7. SIP Connection <-> Outbound Voice Profile Linkage Verification and Enforcement
+        # Retrieve the current connection object details from list
+        connections = await self.client.list_credential_connections()
+        current_conn = next((c for c in connections if c.get("id") == res_details["connection_id"]), None) if connections else None
+        
+        if current_conn:
+            linked_profile_id = current_conn.get("outbound_voice_profile_id")
+            if linked_profile_id != res_details["outbound_voice_profile_id"]:
+                logger.info("Outbound voice profile linkage mismatch. Connection has '%s', expected '%s'.", linked_profile_id, res_details["outbound_voice_profile_id"])
+                
+                if self.config.dana_confirm_telnyx_mutation:
+                    logger.info("Updating SIP connection outbound voice profile linkage...")
+                    update_res = await self.client.update_credential_connection(
+                        res_details["connection_id"],
+                        {"outbound_voice_profile_id": res_details["outbound_voice_profile_id"]}
+                    )
+                    if not update_res:
+                        logger.error("Failed to update credential connection voice profile linkage via API.")
+                        self.print_report("failed_api_error")
+                        sys.exit(1)
+                        return
+                else:
+                    logger.error("SIP Connection is not linked to the selected Outbound Voice Profile, and DANA_CONFIRM_TELNYX_MUTATION=yes is not set.")
+                    self.report["operator_action"] = f"SIP Connection is not linked to Outbound Voice Profile ID {res_details['outbound_voice_profile_id']}. Link connection ID {res_details['connection_id']} to profile ID {res_details['outbound_voice_profile_id']} in Telnyx dashboard, or enable DANA_CONFIRM_TELNYX_MUTATION=yes."
+                    self.print_report("failed_requires_operator_action")
+                    sys.exit(1)
+                    return
 
-        # 8. Resolve Phone Number
-        if not res_details["outbound_number"] or res_details["outbound_number"] == "replace_me":
+        # 8. Phone Number Logic
+        # A: Verify TELNYX_PHONE_NUMBER_ID if provided
+        if res_details["phone_number_id"] and res_details["phone_number_id"] != "replace_me":
+            logger.info("Verifying provided Phone Number ID: %s...", res_details["phone_number_id"])
+            details = await self.client.get_phone_number_details(res_details["phone_number_id"])
+            if not details:
+                logger.error("Provided TELNYX_PHONE_NUMBER_ID '%s' was not found on the account.", res_details["phone_number_id"])
+                self.report["phone_number"] = "failed"
+                self.report["operator_action"] = f"Verify TELNYX_PHONE_NUMBER_ID value '{res_details['phone_number_id']}' exists in Telnyx dashboard."
+                self.print_report("failed_requires_operator_action")
+                sys.exit(1)
+                return
+            
+            num_val = details.get("phone_number")
+            if res_details["outbound_number"] and res_details["outbound_number"] != "replace_me":
+                if num_val != res_details["outbound_number"]:
+                    logger.error("Phone number ID '%s' maps to number '%s', but TELNYX_OUTBOUND_NUMBER is set to '%s'. They must match.", 
+                                 res_details["phone_number_id"], num_val, res_details["outbound_number"])
+                    self.report["phone_number"] = "failed"
+                    self.report["operator_action"] = "Ensure TELNYX_PHONE_NUMBER_ID and TELNYX_OUTBOUND_NUMBER are consistent. They must match."
+                    self.print_report("failed_requires_operator_action")
+                    sys.exit(1)
+                    return
+
+            res_details["outbound_number"] = num_val
+            logger.info("Successfully verified Phone Number ID. Number is: %s", num_val)
+            self.report["phone_number"] = "reused"
+
+        # B: Verify TELNYX_OUTBOUND_NUMBER if provided but ID is not
+        elif res_details["outbound_number"] and res_details["outbound_number"] != "replace_me":
+            logger.info("Verifying ownership of outbound number: %s...", res_details["outbound_number"])
+            numbers = await self.client.list_phone_numbers()
+            if numbers is None:
+                logger.error("API Call to list phone numbers failed.")
+                self.print_report("failed_api_error")
+                sys.exit(1)
+                return
+            
+            match_num = next((n for n in numbers if n.get("phone_number") == res_details["outbound_number"]), None)
+            if match_num:
+                res_details["phone_number_id"] = match_num.get("id")
+                logger.info("Found owned number ID: %s", res_details["phone_number_id"])
+                
+                # Check connection assignment
+                if match_num.get("connection_id") != res_details["connection_id"]:
+                    if self.config.dana_confirm_telnyx_mutation:
+                        logger.info("Assigning phone number to connection ID %s...", res_details["connection_id"])
+                        assign_res = await self.client.assign_phone_number_connection(res_details["phone_number_id"], res_details["connection_id"])
+                        if not assign_res:
+                            logger.error("Failed to assign phone number to SIP connection.")
+                            self.report["phone_number"] = "failed"
+                            self.print_report("failed_api_error")
+                            sys.exit(1)
+                            return
+                    else:
+                        logger.error("Phone number %s is not assigned to connection ID %s, and mutation is not confirmed.", res_details["outbound_number"], res_details["connection_id"])
+                        self.report["phone_number"] = "failed"
+                        self.report["operator_action"] = f"Assign number {res_details['outbound_number']} to connection ID {res_details['connection_id']} in Telnyx dashboard, or enable DANA_CONFIRM_TELNYX_MUTATION=yes."
+                        self.print_report("failed_requires_operator_action")
+                        sys.exit(1)
+                        return
+                
+                self.report["phone_number"] = "reused"
+            else:
+                logger.error("The configured TELNYX_OUTBOUND_NUMBER '%s' is not owned by this Telnyx account.", res_details["outbound_number"])
+                self.report["phone_number"] = "failed"
+                self.report["operator_action"] = f"Ensure the number '{res_details['outbound_number']}' is ordered/active in your Telnyx portal. Number is not owned by this Telnyx account."
+                self.print_report("failed_requires_operator_action")
+                sys.exit(1)
+                return
+
+        # C: Auto-Resolve Phone Number
+        else:
             logger.info("Searching owned phone numbers...")
             numbers = await self.client.list_phone_numbers()
             if numbers is None:
                 logger.error("API Call to list phone numbers failed.")
                 self.print_report("failed_api_error")
                 sys.exit(1)
+                return
 
             self.report["inspected"] = "yes"
-            # Try to find a number assigned to this connection
             owned_assigned = next((n for n in numbers if n.get("connection_id") == res_details["connection_id"]), None)
             if owned_assigned:
                 res_details["outbound_number"] = owned_assigned.get("phone_number")
@@ -473,7 +658,6 @@ class ProvisioningOrchestrator:
                 self.report["phone_number"] = "reused"
                 logger.info("Found number assigned to connection: %s (ID: %s)", res_details["outbound_number"], res_details["phone_number_id"])
             else:
-                # Find an unassigned owned number
                 owned_unassigned = next((n for n in numbers if not n.get("connection_id")), None)
                 if owned_unassigned:
                     res_details["outbound_number"] = owned_unassigned.get("phone_number")
@@ -490,15 +674,16 @@ class ProvisioningOrchestrator:
                             self.report["phone_number"] = "failed"
                             self.print_report("failed_api_error")
                             sys.exit(1)
+                            return
                     else:
                         logger.error("Owned unassigned phone number exists but assignment not confirmed.")
                         self.report["phone_number"] = "failed"
                         self.report["operator_action"] = "Enable DANA_CONFIRM_TELNYX_MUTATION=yes to assign owned number."
                         self.print_report("failed_requires_operator_action")
                         sys.exit(1)
+                        return
                 else:
-                    # No owned numbers. Attempt to purchase.
-                    # Verify ALL required purchase confirmations are present
+                    # Purchase Logic
                     purchase_country = self.config.telnyx_purchase_country
                     if (not self.config.dana_confirm_purchase_number or 
                             not self.config.dana_confirm_telnyx_mutation or
@@ -508,8 +693,8 @@ class ProvisioningOrchestrator:
                         self.report["operator_action"] = "Provide TELNYX_OUTBOUND_NUMBER, assign an owned number, or verify purchase configs (DANA_CONFIRM_PURCHASE_NUMBER=yes, TELNYX_PURCHASE_COUNTRY=US, DANA_CONFIRM_TELNYX_MUTATION=yes)."
                         self.print_report("failed_requires_operator_action")
                         sys.exit(1)
+                        return
 
-                    # Search available number
                     logger.info("Searching available numbers in country: %s...", purchase_country)
                     params = {"filter[country_code]": purchase_country, "filter[limit]": 1}
                     if self.config.telnyx_purchase_area_code:
@@ -523,14 +708,13 @@ class ProvisioningOrchestrator:
                         self.report["phone_number"] = "failed"
                         self.print_report("failed_api_error")
                         sys.exit(1)
+                        return
 
                     target_num = available[0].get("phone_number")
                     logger.info("Ordering phone number: %s...", target_num)
                     order = await self.client.purchase_phone_number(target_num)
                     if order and order.get("id"):
-                        # In the real Telnyx order api, we may need to pull order status or read owned numbers again.
-                        # For provisioning purposes, let's list owned numbers to locate the new ID
-                        logger.info("Successfully ordered number. Retrieving ID...")
+                        logger.info("Successfully ordered number. Checking if visible in owned numbers list...")
                         await asyncio.sleep(2)  # brief wait for ordering propagation
                         updated_numbers = await self.client.list_phone_numbers()
                         match_new = next((n for n in updated_numbers if n.get("phone_number") == target_num), None) if updated_numbers else None
@@ -544,56 +728,127 @@ class ProvisioningOrchestrator:
                             await self.client.assign_phone_number_connection(res_details["phone_number_id"], res_details["connection_id"])
                             self.report["phone_number"] = "purchased"
                         else:
-                            res_details["outbound_number"] = target_num
-                            res_details["phone_number_id"] = "unknown_order_pending"
-                            self.report["phone_number"] = "purchased"
-                            logger.warning("Number ordered successfully, but ID lookup pending. Re-run after order provisioning completes.")
+                            # Strict requirement: Fail if purchased number is not yet visible/provisioned.
+                            # Never write success with pending order.
+                            logger.error("Number order was created but the phone number is not yet provisioned/visible in the owned numbers list.")
+                            self.report["phone_number"] = "failed"
+                            self.report["operator_action"] = "Number order was created but the phone number is not yet provisioned/visible. Re-run apply after Telnyx finishes provisioning. phone_number_order_pending"
+                            self.report["phone_number_status"] = "phone_number_order_pending"
+                            
+                            # Output resources metadata as pending/failed before exiting
+                            self._write_outputs(res_details, "phone_number_order_pending")
+                            self.print_report("failed_requires_operator_action")
+                            sys.exit(1)
+                            return
                     else:
                         logger.error("Failed to purchase phone number.")
                         self.report["phone_number"] = "failed"
                         self.print_report("failed_api_error")
                         sys.exit(1)
-        else:
-            self.report["phone_number"] = "reused"
+                        return
 
         # 9. Create or Reuse LiveKit Outbound Trunk
-        if not res_details["livekit_sip_outbound_trunk_id"]:
-            # Need to connect to LiveKit
-            try:
-                self.config.validate_for_livekit()
-            except ValueError as e:
-                logger.error("LiveKit credentials validation failed: %s", e)
-                self.report["livekit_trunk"] = "failed"
-                self.report["operator_action"] = f"Provide LiveKit credentials to register trunk: {e}"
-                self.print_report("failed_requires_operator_action")
-                sys.exit(1)
+        # Validate LiveKit credentials
+        try:
+            self.config.validate_for_livekit()
+        except ValueError as e:
+            logger.error("LiveKit credentials validation failed: %s", e)
+            self.report["livekit_trunk"] = "failed"
+            self.report["operator_action"] = f"Provide LiveKit credentials to register trunk: {e}"
+            self.print_report("failed_requires_operator_action")
+            sys.exit(1)
+            return
 
-            # Attempt import and client connection
-            try:
-                from livekit import api as lk_api
-            except ImportError:
-                logger.error("Failed to import LiveKit SDK. livekit-api is required to register outbound trunk.")
-                self.report["livekit_trunk"] = "failed"
-                self.report["operator_action"] = "Install livekit-api dependency on Hyperstack server."
-                self.print_report("failed_requires_operator_action")
-                sys.exit(1)
+        # Attempt SDK import
+        try:
+            from livekit import api as lk_api
+            has_sdk = True
+        except ImportError:
+            has_sdk = False
 
-            logger.info("Connecting to LiveKit API...")
-            try:
-                lkapi = lk_api.LiveKitAPI(
-                    url=self.config.livekit_url,
-                    api_key=self.config.livekit_api_key,
-                    api_secret=self.config.livekit_api_secret
-                )
-            except Exception as e:
-                logger.error("Failed to instantiate LiveKit API client: %s", e)
-                self.report["livekit_trunk"] = "failed"
-                self.print_report("failed_api_error")
-                sys.exit(1)
+        if not has_sdk:
+            logger.error("Failed to import LiveKit SDK. livekit-api is required to register/verify outbound trunk.")
+            self.report["livekit_trunk"] = "failed"
+            self.report["operator_action"] = "Install livekit-api dependency on Hyperstack server."
+            self.print_report("failed_requires_operator_action")
+            sys.exit(1)
+            return
 
-            # Prevent duplicate trunk by listing existing
+        logger.info("Connecting to LiveKit API...")
+        try:
+            lkapi = lk_api.LiveKitAPI(
+                url=self.config.livekit_url,
+                api_key=self.config.livekit_api_key,
+                api_secret=self.config.livekit_api_secret
+            )
+        except Exception as e:
+            logger.error("Failed to instantiate LiveKit API client: %s", e)
+            self.report["livekit_trunk"] = "failed"
+            self.print_report("failed_api_error")
+            sys.exit(1)
+            return
+
+        listing_supported = hasattr(lkapi, "sip") and hasattr(lkapi.sip, "list_sip_outbound_trunk")
+        
+        if res_details["livekit_sip_outbound_trunk_id"] and res_details["livekit_sip_outbound_trunk_id"] != "replace_me":
+            # Override provided. Verify it.
+            if listing_supported:
+                try:
+                    logger.info("Verifying provided LiveKit Outbound SIP Trunk ID: %s...", res_details["livekit_sip_outbound_trunk_id"])
+                    req = lk_api.ListSIPOutboundTrunkRequest()
+                    res = await lkapi.sip.list_sip_outbound_trunk(req)
+                    trunks = getattr(res, "results", getattr(res, "trunks", []))
+                    match_trunk = next((t for t in trunks if t.sip_trunk_id == res_details["livekit_sip_outbound_trunk_id"]), None)
+                    
+                    if match_trunk:
+                        # Confirm details match
+                        if (match_trunk.name != "Dana Telnyx Outbound Trunk" or 
+                                match_trunk.address != "sip.telnyx.com" or 
+                                res_details["outbound_number"] not in match_trunk.numbers):
+                            logger.error("Provided LiveKit trunk ID details mismatch. Expected Name: 'Dana Telnyx Outbound Trunk', Address: 'sip.telnyx.com', Numbers: [%s]. Got: Name: '%s', Address: '%s', Numbers: %s",
+                                         res_details["outbound_number"], match_trunk.name, match_trunk.address, match_trunk.numbers)
+                            self.report["livekit_trunk"] = "failed"
+                            self.report["operator_action"] = "LiveKit Outbound Trunk details do not match expected Telnyx profile settings."
+                            await lkapi.aclose()
+                            self.print_report("failed_requires_operator_action")
+                            sys.exit(1)
+                            return
+                        else:
+                            self.report["livekit_trunk"] = "reused"
+                            logger.info("Successfully verified provided LiveKit Trunk ID.")
+                    else:
+                        logger.error("Provided LIVEKIT_SIP_OUTBOUND_TRUNK_ID '%s' was not found.", res_details["livekit_sip_outbound_trunk_id"])
+                        self.report["livekit_trunk"] = "failed"
+                        self.report["operator_action"] = f"Verify trunk ID '{res_details['livekit_sip_outbound_trunk_id']}' exists in LiveKit Cloud."
+                        await lkapi.aclose()
+                        self.print_report("failed_requires_operator_action")
+                        sys.exit(1)
+                        return
+                except Exception as le:
+                    logger.error("Failed to verify LiveKit Trunk ID: %s", le)
+                    self.report["livekit_trunk"] = "failed"
+                    await lkapi.aclose()
+                    self.print_report("failed_api_error")
+                    sys.exit(1)
+                    return
+            else:
+                # Listing unsupported. Require override bypass gate
+                if self.config.dana_confirm_accept_unverified_livekit_trunk:
+                    self.report["livekit_trunk"] = "unverified_existing"
+                    logger.warning("LiveKit SDK cannot verify existing trunk ID. Bypassing check due to DANA_CONFIRM_ACCEPT_UNVERIFIED_LIVEKIT_TRUNK=yes.")
+                else:
+                    logger.error("Provided LIVEKIT_SIP_OUTBOUND_TRUNK_ID cannot be verified because the installed SDK does not support listing. Verification bypass DANA_CONFIRM_ACCEPT_UNVERIFIED_LIVEKIT_TRUNK=yes is required.")
+                    self.report["livekit_trunk"] = "unverified"
+                    self.report["operator_action"] = "Confirm you accept the unverified trunk by setting DANA_CONFIRM_ACCEPT_UNVERIFIED_LIVEKIT_TRUNK=yes."
+                    await lkapi.aclose()
+                    self.print_report("failed_requires_operator_action")
+                    sys.exit(1)
+                    return
+            await lkapi.aclose()
+        else:
+            # Check for existing trunk to prevent duplicates
             matching_trunk_id = None
-            if hasattr(lkapi, "sip") and hasattr(lkapi.sip, "list_sip_outbound_trunk"):
+            if listing_supported:
                 try:
                     logger.info("Checking for duplicate LiveKit Outbound SIP Trunks...")
                     req = lk_api.ListSIPOutboundTrunkRequest()
@@ -608,9 +863,7 @@ class ProvisioningOrchestrator:
                             break
                 except Exception as le:
                     logger.warning("Could not list existing LiveKit trunks to check duplicates (will attempt creation if confirmed): %s", le)
-            else:
-                logger.warning("LiveKit SDK doesn't support listing SIP trunks. Duplicate prevention skipped.")
-
+            
             if matching_trunk_id:
                 res_details["livekit_sip_outbound_trunk_id"] = matching_trunk_id
                 self.report["livekit_trunk"] = "reused"
@@ -624,6 +877,7 @@ class ProvisioningOrchestrator:
                     await lkapi.aclose()
                     self.print_report("failed_requires_operator_action")
                     sys.exit(1)
+                    return
 
                 logger.info("Creating LiveKit Outbound SIP Trunk...")
                 try:
@@ -645,15 +899,25 @@ class ProvisioningOrchestrator:
                     await lkapi.aclose()
                     self.print_report("failed_api_error")
                     sys.exit(1)
+                    return
                 finally:
                     await lkapi.aclose()
-        else:
-            self.report["livekit_trunk"] = "reused"
 
-        # 10. Write outputs and report success
+        # 10. SUCCESS GUARD ASSERTS BEFORE OUTPUT WRITING
+        try:
+            self.assert_real_success(res_details)
+        except ValueError as ve:
+            logger.error("Final success assertion failed: %s", ve)
+            self.report["operator_action"] = f"Final validation failed: {ve}"
+            self.print_report("failed_api_error")
+            sys.exit(1)
+            return
+
+        # Write outputs and report success
         self._write_outputs(res_details, "provisioned_successfully")
         self.print_report("provisioned_successfully")
         sys.exit(0)
+        return
 
 
 if __name__ == "__main__":

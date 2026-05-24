@@ -15,6 +15,7 @@ To prevent accidental charges, unauthorized resource creation, or unintended out
 | `DANA_CONFIRM_TELNYX_READ` | Any Telnyx GET or list API calls | Allows fetching lists of numbers, profiles, and connections. | `no` |
 | `DANA_CONFIRM_TELNYX_MUTATION` | Creating/updating Telnyx connections or buying numbers | Allows creating SIP connections, outbound profiles, etc. | `no` |
 | `DANA_CONFIRM_CREATE_LIVEKIT_TRUNK` | Creating LiveKit SIP Outbound Trunks | Allows registering Telnyx credentials into LiveKit Cloud. | `no` |
+| `DANA_CONFIRM_ACCEPT_UNVERIFIED_LIVEKIT_TRUNK` | Reusing an unverified LiveKit SIP Outbound Trunk | Allows bypassing verification checks if the SDK cannot list trunks. | `no` |
 | `DANA_CONFIRM_PLACE_CALL` | Placing outbound test calls via LiveKit SIP | Triggers a live outbound call to the destination number. | `no` |
 | `DANA_CONFIRM_TRANSFER_CALL` | Executing live prospect transfers to agents | Bridges a caller in the LiveKit room to the licensed agent. | `no` |
 

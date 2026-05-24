@@ -301,7 +301,7 @@ After rotating, update `/opt/dana/.env` on the server with the new values.
    ```bash
    grep DANA_CONFIRM_ /opt/dana/.env
    ```
-   To run live calls and transfers, ensure `DANA_CONFIRM_PLACE_CALL=yes` and `DANA_CONFIRM_TRANSFER_CALL=yes` are set.
+   To run live calls and transfers, ensure `DANA_CONFIRM_PLACE_CALL=yes` and `DANA_CONFIRM_TRANSFER_CALL=yes` are set. If reusing an existing unverified LiveKit trunk ID and the SDK cannot list trunks, ensure `DANA_CONFIRM_ACCEPT_UNVERIFIED_LIVEKIT_TRUNK=yes` is set.
 2. Confirm the destination phone numbers are formatted in E.164:
    ```bash
    grep PHONE_NUMBER /opt/dana/.env

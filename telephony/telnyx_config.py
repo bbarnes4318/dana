@@ -75,6 +75,7 @@ class TelephonyConfig:
     dana_confirm_telnyx_mutation: bool = field(default_factory=lambda: env_bool("DANA_CONFIRM_TELNYX_MUTATION", False))
     dana_confirm_purchase_number: bool = field(default_factory=lambda: env_bool("DANA_CONFIRM_PURCHASE_NUMBER", False))
     dana_confirm_create_livekit_trunk: bool = field(default_factory=lambda: env_bool("DANA_CONFIRM_CREATE_LIVEKIT_TRUNK", False))
+    dana_confirm_accept_unverified_livekit_trunk: bool = field(default_factory=lambda: env_bool("DANA_CONFIRM_ACCEPT_UNVERIFIED_LIVEKIT_TRUNK", False))
     dana_confirm_place_call: bool = field(default_factory=lambda: env_bool("DANA_CONFIRM_PLACE_CALL", False))
     dana_confirm_transfer_call: bool = field(default_factory=lambda: env_bool("DANA_CONFIRM_TRANSFER_CALL", False))
     
@@ -142,6 +143,7 @@ class TelephonyConfig:
             f"dana_confirm_telnyx_mutation={self.dana_confirm_telnyx_mutation}, "
             f"dana_confirm_purchase_number={self.dana_confirm_purchase_number}, "
             f"dana_confirm_create_livekit_trunk={self.dana_confirm_create_livekit_trunk}, "
+            f"dana_confirm_accept_unverified_livekit_trunk={self.dana_confirm_accept_unverified_livekit_trunk}, "
             f"dana_confirm_place_call={self.dana_confirm_place_call}, "
             f"dana_confirm_transfer_call={self.dana_confirm_transfer_call}"
             f")"
