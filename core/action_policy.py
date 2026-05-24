@@ -112,7 +112,7 @@ class ActionPolicy:
         if self.should_transfer(state, profile):
             actions.append(
                 RecommendedAction(
-                    tool_name="transfer_to_agent",
+                    tool_name="feTransfer",
                     reason="Lead qualified and ready for agent transfer",
                 )
             )

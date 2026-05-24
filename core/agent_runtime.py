@@ -8,6 +8,7 @@ prompt instruction assembly, response validation, tool execution, and storage lo
 from __future__ import annotations
 
 import logging
+import os
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Callable, Optional, Awaitable
@@ -384,6 +385,12 @@ class AgentRuntime:
                     params["call_id"] = lead.call_id
                     params["lead_summary"] = lead.to_summary_dict()
                     params["transfer_reason"] = action.reason
+                elif action.tool_name == "feTransfer":
+                    params["room_name"] = lead.call_id
+                    params["prospect_identity"] = f"{lead.first_name or ''} {lead.last_name or ''}".strip() or "Prospect"
+                    params["licensed_agent_phone_number"] = os.getenv("LICENSED_AGENT_PHONE_NUMBER")
+                    params["call_summary"] = lead.to_summary_dict()
+                    params["transfer_reason"] = action.reason
                 elif action.tool_name == "schedule_callback":
                     params["call_id"] = lead.call_id
                     params["lead_name"] = f"{lead.first_name or ''} {lead.last_name or ''}".strip() or "Prospect"
@@ -415,6 +422,24 @@ class AgentRuntime:
                             error=res.error,
                         )
                     )
+
+                    # State machine callback transition on transfer failure
+                    if action.tool_name in ("feTransfer", "transfer_to_agent") and not res.success:
+                        logger.warning("Transfer failed or was not implemented. Transitioning to CALLBACK stage.")
+                        from_stage = call_state.current_stage
+                        self.state_machine.transition(CallStage.CALLBACK.value)
+                        self._publish_event(
+                            StateTransitionEvent(
+                                call_id=lead.call_id,
+                                from_stage=from_stage.value,
+                                to_stage=CallStage.CALLBACK.value,
+                            )
+                        )
+                        # Override agent_response to offer a callback
+                        agent_response = (
+                            "I'm sorry, but it looks like we're unable to connect to a licensed agent at the moment. "
+                            "Could we schedule a convenient time to call you back?"
+                        )
                 except Exception as exc:
                     logger.error("Error executing tool %s: %s", action.tool_name, exc)
                     tool_results.append(str(exc))

@@ -258,7 +258,11 @@ docker ps            # should show nothing
 
 ## Developer Notes
 
-### feTransfer Integration TODO
+### feTransfer Integration
+
 The final expense screening prompt (`prompts/final_expense_alex.md`) references a tool named `feTransfer` to connect qualified prospects to a licensed agent.
-- Currently, the voice agent is configured to use the dry-run `transfer_to_agent` tool which logs events to `data/transfers.jsonl`.
-- **TODO:** When the SIP/LiveKit transfer infrastructure is ready, implement the real `feTransfer` tool in the `tools/` package, register it in `ToolRegistry` (or register it as an alias), and update `ActionPolicy` and `AgentRuntime` to invoke it upon successful qualification.
+- **Status:** Fully implemented and integrated.
+- The `feTransfer` tool is registered in the `ToolRegistry` and wired natively into both the dynamic agent orchestrator (`AgentRuntime`) and the LiveKit worker runtime (`DanaAgent` in `main.py`).
+- **Safety Gate**: Actual transfer execution is gated by the environment variable `DANA_CONFIRM_TRANSFER_CALL=yes`. If not set or set to `no`, the tool will return `success=False` with `reason="transfer_not_confirmed"`.
+- **Failover / Callback Handler**: If the transfer fails (e.g. not implemented or not confirmed), the system automatically transitions the agent's internal state machine to the `CALLBACK` stage and overrides the spoken response to offer a callback instead of pretending that the transfer succeeded.
+

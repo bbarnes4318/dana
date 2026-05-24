@@ -50,7 +50,7 @@ def test_transfer_ready_triggers_transfer() -> None:
     actions = policy.get_recommended_actions(state, _EMPTY_PROFILE)
     tool_names = [a.tool_name for a in actions]
     assert "save_lead" in tool_names
-    assert "transfer_to_agent" in tool_names
+    assert "feTransfer" in tool_names
 
 
 def test_callback_requested_triggers_callback() -> None:

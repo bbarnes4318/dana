@@ -79,6 +79,31 @@ async def test_transfer_logs_dry_run(tmp_path: Path) -> None:
 
 
 # ------------------------------------------------------------------
+# FeTransferTool
+# ------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_fe_transfer_tool_execution(monkeypatch) -> None:
+    """FeTransferTool should run fe_transfer and return success status."""
+    from tools.fe_transfer import FeTransferTool
+    
+    # Force confirm transfer to no (or leave it unset) to check safety gate behavior
+    monkeypatch.setenv("DANA_CONFIRM_TRANSFER_CALL", "no")
+    monkeypatch.setenv("LICENSED_AGENT_PHONE_NUMBER", "+15550009999")
+    
+    tool = FeTransferTool()
+    result = await tool.execute({
+        "call_id": "call-fe-001",
+        "lead_summary": "Qualified lead summary",
+        "transfer_reason": "Passes all qualification checks",
+    })
+    
+    # Should fail because transfer is not confirmed (requires DANA_CONFIRM_TRANSFER_CALL=yes)
+    assert result.success is False
+    assert result.error == "transfer_not_confirmed"
+
+
+# ------------------------------------------------------------------
 # ScheduleCallbackTool
 # ------------------------------------------------------------------
 
@@ -135,7 +160,7 @@ async def test_mark_dnc(tmp_path: Path) -> None:
 # ------------------------------------------------------------------
 
 def test_tool_registry_lists_all() -> None:
-    """ToolRegistry should pre-register all 5 built-in tools."""
+    """ToolRegistry should pre-register all built-in tools."""
     registry = ToolRegistry()
     tools = registry.list_tools()
 
@@ -143,12 +168,13 @@ def test_tool_registry_lists_all() -> None:
     expected = {
         "save_lead",
         "transfer_to_agent",
+        "feTransfer",
         "schedule_callback",
         "mark_dnc",
         "escalate_to_human",
     }
     assert names == expected
-    assert len(tools) == 5
+    assert len(tools) == 6
 
 
 @pytest.mark.asyncio

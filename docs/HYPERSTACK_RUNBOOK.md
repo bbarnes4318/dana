@@ -122,7 +122,7 @@ Expected: Default deny incoming, allow outgoing, SSH allowed from your IP only.
 | SSH private key | Regenerate key pair; update `~/.ssh/authorized_keys` on the server |
 | Hugging Face token (`HF_TOKEN`) | [huggingface.co/settings/tokens](https://huggingface.co/settings/tokens) |
 | LiveKit API key / secret | LiveKit Cloud dashboard |
-| SignalWire SIP credentials | SignalWire dashboard |
+| Telnyx API key / SIP credentials | Telnyx dashboard |
 
 After rotating, update `/opt/dana/.env` on the server with the new values.
 
@@ -289,6 +289,30 @@ After rotating, update `/opt/dana/.env` on the server with the new values.
    > [!WARNING]
    > This removes **all** unused images, containers, and volumes. Model caches stored in Docker volumes will be deleted and must be re-downloaded on next start.
 3. If pruning is not enough, the disk is too small — resize the VM's disk in the Hyperstack dashboard.
+
+---
+
+### Telnyx + LiveKit Telephony Issues
+
+**Symptom:** Outbound call fails or transfer returns `success=False` with `reason="transfer_not_confirmed"` or `reason="licensed_agent_phone_number_not_configured"`.
+
+**Fix:**
+1. Check that the safety gates in `/opt/dana/.env` are correctly set:
+   ```bash
+   grep DANA_CONFIRM_ /opt/dana/.env
+   ```
+   To run live calls and transfers, ensure `DANA_CONFIRM_OUTBOUND_CALL=yes` and `DANA_CONFIRM_TRANSFER_CALL=yes` are set.
+2. Confirm the destination phone numbers are formatted in E.164:
+   ```bash
+   grep PHONE_NUMBER /opt/dana/.env
+   ```
+   Values must not be `"replace_me"`. They should be like `+15551234567`.
+3. Check the saved JSON resources on the server:
+   ```bash
+   cat /opt/dana/telephony/telnyx_resources.json
+   cat /opt/dana/telephony/livekit_trunk_result.json
+   ```
+   If these files do not exist or are empty, re-run the setup steps in [TELNYX_LIVEKIT_SIP_SETUP.md](file:///opt/dana/docs/TELNYX_LIVEKIT_SIP_SETUP.md).
 
 ---
 

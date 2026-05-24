@@ -19,6 +19,12 @@ private/
 # --------------- Infrastructure State ---------------
 infra/hyperstack/last_vm.json
 
+# --------------- Telephony State ---------------
+telephony/livekit_trunk_result.json
+telephony/last_outbound_call.json
+telephony/telnyx_resources.json
+telephony/telnyx_dry_run.json
+
 # --------------- Logs & Backups ---------------
 *.log
 *.bak

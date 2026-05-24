@@ -125,12 +125,45 @@ class SharedComponents:
         logger.info("All shared components initialized successfully")
 
 
+class DanaFunctionContext(llm.FunctionContext):
+    def __init__(self, room: rtc.Room):
+        super().__init__()
+        self.room = room
+
+    @llm.ai_callable(description="Transfer the qualified lead to a licensed final expense insurance agent/benefits coordinator.")
+    async def feTransfer(
+        self,
+        prospect_identity: str,
+        call_summary: str,
+        transfer_reason: str,
+    ) -> str:
+        logger.info(f"feTransfer tool called natively in room {self.room.name} via LLM function calling.")
+        
+        # Invoke the core fe_transfer function
+        from telephony.fe_transfer import fe_transfer
+        
+        res = await fe_transfer(
+            room_name=self.room.name,
+            prospect_identity=prospect_identity,
+            licensed_agent_phone_number=None,  # falls back to LICENSED_AGENT_PHONE_NUMBER env var
+            call_summary=call_summary,
+            transfer_reason=transfer_reason
+        )
+        
+        if not res.success:
+            logger.warning(f"feTransfer failed: success=False, reason={res.reason}")
+            # Return status so LLM knows it failed, letting it inform the user and offer a callback.
+            return f"Transfer failed: {res.reason}. Please inform the user that all licensed agents are busy, and offer to schedule a callback instead."
+            
+        return f"Transfer initiated successfully: {res.transfer_mode}"
+
+
 class DanaAgent(Agent):
     """
     Subclass of livekit.agents.Agent implementing our phone-optimized Dana personality
     and wrapping LLM & TTS streaming nodes with latency recorder hooks.
     """
-    def __init__(self, shared: SharedComponents, latency_recorder: LatencyRecorder):
+    def __init__(self, shared: SharedComponents, latency_recorder: LatencyRecorder, fnc_ctx: Optional[llm.FunctionContext] = None):
         instructions = load_instructions(shared.config.agent_prompt_path)
         super().__init__(instructions=instructions)
         self.llm = shared.llm
@@ -138,6 +171,7 @@ class DanaAgent(Agent):
         self.stt = shared.stt
         self._config = shared.config
         self._latency_recorder = latency_recorder
+        self.fnc_ctx = fnc_ctx
 
     async def on_user_turn_completed(self, turn_ctx: llm.ChatContext, new_message: llm.ChatMessage) -> None:
         logger.debug(f"User turn completed: '{new_message.content}'")
@@ -153,6 +187,7 @@ class DanaAgent(Agent):
         # Stream response token-by-token using vLLM
         stream = self.llm.chat(
             chat_ctx=chat_ctx,
+            fnc_ctx=self.fnc_ctx,
             temperature=self._config.temperature,
             top_p=self._config.top_p,
             max_tokens=self._config.max_tokens,
@@ -248,7 +283,8 @@ async def entrypoint(ctx: JobContext):
         turn_handling=turn_handling,
     )
     
-    agent = DanaAgent(shared, latency_recorder)
+    fnc_ctx = DanaFunctionContext(ctx.room)
+    agent = DanaAgent(shared, latency_recorder, fnc_ctx)
     
     # Set up session event hooks
     @session.on("user_state_changed")

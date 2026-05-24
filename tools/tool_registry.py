@@ -15,6 +15,7 @@ from tools.mark_dnc import MarkDNCTool
 from tools.save_lead import SaveLeadTool
 from tools.schedule_callback import ScheduleCallbackTool
 from tools.transfer_to_agent import TransferToAgentTool
+from tools.fe_transfer import FeTransferTool
 
 logger = logging.getLogger(__name__)
 
@@ -96,10 +97,11 @@ class ToolRegistry:
     # ------------------------------------------------------------------
 
     def _register_defaults(self) -> None:
-        """Pre-register the five built-in tools."""
+        """Pre-register the default tools."""
         for tool in (
             SaveLeadTool(),
             TransferToAgentTool(),
+            FeTransferTool(),
             ScheduleCallbackTool(),
             MarkDNCTool(),
             EscalateToHumanTool(),
