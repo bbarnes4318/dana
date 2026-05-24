@@ -69,7 +69,9 @@ async def test_mutation_gates_dry_run(monkeypatch):
     result = await client.create_credential_connection("my-connection")
     assert result["status"] == "dry_run"
     assert result["connection_name"] == "my-connection"
-    assert result["id"] == "dry_run_connection_id"
+    assert result["id"] is None
+    assert result["real_resource_created"] is False
+    assert result["would_create"] is True
 
 
 @pytest.mark.asyncio
@@ -87,7 +89,10 @@ async def test_purchase_gates_dry_run(monkeypatch):
     result = await client.purchase_phone_number("+15551234567")
     assert result["status"] == "dry_run"
     assert result["phone_numbers"][0]["phone_number"] == "+15551234567"
-    assert result["phone_numbers"][0]["status"] == "pending_dry_run"
+    assert result["phone_numbers"][0]["status"] == "dry_run"
+    assert result["id"] is None
+    assert result["real_resource_created"] is False
+    assert result["would_create"] is True
 
 
 @pytest.mark.asyncio

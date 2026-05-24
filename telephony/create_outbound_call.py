@@ -94,7 +94,10 @@ async def main():
         
         # Save dry-run record
         dry_run_data = {
+            "id": None,
+            "real_resource_created": False,
             "status": "dry_run",
+            "would_create": True,
             "to": planned_call["to_masked"],
             "from": planned_call["from_masked"],
             "room_name": planned_call["room_name"],
@@ -141,13 +144,24 @@ async def main():
 
     logger.info("Executing LiveKit CreateSIPParticipant API call...")
     try:
-        request = api.CreateSIPParticipantRequest(
-            sip_trunk_id=config.livekit_sip_outbound_trunk_id,
-            sip_call_to=call_to,
-            room_name=room_name,
-            participant_identity=participant_identity,
-            participant_metadata=metadata_str
-        )
+        fields = api.CreateSIPParticipantRequest.DESCRIPTOR.fields_by_name
+        kwargs = {
+            "sip_trunk_id": config.livekit_sip_outbound_trunk_id,
+            "sip_call_to": call_to,
+            "room_name": room_name,
+            "participant_identity": participant_identity,
+            "participant_metadata": metadata_str,
+        }
+        if "wait_until_answered" in fields:
+            kwargs["wait_until_answered"] = True
+        if "display_name" in fields:
+            kwargs["display_name"] = "Dana Voice Agent"
+        if "participant_name" in fields:
+            kwargs["participant_name"] = "Dana Voice Agent"
+        if "sip_number" in fields:
+            kwargs["sip_number"] = config.dana_default_caller_id
+
+        request = api.CreateSIPParticipantRequest(**kwargs)
         participant = await lkapi.sip.create_sip_participant(request)
         
         logger.info("Successfully initiated SIP call. Participant: %s", participant)

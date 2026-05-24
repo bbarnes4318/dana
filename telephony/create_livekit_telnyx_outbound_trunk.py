@@ -65,8 +65,10 @@ async def main():
         
         # Save dry-run record
         dry_run_data = {
+            "id": None,
+            "real_resource_created": False,
             "status": "dry_run",
-            "trunk_id": "dry_run_lk_trunk_id",
+            "would_create": True,
             "trunk_name": planned_trunk["name"],
             "sip_address": planned_trunk["address"],
             "outbound_number": planned_trunk["outbound_number_masked"],

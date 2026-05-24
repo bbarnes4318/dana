@@ -181,7 +181,7 @@ class TelnyxAPIClient:
         """
         action = f"Create credential connection '{connection_name}'"
         if not self._check_mutation_gate(action):
-            return {"id": "dry_run_connection_id", "connection_name": connection_name, "status": "dry_run"}
+            return {"id": None, "real_resource_created": False, "status": "dry_run", "would_create": True, "connection_name": connection_name}
 
         url = f"{BASE_URL}/credential_connections"
         payload = {
@@ -207,7 +207,7 @@ class TelnyxAPIClient:
         """
         action = f"Update credential connection ID {connection_id} with payload: {payload}"
         if not self._check_mutation_gate(action):
-            return {"id": connection_id, "status": "dry_run"}
+            return {"id": None, "real_resource_created": False, "status": "dry_run", "would_create": True}
 
         url = f"{BASE_URL}/credential_connections/{connection_id}"
         try:
@@ -228,7 +228,7 @@ class TelnyxAPIClient:
         """
         action = f"Assign phone number ID {phone_number_id} to connection ID {connection_id}"
         if not self._check_mutation_gate(action):
-            return {"id": phone_number_id, "connection_id": connection_id, "status": "dry_run"}
+            return {"id": None, "real_resource_created": False, "status": "dry_run", "would_create": True}
 
         url = f"{BASE_URL}/phone_numbers/{phone_number_id}"
         payload = {"connection_id": connection_id}
@@ -250,7 +250,7 @@ class TelnyxAPIClient:
         """
         action = f"Create outbound voice profile '{name}'"
         if not self._check_mutation_gate(action):
-            return {"id": "dry_run_profile_id", "name": name, "status": "dry_run"}
+            return {"id": None, "real_resource_created": False, "status": "dry_run", "would_create": True, "name": name}
 
         url = f"{BASE_URL}/outbound_voice_profiles"
         payload = {
@@ -280,9 +280,11 @@ class TelnyxAPIClient:
         action = f"Purchase phone number '{phone_number}'"
         if not self._check_purchase_gate(action):
             return {
-                "id": "dry_run_order_id",
-                "phone_numbers": [{"phone_number": phone_number, "status": "pending_dry_run"}],
-                "status": "dry_run"
+                "id": None,
+                "real_resource_created": False,
+                "status": "dry_run",
+                "would_create": True,
+                "phone_numbers": [{"phone_number": phone_number, "status": "dry_run"}]
             }
 
         url = f"{BASE_URL}/number_orders"

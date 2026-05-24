@@ -42,19 +42,74 @@ sys.modules['livekit.agents.voice'] = agents_voice
 agents_utils = MagicMock()
 sys.modules['livekit.agents.utils'] = agents_utils
 
+# Create DummyAgent, function_tool, and RunContext to allow proper subclassing and introspection
+class DummyAgent:
+    def __init__(self, instructions: str = "", **kwargs):
+        self.instructions = instructions
+        self.tools = []
+        for name in dir(self):
+            try:
+                member = getattr(self, name)
+                if hasattr(member, "_is_tool") or getattr(member, "_is_tool", False):
+                    self.tools.append(member)
+            except AttributeError:
+                pass
+
+def function_tool(*args, **kwargs):
+    def decorator(func):
+        func._is_tool = True
+        name = kwargs.get("name", func.__name__)
+        class Info:
+            def __init__(self, n):
+                self.name = n
+        func.info = Info(name)
+        func.id = name
+        return func
+    return decorator
+
+class DummyRunContext:
+    pass
+
+class MockDescriptor:
+    def __init__(self, fields):
+        self.fields_by_name = {f: MagicMock() for f in fields}
+
+class MockCreateSIPParticipantRequest:
+    DESCRIPTOR = MockDescriptor([
+        "sip_trunk_id",
+        "sip_call_to",
+        "room_name",
+        "participant_identity",
+        "participant_metadata",
+        "wait_until_answered",
+        "display_name"
+    ])
+    def __init__(self, **kwargs):
+        self.kwargs = kwargs
+
 # Create top-level livekit.agents
 livekit_agents = MagicMock()
 livekit_agents.tts = agents_tts
 livekit_agents.stt = agents_stt
 livekit_agents.voice = agents_voice
 livekit_agents.utils = agents_utils
+livekit_agents.Agent = DummyAgent
+livekit_agents.function_tool = function_tool
+livekit_agents.RunContext = DummyRunContext
 sys.modules['livekit.agents'] = livekit_agents
+
+# Create livekit.api mock module
+api_mock = MagicMock()
+api_mock.CreateSIPParticipantRequest = MockCreateSIPParticipantRequest
+sys.modules['livekit.api'] = api_mock
 
 # Create top-level livekit
 livekit_mock = MagicMock()
 livekit_mock.rtc = rtc_mock
 livekit_mock.agents = livekit_agents
+livekit_mock.api = api_mock
 sys.modules['livekit'] = livekit_mock
+
 
 # Other plugins
 sys.modules['livekit.plugins'] = MagicMock()
