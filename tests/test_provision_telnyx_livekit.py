@@ -495,7 +495,10 @@ async def test_apply_mode_creates_new_resources(clean_env, monkeypatch, tmp_path
     
     # Return empty lists to force creation
     orchestrator.client.list_outbound_voice_profiles = AsyncMock(return_value=[])
-    orchestrator.client.list_credential_connections = AsyncMock(return_value=[])
+    orchestrator.client.list_credential_connections = AsyncMock(side_effect=[
+        [],  # call in connection search logic
+        [{"id": "conn-new", "connection_name": "dana-sip-connection", "username": "new-sip-user", "outbound_voice_profile_id": "vp-new"}]  # call in linkage check logic
+    ])
     orchestrator.client.list_phone_numbers = AsyncMock(return_value=[])
     
     # Mock creations
@@ -757,3 +760,27 @@ async def test_apply_mode_purchase_number_assignment_success(clean_env, monkeypa
     
     assert excinfo.value.code == 0
     assert orchestrator.report["phone_number"] == "purchased"
+
+
+@pytest.mark.asyncio
+async def test_apply_mode_linkage_verification_fails_if_connection_missing(clean_env, monkeypatch):
+    monkeypatch.setenv("DANA_PROVISION_MODE", "apply")
+    monkeypatch.setenv("DANA_PROVISION_APPLY_CONFIRM", "yes")
+    monkeypatch.setenv("DANA_CONFIRM_TELNYX_READ", "yes")
+    monkeypatch.setenv("TELNYX_CONNECTION_ID", "conn-existing")
+    monkeypatch.setenv("TELNYX_OUTBOUND_VOICE_PROFILE_ID", "vp-existing")
+    monkeypatch.setenv("TELNYX_SIP_USERNAME", "test-user")
+    monkeypatch.setenv("TELNYX_SIP_PASSWORD", "test-pass")
+
+    orchestrator = ProvisioningOrchestrator()
+    orchestrator.client.list_outbound_voice_profiles = AsyncMock(return_value=[{"id": "vp-existing", "name": "dana-voice-profile"}])
+    
+    # Return connection first time (Step 5 passes), but return empty second time (Step 7 fails)
+    orchestrator.client.list_credential_connections = AsyncMock(side_effect=[
+        [{"id": "conn-existing", "connection_name": "dana-sip-connection", "username": "test-user", "outbound_voice_profile_id": "vp-existing"}], # Step 5
+        [] # Step 7 returns empty connection list
+    ])
+
+    with pytest.raises(SystemExit) as excinfo:
+        await orchestrator.run()
+    assert excinfo.value.code == 1

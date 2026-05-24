@@ -544,30 +544,40 @@ class ProvisioningOrchestrator:
         # 7. SIP Connection <-> Outbound Voice Profile Linkage Verification and Enforcement
         # Retrieve the current connection object details from list
         connections = await self.client.list_credential_connections()
-        current_conn = next((c for c in connections if c.get("id") == res_details["connection_id"]), None) if connections else None
+        if connections is None:
+            logger.error("API Call to list connections failed during linkage verification.")
+            self.print_report("failed_api_error")
+            sys.exit(1)
+            return
+
+        current_conn = next((c for c in connections if c.get("id") == res_details["connection_id"]), None)
+        if not current_conn:
+            logger.error("SIP Connection ID '%s' was not found on the account during linkage verification.", res_details["connection_id"])
+            self.print_report("failed_api_error")
+            sys.exit(1)
+            return
         
-        if current_conn:
-            linked_profile_id = current_conn.get("outbound_voice_profile_id")
-            if linked_profile_id != res_details["outbound_voice_profile_id"]:
-                logger.info("Outbound voice profile linkage mismatch. Connection has '%s', expected '%s'.", linked_profile_id, res_details["outbound_voice_profile_id"])
-                
-                if self.config.dana_confirm_telnyx_mutation:
-                    logger.info("Updating SIP connection outbound voice profile linkage...")
-                    update_res = await self.client.update_credential_connection(
-                        res_details["connection_id"],
-                        {"outbound_voice_profile_id": res_details["outbound_voice_profile_id"]}
-                    )
-                    if not update_res:
-                        logger.error("Failed to update credential connection voice profile linkage via API.")
-                        self.print_report("failed_api_error")
-                        sys.exit(1)
-                        return
-                else:
-                    logger.error("SIP Connection is not linked to the selected Outbound Voice Profile, and DANA_CONFIRM_TELNYX_MUTATION=yes is not set.")
-                    self.report["operator_action"] = f"SIP Connection is not linked to Outbound Voice Profile ID {res_details['outbound_voice_profile_id']}. Link connection ID {res_details['connection_id']} to profile ID {res_details['outbound_voice_profile_id']} in Telnyx dashboard, or enable DANA_CONFIRM_TELNYX_MUTATION=yes."
-                    self.print_report("failed_requires_operator_action")
+        linked_profile_id = current_conn.get("outbound_voice_profile_id")
+        if linked_profile_id != res_details["outbound_voice_profile_id"]:
+            logger.info("Outbound voice profile linkage mismatch. Connection has '%s', expected '%s'.", linked_profile_id, res_details["outbound_voice_profile_id"])
+            
+            if self.config.dana_confirm_telnyx_mutation:
+                logger.info("Updating SIP connection outbound voice profile linkage...")
+                update_res = await self.client.update_credential_connection(
+                    res_details["connection_id"],
+                    {"outbound_voice_profile_id": res_details["outbound_voice_profile_id"]}
+                )
+                if not update_res:
+                    logger.error("Failed to update credential connection voice profile linkage via API.")
+                    self.print_report("failed_api_error")
                     sys.exit(1)
                     return
+            else:
+                logger.error("SIP Connection is not linked to the selected Outbound Voice Profile, and DANA_CONFIRM_TELNYX_MUTATION=yes is not set.")
+                self.report["operator_action"] = f"SIP Connection is not linked to Outbound Voice Profile ID {res_details['outbound_voice_profile_id']}. Link connection ID {res_details['connection_id']} to profile ID {res_details['outbound_voice_profile_id']} in Telnyx dashboard, or enable DANA_CONFIRM_TELNYX_MUTATION=yes."
+                self.print_report("failed_requires_operator_action")
+                sys.exit(1)
+                return
 
         # 8. Phone Number Logic
         # A: Verify TELNYX_PHONE_NUMBER_ID if provided
