@@ -108,16 +108,9 @@ def test_telephony_config_modular_validation(monkeypatch):
     monkeypatch.setenv("TELNYX_API_KEY", "key123")
     config_read = TelephonyConfig()
     config_read.validate_for_telnyx(write_required=False)  # Should pass
-    
-    with pytest.raises(ValueError, match="TELNYX_OUTBOUND_NUMBER is required"):
-        config_read.validate_for_telnyx(write_required=True)
+    config_read.validate_for_telnyx(write_required=True)   # Should also pass now!
 
-    # Case 3: Validate Telnyx write requires outbound number
-    monkeypatch.setenv("TELNYX_OUTBOUND_NUMBER", "+15551234567")
-    config_write = TelephonyConfig()
-    config_write.validate_for_telnyx(write_required=True)  # Should pass
-
-    # Case 4: Validate LiveKit requires livekit credentials
+    # Case 3: Validate LiveKit requires livekit credentials
     monkeypatch.setenv("LIVEKIT_URL", "wss://livekit.test")
     monkeypatch.setenv("LIVEKIT_API_KEY", "lkkey")
     monkeypatch.setenv("LIVEKIT_API_SECRET", "lksecret")

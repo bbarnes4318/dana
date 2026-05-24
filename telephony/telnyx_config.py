@@ -77,6 +77,15 @@ class TelephonyConfig:
     dana_confirm_create_livekit_trunk: bool = field(default_factory=lambda: env_bool("DANA_CONFIRM_CREATE_LIVEKIT_TRUNK", False))
     dana_confirm_place_call: bool = field(default_factory=lambda: env_bool("DANA_CONFIRM_PLACE_CALL", False))
     dana_confirm_transfer_call: bool = field(default_factory=lambda: env_bool("DANA_CONFIRM_TRANSFER_CALL", False))
+    
+    # ---- Provisioning Orchestration Gates ----
+    dana_provision_mode: str = field(default_factory=lambda: env_str("DANA_PROVISION_MODE", "plan"))
+    dana_provision_apply_confirm: bool = field(default_factory=lambda: env_bool("DANA_PROVISION_APPLY_CONFIRM", False))
+    
+    # ---- Purchase Filters ----
+    telnyx_purchase_country: str = field(default_factory=lambda: env_str("TELNYX_PURCHASE_COUNTRY"))
+    telnyx_purchase_area_code: str = field(default_factory=lambda: env_str("TELNYX_PURCHASE_AREA_CODE"))
+    telnyx_purchase_locality: str = field(default_factory=lambda: env_str("TELNYX_PURCHASE_LOCALITY"))
 
     def __post_init__(self):
         # Apply defaults where secondary variables depend on primary ones
@@ -87,9 +96,6 @@ class TelephonyConfig:
         """Validate Telnyx API keys for read-only or mutation/write modes."""
         if not self.telnyx_api_key or self.telnyx_api_key == "replace_me":
             raise ValueError("TELNYX_API_KEY is required and must not be empty.")
-        if write_required:
-            if not self.telnyx_outbound_number or self.telnyx_outbound_number == "replace_me":
-                raise ValueError("TELNYX_OUTBOUND_NUMBER is required for mutations.")
 
     def validate_for_livekit(self):
         """Validate LiveKit credentials."""

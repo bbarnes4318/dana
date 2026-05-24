@@ -20,109 +20,98 @@ To prevent accidental charges, unauthorized resource creation, or unintended out
 
 ---
 
-## 2. Setup Checklist
+### 2. Setup Checklist & Orchestrator Workflow
 
-Follow these steps in sequence to provision the carrier and bridge.
+To provision your telephony infrastructure end-to-end, use the unified orchestrator script:
+```bash
+python telephony/provision_telnyx_livekit.py
+```
+
+It operates in three distinct modes, controlled by the `DANA_PROVISION_MODE` environment variable.
 
 ### Step 1: Environment Variables Configuration
 
-Ensure the following variables are set in `/opt/dana/.env` on the production server (never commit these to Git):
-
+Set up your environment variables on the host (never commit these to Git):
 ```env
-# Telnyx API Keys (v2)
+# Credentials
 TELNYX_API_KEY=your_telnyx_api_key_here
-
-# Telnyx Connection Details
-TELNYX_SIP_CONNECTION_NAME=dana-sip-connection
-TELNYX_OUTBOUND_PROFILE_NAME=dana-outbound-profile
-TELNYX_IP_PORT_IP_ADDRESS=127.0.0.1  # Replace with the Hyperstack VM's public IP address
-
-# Phone Numbers (E.164 format, e.g., +15551234567)
-TELNYX_PHONE_NUMBER=replace_me
-LICENSED_AGENT_PHONE_NUMBER=replace_me
-
-# LiveKit SIP Configuration
-LIVEKIT_URL=wss://your-livekit-project.livekit.cloud
+LIVEKIT_URL=wss://your-project.livekit.cloud
 LIVEKIT_API_KEY=your_livekit_api_key_here
 LIVEKIT_API_SECRET=your_livekit_api_secret_here
 
-# Telephony Safety Gates (change to "yes" when performing specific tasks)
-DANA_CONFIRM_TELNYX_READ=no
-DANA_CONFIRM_TELNYX_MUTATION=no
-DANA_CONFIRM_CREATE_LIVEKIT_TRUNK=no
-DANA_CONFIRM_PLACE_CALL=no
-DANA_CONFIRM_TRANSFER_CALL=no
+# Optional/Overrides (omit to auto-discover/create)
+TELNYX_CONNECTION_ID=...
+TELNYX_OUTBOUND_VOICE_PROFILE_ID=...
+TELNYX_PHONE_NUMBER_ID=...
+TELNYX_OUTBOUND_NUMBER=...
+TELNYX_SIP_USERNAME=...
+TELNYX_SIP_PASSWORD=...
+LIVEKIT_SIP_OUTBOUND_TRUNK_ID=...
+
+# Purchase parameters (required if DANA_CONFIRM_PURCHASE_NUMBER=yes)
+TELNYX_PURCHASE_COUNTRY=US
+TELNYX_PURCHASE_AREA_CODE=512
 ```
 
-### Step 2: Validate Config and Dry-Run Verification
-
-Run the provisioning script in dry-run mode to ensure that your API keys and configuration values are loaded correctly:
-
+### Step 2: Run a Dry-Run Plan
+Ensure all safety gates are checked and show planned mutations without making any network calls:
 ```bash
-python -m telephony.telnyx_provision
+DANA_PROVISION_MODE=plan \
+python telephony/provision_telnyx_livekit.py
 ```
 
-*This will read environment variables and validate settings without making network requests. Results are written to `telephony/telnyx_dry_run.json`.*
-
-### Step 3: Run Read-Only Checks
-
-Verify that the configured Telnyx phone number actually exists and is active under your Telnyx account:
-
+### Step 3: Run Read-Only Inspection
+Verify existing resources on your Telnyx and LiveKit accounts:
 ```bash
-export DANA_CONFIRM_TELNYX_READ=yes
-python -m telephony.telnyx_provision
+DANA_PROVISION_MODE=inspect \
+DANA_CONFIRM_TELNYX_READ=yes \
+python telephony/provision_telnyx_livekit.py
 ```
 
-*This checks the Telnyx API to see if the configuration matches existing credentials.*
-
-### Step 4: Provision Telnyx Connections
-
-Create the SIP connection and outbound profile on Telnyx. This will bind your outbound number to the SIP connection:
-
+### Step 4: Apply Provisioning (Mutations)
+To perform actual resource mutations and create the LiveKit outbound SIP trunk, run:
 ```bash
-export DANA_CONFIRM_TELNYX_READ=yes
-export DANA_CONFIRM_TELNYX_MUTATION=yes
-python -m telephony.telnyx_provision
+DANA_PROVISION_MODE=apply \
+DANA_CONFIRM_TELNYX_READ=yes \
+DANA_CONFIRM_TELNYX_MUTATION=yes \
+DANA_CONFIRM_CREATE_LIVEKIT_TRUNK=yes \
+DANA_PROVISION_APPLY_CONFIRM=yes \
+python telephony/provision_telnyx_livekit.py
 ```
+*(If purchasing a number is needed, also set `DANA_CONFIRM_PURCHASE_NUMBER=yes` and `TELNYX_PURCHASE_COUNTRY=US`).*
 
-*Upon success, connection detail configurations and SIP credentials are saved to `telephony/telnyx_resources.json`.*
-
-### Step 5: Register LiveKit SIP Outbound Trunk
-
-Bridge Telnyx to LiveKit by creating the LiveKit SIP Outbound Trunk. This gives LiveKit the credentials to place outbound calls through Telnyx:
-
-```bash
-export DANA_CONFIRM_CREATE_LIVEKIT_TRUNK=yes
-python -m telephony.create_livekit_telnyx_outbound_trunk
-```
-
-*This registers the trunk on LiveKit Cloud and saves details to `telephony/livekit_trunk_result.json`.*
-
-### Step 6: Test Outbound SIP Calling
-
-Place a test call to a destination phone number (e.g., your personal mobile number) to verify media and signaling:
-
+### Step 5: Test Outbound SIP Calling
+Once provisioned successfully, place a test call:
 ```bash
 export DANA_CONFIRM_PLACE_CALL=yes
 python -m telephony.create_outbound_call --to +15551234567
 ```
 
-*This connects to LiveKit Cloud, initiates a SIP participant, and places an outbound call through the Telnyx trunk.*
+---
+
+## 3. Orchestrator Outputs & Permissions
+
+When apply mode succeeds, the following files are generated:
+1. **`telephony/provisioned.env`** (or **`/opt/dana/.env.telephony`** if running on the server):
+   Contains the real credentials and IDs needed by the Dana server. This file is automatically set to `chmod 600` permissions.
+2. **`telephony/provisioned_resources.json`**:
+   Contains non-sensitive metadata (masked outbound numbers, statuses, and IDs). No secrets are written here.
 
 ---
 
-## 3. Monitoring and Troubleshooting
+## 4. Monitoring and Troubleshooting
 
 ### Log Locations
 All outputs from provisioning steps are written to:
-- `telephony/telnyx_resources.json` (SIP connection details and credentials)
-- `telephony/livekit_trunk_result.json` (LiveKit SIP Outbound Trunk ID)
+- `telephony/provisioned_resources.json` (Non-sensitive resource metadata)
+- `telephony/provisioned.env` (or `/opt/dana/.env.telephony` on server - real credentials)
 - `telephony/last_outbound_call.json` (Most recent test call details)
 
 ### Common Failure Points
 1. **HTTP 401 Unauthorized**: Double-check your `TELNYX_API_KEY`.
 2. **Method Missing on LiveKit SDK**: Ensure `livekit-api` is upgraded (`>=1.1.8` or newer) to support SIP APIs.
 3. **No Audio / One-Way Audio**: Ensure that firewall/UFW rules allow UDP ports required by SIP signaling and media, and that the `TELNYX_IP_PORT_IP_ADDRESS` matches the public IP of the host machine.
+4. **Telnyx SIP password could not be retrieved**: If reusing an existing connection, Telnyx does not expose the password. You must provide `TELNYX_SIP_USERNAME` and `TELNYX_SIP_PASSWORD` in the environment.
 
 ---
 

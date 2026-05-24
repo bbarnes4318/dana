@@ -307,12 +307,12 @@ After rotating, update `/opt/dana/.env` on the server with the new values.
    grep PHONE_NUMBER /opt/dana/.env
    ```
    Values must not be `"replace_me"`. They should be like `+15551234567`.
-3. Check the saved JSON resources on the server:
+3. Check the saved resources on the server:
    ```bash
-   cat /opt/dana/telephony/telnyx_resources.json
-   cat /opt/dana/telephony/livekit_trunk_result.json
+   cat /opt/dana/telephony/provisioned_resources.json
+   cat /opt/dana/.env.telephony
    ```
-   If these files do not exist or are empty, re-run the setup steps in [TELNYX_LIVEKIT_SIP_SETUP.md](file:///opt/dana/docs/TELNYX_LIVEKIT_SIP_SETUP.md).
+   If these files do not exist or are empty, re-run the setup setup steps in [TELNYX_LIVEKIT_SIP_SETUP.md](file:///opt/dana/docs/TELNYX_LIVEKIT_SIP_SETUP.md).
 
 ---
 

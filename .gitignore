@@ -24,6 +24,8 @@ telephony/livekit_trunk_result.json
 telephony/last_outbound_call.json
 telephony/telnyx_resources.json
 telephony/telnyx_dry_run.json
+telephony/provisioned.env
+telephony/provisioned_resources.json
 
 # --------------- Logs & Backups ---------------
 *.log
