@@ -30,6 +30,8 @@ async def fe_transfer(
 ) -> FeTransferResult:
     """Bridge qualified prospect to a licensed agent.
     
+    feTransfer is currently a safe failure stub only. Real transfer/bridge is not implemented yet.
+    
     Checks licensed agent number, validates DANA_CONFIRM_TRANSFER_CALL gate,
     and attempts SIP transfer or returns a safe placeholder failure.
     """

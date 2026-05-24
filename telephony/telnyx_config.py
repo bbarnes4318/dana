@@ -83,16 +83,27 @@ class TelephonyConfig:
         if not self.dana_default_caller_id:
             self.dana_default_caller_id = self.telnyx_outbound_number
 
-    def validate_api_keys(self):
-        """Perform validation of primary required fields."""
-        if not self.telnyx_api_key:
+    def validate_for_telnyx(self, write_required: bool = False):
+        """Validate Telnyx API keys for read-only or mutation/write modes."""
+        if not self.telnyx_api_key or self.telnyx_api_key == "replace_me":
             raise ValueError("TELNYX_API_KEY is required and must not be empty.")
-        if not self.livekit_url:
+        if write_required:
+            if not self.telnyx_outbound_number or self.telnyx_outbound_number == "replace_me":
+                raise ValueError("TELNYX_OUTBOUND_NUMBER is required for mutations.")
+
+    def validate_for_livekit(self):
+        """Validate LiveKit credentials."""
+        if not self.livekit_url or self.livekit_url == "replace_me":
             raise ValueError("LIVEKIT_URL is required and must not be empty.")
-        if not self.livekit_api_key:
+        if not self.livekit_api_key or self.livekit_api_key == "replace_me":
             raise ValueError("LIVEKIT_API_KEY is required and must not be empty.")
-        if not self.livekit_api_secret:
+        if not self.livekit_api_secret or self.livekit_api_secret == "replace_me":
             raise ValueError("LIVEKIT_API_SECRET is required and must not be empty.")
+
+    def validate_api_keys(self):
+        """Perform validation of primary required fields for backward compatibility."""
+        self.validate_for_telnyx(write_required=False)
+        self.validate_for_livekit()
 
     def __repr__(self) -> str:
         """Secure string representation filtering out sensitive credential data."""

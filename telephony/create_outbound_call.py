@@ -37,7 +37,9 @@ async def main():
     # Load configuration
     try:
         config = TelephonyConfig()
-        config.validate_api_keys()
+        # Only validate LiveKit credentials if placing the call is confirmed
+        if config.dana_confirm_place_call:
+            config.validate_for_livekit()
     except Exception as e:
         logger.error("Configuration validation failed: %s", e)
         sys.exit(1)
@@ -67,18 +69,14 @@ async def main():
             return "****"
         return f"******{num[-4:]}"
 
+    planned_trunk_id = config.livekit_sip_outbound_trunk_id or "mock_trunk_id"
     planned_call = {
         "to_masked": mask_num(call_to),
         "from_masked": mask_num(config.dana_default_caller_id),
         "room_name": room_name,
         "participant_identity": participant_identity,
-        "trunk_id_masked": mask_num(config.livekit_sip_outbound_trunk_id),
+        "trunk_id_masked": mask_num(planned_trunk_id),
     }
-
-    # Validate trunk ID exists for the call
-    if not config.livekit_sip_outbound_trunk_id:
-        logger.error("LIVEKIT_SIP_OUTBOUND_TRUNK_ID is not configured in environment.")
-        sys.exit(1)
 
     if not confirm_place_call:
         logger.info("=========================================================================")
@@ -109,6 +107,11 @@ async def main():
             json.dump(dry_run_data, f, indent=2)
         logger.info("Dry-run call log saved to %s", CALL_RESULT_FILE)
         return
+
+    # Validate trunk ID exists for the call
+    if not config.livekit_sip_outbound_trunk_id:
+        logger.error("LIVEKIT_SIP_OUTBOUND_TRUNK_ID is not configured in environment.")
+        sys.exit(1)
 
     logger.info("Connecting to LiveKit API...")
     try:

@@ -94,3 +94,33 @@ def test_telephony_config_repr_redaction(monkeypatch):
     assert "lk_k...long" in config_repr
     assert "my_s...name" in config_repr
     assert "[REDACTED]" in config_repr
+
+
+def test_telephony_config_modular_validation(monkeypatch):
+    # Case 1: Empty config does not pass validation
+    config = TelephonyConfig()
+    with pytest.raises(ValueError, match="TELNYX_API_KEY is required"):
+        config.validate_for_telnyx()
+    with pytest.raises(ValueError, match="LIVEKIT_URL is required"):
+        config.validate_for_livekit()
+
+    # Case 2: Validate Telnyx read-only only requires key
+    monkeypatch.setenv("TELNYX_API_KEY", "key123")
+    config_read = TelephonyConfig()
+    config_read.validate_for_telnyx(write_required=False)  # Should pass
+    
+    with pytest.raises(ValueError, match="TELNYX_OUTBOUND_NUMBER is required"):
+        config_read.validate_for_telnyx(write_required=True)
+
+    # Case 3: Validate Telnyx write requires outbound number
+    monkeypatch.setenv("TELNYX_OUTBOUND_NUMBER", "+15551234567")
+    config_write = TelephonyConfig()
+    config_write.validate_for_telnyx(write_required=True)  # Should pass
+
+    # Case 4: Validate LiveKit requires livekit credentials
+    monkeypatch.setenv("LIVEKIT_URL", "wss://livekit.test")
+    monkeypatch.setenv("LIVEKIT_API_KEY", "lkkey")
+    monkeypatch.setenv("LIVEKIT_API_SECRET", "lksecret")
+    config_lk = TelephonyConfig()
+    config_lk.validate_for_livekit()  # Should pass
+

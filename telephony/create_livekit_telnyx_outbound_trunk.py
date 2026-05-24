@@ -28,7 +28,9 @@ async def main():
     # Load configuration
     try:
         config = TelephonyConfig()
-        config.validate_api_keys()
+        # Only validate LiveKit credentials if registering/creating the trunk is confirmed
+        if config.dana_confirm_create_livekit_trunk:
+            config.validate_for_livekit()
     except Exception as e:
         logger.error("Configuration validation failed: %s", e)
         sys.exit(1)

@@ -266,6 +266,20 @@ The final expense screening prompt (`prompts/final_expense_alex.md`) references 
 - **Safety Gate**: Actual transfer execution is gated by the environment variable `DANA_CONFIRM_TRANSFER_CALL=yes`. If not set or set to `no`, the tool will return `success=False` with `reason="transfer_not_confirmed"`.
 - **Failover / Callback Handler**: 
   - **In simulated environments (`AgentRuntime`):** If the transfer fails, the system transitions the state machine to `CALLBACK` and overrides the response to offer a callback.
-  - **In the live voice path (`main.py` / `DanaAgent`):** Since `main.py` does not run `AgentRuntime`, `DanaAgent` intercepts the failure in `llm_node` and deterministically speaks the callback fallback phrase: *"I'm sorry, but it looks like we're unable to connect to a licensed agent at the moment. Could we schedule a convenient time to call you back?"* bypassing the LLM entirely.
+  - **In the live voice path (`main.py` / `DanaAgent`):** `DanaAgent` does not run `AgentRuntime`. Same-turn deterministic fallback is a **TODO-safe only** item. Currently, when the `feTransfer` tool fails, it returns a descriptive failure instruction to the LLM, which then generates the fallback message to the user.
+
+---
+
+## Integration Verification Disclaimer
+
+> [!WARNING]
+> Mocked unit tests (e.g. running under pytest) verify code flow, safety gates, and static structure but do **not** prove real LiveKit/Telnyx integration.
+> 
+> Real SDK shape and import verification must be executed and pass on the Hyperstack production server (where the real dependencies are installed) using the following verification scripts:
+> - `python scripts/verify_livekit_sdk_shape.py`
+> - `python scripts/verify_livekit_runtime_imports.py`
+> 
+> If either script exits with code `1` on the Hyperstack server, deployment is blocked.
+
 
 

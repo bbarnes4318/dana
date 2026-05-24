@@ -13,7 +13,10 @@ logger = logging.getLogger(__name__)
 
 
 class FeTransferTool(BaseTool):
-    """Bridge qualified lead to a licensed final expense insurance agent."""
+    """Bridge qualified lead to a licensed final expense insurance agent.
+    
+    feTransfer is currently a safe failure stub only. Real transfer/bridge is not implemented yet.
+    """
 
     @property
     def name(self) -> str:
@@ -23,6 +26,7 @@ class FeTransferTool(BaseTool):
     def description(self) -> str:
         return (
             "Transfer the qualified lead to a licensed insurance agent. "
+            "feTransfer is currently a safe failure stub only. Real transfer/bridge is not implemented yet. "
             "Gated by DANA_CONFIRM_TRANSFER_CALL env var."
         )
 

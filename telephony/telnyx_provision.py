@@ -29,7 +29,11 @@ async def main():
     # Load configuration
     try:
         config = TelephonyConfig()
-        config.validate_api_keys()
+        # Only validate Telnyx keys when real read/write operations are confirmed
+        if config.dana_confirm_telnyx_mutation:
+            config.validate_for_telnyx(write_required=True)
+        elif config.dana_confirm_telnyx_read:
+            config.validate_for_telnyx(write_required=False)
     except Exception as e:
         logger.error("Configuration validation failed: %s", e)
         sys.exit(1)

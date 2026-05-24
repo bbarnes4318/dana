@@ -123,3 +123,17 @@ All outputs from provisioning steps are written to:
 1. **HTTP 401 Unauthorized**: Double-check your `TELNYX_API_KEY`.
 2. **Method Missing on LiveKit SDK**: Ensure `livekit-api` is upgraded (`>=1.1.8` or newer) to support SIP APIs.
 3. **No Audio / One-Way Audio**: Ensure that firewall/UFW rules allow UDP ports required by SIP signaling and media, and that the `TELNYX_IP_PORT_IP_ADDRESS` matches the public IP of the host machine.
+
+---
+
+## 4. Integration Verification Disclaimer
+
+> [!WARNING]
+> Mocked unit tests (e.g. running under pytest) verify code flow, safety gates, and static structure but do **not** prove real LiveKit/Telnyx integration.
+> 
+> Real SDK shape and import verification must be executed and pass on the Hyperstack production server (where the real dependencies are installed) using the following verification scripts:
+> - `python scripts/verify_livekit_sdk_shape.py`
+> - `python scripts/verify_livekit_runtime_imports.py`
+> 
+> If either script exits with code `1` on the Hyperstack server, deployment is blocked.
+

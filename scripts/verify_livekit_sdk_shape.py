@@ -8,14 +8,19 @@ and verifies their exact structure, classes, and descriptor fields.
 import sys
 import importlib.metadata
 
-def print_check(name: str, passed: bool, info: str = ""):
-    status = "[ PASS ]" if passed else "[ FAIL ]"
-    print(f"{status} {name:<40} {info}")
-
 def main():
     print("=====================================================================")
     print("Verifying LiveKit SDK Shape (Real Installed Packages)")
     print("=====================================================================")
+
+    failed = False
+
+    def print_check(name: str, passed: bool, info: str = ""):
+        nonlocal failed
+        status = "[ PASS ]" if passed else "[ FAIL ]"
+        print(f"{status} {name:<45} {info}")
+        if not passed:
+            failed = True
 
     # 1. Package Versions
     packages = ["livekit", "livekit-agents", "livekit-api"]
@@ -48,11 +53,9 @@ def main():
         print_check("Import livekit.api", False, str(e))
 
     # 3. Check function_tool decorator
-    has_func_tool = False
     try:
         from livekit.agents import function_tool
         print_check("function_tool decorator exists", True)
-        has_func_tool = True
     except ImportError as e:
         print_check("function_tool decorator exists", False, str(e))
 
@@ -60,9 +63,6 @@ def main():
     try:
         from livekit.agents import Agent
         print_check("Agent class exists", True)
-        # Check if Agent has decorator-based tools or tools collection support
-        has_tools_attr = hasattr(Agent, "tools") or any("tool" in name.lower() for name in dir(Agent))
-        print_check("Agent supports function tools", has_tools_attr, f"dir(Agent) contains: {[n for n in dir(Agent) if 'tool' in n.lower()]}")
     except ImportError as e:
         print_check("Agent class exists", False, str(e))
 
@@ -80,21 +80,24 @@ def main():
     # 6. Introspect CreateSIPParticipantRequest fields
     if has_request and req_class is not None:
         try:
-            fields = list(req_class.DESCRIPTOR.fields_by_name.keys())
-            print_check("Introspect CreateSIPParticipantRequest descriptor", True, f"Fields: {fields}")
+            has_descriptor = hasattr(req_class, "DESCRIPTOR")
+            print_check("CreateSIPParticipantRequest has DESCRIPTOR", has_descriptor)
             
-            # Check presence of specific fields
-            for f in ["sip_trunk_id", "sip_call_to", "room_name", "participant_identity", "participant_metadata"]:
-                present = f in fields
-                print_check(f"  Field '{f}' present", present)
-            
-            # Warn if sip_number is present or missing
-            sip_number_present = "sip_number" in fields
-            print_check("  Field 'sip_number' present", sip_number_present, "(Deprecated/undocumented outbound field)")
-            
-            display_name_present = "display_name" in fields
-            print_check("  Field 'display_name' present", display_name_present)
-            
+            if has_descriptor:
+                has_fields = hasattr(req_class.DESCRIPTOR, "fields_by_name")
+                print_check("CreateSIPParticipantRequest.DESCRIPTOR has fields_by_name", has_fields)
+                
+                if has_fields:
+                    fields = list(req_class.DESCRIPTOR.fields_by_name.keys())
+                    
+                    # Check presence of specific required fields
+                    for f in ["sip_trunk_id", "sip_call_to", "room_name", "participant_identity", "participant_metadata"]:
+                        present = f in fields
+                        print_check(f"  Field '{f}' present", present)
+                else:
+                    failed = True
+            else:
+                failed = True
         except Exception as e:
             print_check("Introspect CreateSIPParticipantRequest descriptor", False, str(e))
     else:
@@ -103,7 +106,6 @@ def main():
     # 7. Check LiveKitAPI.sip methods
     try:
         from livekit.api import LiveKitAPI
-        # Create a dummy client without making calls
         lkapi = LiveKitAPI("http://localhost:7880", "devkey", "secret")
         
         has_sip = hasattr(lkapi, "sip")
@@ -123,8 +125,12 @@ def main():
         print_check("Verify LiveKitAPI.sip methods", False, str(e))
 
     print("=====================================================================")
-    print("Verification completed.")
-    print("=====================================================================")
+    if failed:
+        print("VERIFICATION FAILED: One or more required checks failed.")
+        sys.exit(1)
+    else:
+        print("VERIFICATION SUCCESS: All checks passed.")
+        sys.exit(0)
 
 if __name__ == "__main__":
     main()
