@@ -1,18 +1,13 @@
 """
 Sovereign Voice Stack - Custom TTS Service
 Ultra-low-latency Text-to-Speech using Kokoro ONNX with streaming synthesis.
-
-This module wraps Kokoro ONNX in a LiveKit-compatible TTS interface,
-running entirely in-process for zero network latency. Critically, it
-implements streaming synthesis - generating audio phrase-by-phrase
-as LLM tokens arrive, not waiting for the full response.
 """
 
 import asyncio
 import logging
 import re
 import time
-from typing import AsyncIterator, Optional
+from typing import AsyncIterator, Optional, List
 from dataclasses import dataclass
 import numpy as np
 
@@ -35,15 +30,124 @@ class TTSConfig:
     sentence_end_chars: str = ".!?;:"  # Characters that end a phrase
 
 
+def normalize_text(text: str) -> str:
+    """
+    Pronunciation normalizer for phone speech:
+    - "AI" -> "A I"
+    - "$" -> "dollars"
+    - "%" -> "percent"
+    - Remove markdown formatting
+    - Collapse multiple whitespaces
+    """
+    if not text:
+        return ""
+    # Remove markdown characters (*, _, `, #, ~, [, ], (, ))
+    text = re.sub(r'[*_`#~\[\]()]', '', text)
+    
+    # Replace AI with A I
+    text = re.sub(r'\bAI\b', 'A I', text)
+    
+    # Replace $XX with XX dollars (e.g. $5 -> 5 dollars, $10.50 -> 10.50 dollars)
+    text = re.sub(r'\$(\d+(?:\.\d+)?)', r'\1 dollars', text)
+    text = text.replace("$", " dollars ")
+    
+    # Replace % with percent
+    text = text.replace("%", " percent")
+    
+    # Collapse whitespace
+    text = re.sub(r'\s+', ' ', text).strip()
+    return text
+
+
+class FastPhraseChunker:
+    """
+    FastPhraseChunker flushes text segments as early as possible.
+    Rules:
+    - Flush on punctuation: . ? ! ; :
+    - Flush on clean word boundary when buffer length >= 18
+    - Flush after 150ms from first token when buffer length >= 8
+    - Never wait for full LLM response
+    """
+    def __init__(self):
+        self.buffer = ""
+        self.first_token_time: Optional[float] = None
+
+    def feed(self, text: str) -> List[str]:
+        if not text:
+            return []
+            
+        if self.first_token_time is None:
+            self.first_token_time = time.perf_counter()
+            
+        self.buffer += text
+        phrases = []
+        
+        while True:
+            # 1. Check for punctuation flush (. ? ! ; :)
+            punc_idx = -1
+            for i, char in enumerate(self.buffer):
+                if char in ".?!;:":
+                    punc_idx = i
+                    break
+                    
+            if punc_idx != -1:
+                phrase = self.buffer[:punc_idx + 1]
+                self.buffer = self.buffer[punc_idx + 1:]
+                phrases.append(phrase)
+                self.first_token_time = time.perf_counter() if self.buffer else None
+                continue
+                
+            # 2. Check for clean word boundary if buffer length >= 18
+            last_space = self.buffer.rfind(" ")
+            if last_space == -1:
+                last_space = self.buffer.rfind("\n")
+            if last_space == -1:
+                last_space = self.buffer.rfind("\t")
+                
+            if last_space != -1 and last_space >= 18:
+                phrase = self.buffer[:last_space]
+                self.buffer = self.buffer[last_space + 1:]
+                phrases.append(phrase)
+                self.first_token_time = time.perf_counter() if self.buffer else None
+                continue
+                
+            # 3. Check for timeout flush (150ms elapsed, length >= 8)
+            if self.first_token_time is not None:
+                elapsed_ms = (time.perf_counter() - self.first_token_time) * 1000.0
+                if elapsed_ms > 150.0 and len(self.buffer) >= 8:
+                    last_space = self.buffer.rfind(" ")
+                    if last_space == -1:
+                        last_space = self.buffer.rfind("\n")
+                        
+                    if last_space != -1:
+                        phrase = self.buffer[:last_space]
+                        self.buffer = self.buffer[last_space + 1:]
+                        if phrase.strip():
+                            phrases.append(phrase)
+                    else:
+                        phrase = self.buffer
+                        self.buffer = ""
+                        if phrase.strip():
+                            phrases.append(phrase)
+                    self.first_token_time = time.perf_counter() if self.buffer else None
+                    continue
+                    
+            break
+            
+        return [p.strip() for p in phrases if p.strip()]
+
+    def flush(self) -> List[str]:
+        phrase = self.buffer.strip()
+        self.buffer = ""
+        self.first_token_time = None
+        if phrase:
+            return [phrase]
+        return []
+
+
 class LocallyHostedKokoro(tts.TTS):
     """
     Custom TTS implementation using Kokoro ONNX.
-    
-    Features:
-    - Runs entirely on local GPU (zero network latency)
-    - Streaming synthesis: generates audio phrase-by-phrase
-    - Yields AudioFrames as soon as phrases are synthesized
-    - Does NOT wait for full LLM response
     """
     
     def __init__(self, config: Optional[TTSConfig] = None):
@@ -55,11 +159,9 @@ class LocallyHostedKokoro(tts.TTS):
         
     @property
     def sample_rate(self) -> int:
-        """Return the sample rate of generated audio."""
         return self.config.sample_rate
     
     async def initialize(self):
-        """Initialize the Kokoro TTS model."""
         async with self._lock:
             if self._initialized:
                 return
@@ -67,7 +169,6 @@ class LocallyHostedKokoro(tts.TTS):
             logger.info(f"Loading Kokoro TTS model: {self.config.model_name}...")
             start_time = time.time()
             
-            # Load model in executor (blocking operation)
             loop = asyncio.get_event_loop()
             self._model = await loop.run_in_executor(
                 None,
@@ -79,58 +180,14 @@ class LocallyHostedKokoro(tts.TTS):
             self._initialized = True
             
     async def _ensure_initialized(self):
-        """Ensure the TTS is initialized before use."""
         if not self._initialized:
             await self.initialize()
     
-    def _split_into_phrases(self, text: str) -> list[str]:
-        """
-        Split text into synthesizable phrases.
-        
-        Splits on sentence boundaries while respecting minimum length.
-        This allows streaming synthesis as text arrives.
-        """
-        if not text:
-            return []
-            
-        # Split on sentence-ending punctuation
-        pattern = f'([{re.escape(self.config.sentence_end_chars)}])'
-        parts = re.split(pattern, text)
-        
-        phrases = []
-        current_phrase = ""
-        
-        for part in parts:
-            current_phrase += part
-            
-            # Check if this is a sentence ender and we have enough text
-            if (part in self.config.sentence_end_chars and 
-                len(current_phrase.strip()) >= self.config.min_phrase_chars):
-                phrases.append(current_phrase.strip())
-                current_phrase = ""
-        
-        # Don't forget remaining text
-        if current_phrase.strip():
-            phrases.append(current_phrase.strip())
-            
-        return phrases
-    
     async def _synthesize_audio(self, text: str) -> np.ndarray:
-        """
-        Synthesize audio for given text.
-        
-        Args:
-            text: Text to synthesize
-            
-        Returns:
-            Audio samples as float32 numpy array
-        """
         if not text.strip():
             return np.array([], dtype=np.float32)
             
         await self._ensure_initialized()
-        
-        # Run synthesis in executor (blocking operation)
         loop = asyncio.get_event_loop()
         
         def _run_synthesis():
@@ -145,110 +202,85 @@ class LocallyHostedKokoro(tts.TTS):
         return audio
     
     def _numpy_to_audio_frame(self, audio: np.ndarray) -> rtc.AudioFrame:
-        """
-        Convert numpy audio array to LiveKit AudioFrame.
-        
-        Args:
-            audio: Float32 audio samples [-1.0, 1.0]
-            
-        Returns:
-            LiveKit AudioFrame
-        """
-        # Convert float32 to int16
         audio_int16 = (audio * 32767).astype(np.int16)
-        
-        # Create AudioFrame
         frame = rtc.AudioFrame(
             data=audio_int16.tobytes(),
             sample_rate=self.config.sample_rate,
             num_channels=1,
             samples_per_channel=len(audio_int16)
         )
-        
         return frame
     
     async def synthesize(self, text: str) -> AsyncIterator[rtc.AudioFrame]:
-        """
-        Synthesize text to audio frames (non-streaming).
-        
-        Yields audio frames for the complete text.
-        """
         await self._ensure_initialized()
-        
-        start_time = time.time()
         audio = await self._synthesize_audio(text)
         
         if len(audio) > 0:
-            # Chunk the audio into frames (e.g., 20ms chunks)
             chunk_samples = int(self.config.sample_rate * 0.02)  # 20ms
-            
             for i in range(0, len(audio), chunk_samples):
                 chunk = audio[i:i + chunk_samples]
                 if len(chunk) > 0:
                     yield self._numpy_to_audio_frame(chunk)
-                    
-        latency = (time.time() - start_time) * 1000
-        logger.debug(f"TTS synthesis: {len(text)} chars, {len(audio)/self.config.sample_rate:.2f}s audio (latency: {latency:.0f}ms)")
     
     def stream(self) -> "LocalTTSStream":
-        """Create a streaming TTS session."""
         return LocalTTSStream(self)
 
 
 class LocalTTSStream(tts.TTSStream):
     """
     Streaming TTS implementation for phrase-by-phrase synthesis.
-    
-    This is the KEY to low latency: rather than waiting for the complete
-    LLM response, we synthesize audio for each phrase/sentence as it
-    arrives. This dramatically reduces time-to-first-audio-byte.
     """
     
     def __init__(self, tts_instance: LocallyHostedKokoro):
         super().__init__()
         self._tts = tts_instance
-        self._text_buffer = ""
+        self._chunker = FastPhraseChunker()
         self._audio_queue: asyncio.Queue[Optional[rtc.AudioFrame]] = asyncio.Queue()
+        self._phrase_queue: asyncio.Queue[Optional[str]] = asyncio.Queue()
         self._synthesis_task: Optional[asyncio.Task] = None
+        self._process_loop_task: Optional[asyncio.Task] = None
         self._closed = False
         self._interrupted = False
         
-    async def push_text(self, text: str):
-        """
-        Push text chunk for streaming synthesis.
+        # Start background phrase processing loop
+        self._process_loop_task = asyncio.create_task(self._process_phrases_loop())
         
-        Called as LLM tokens arrive. Buffers text until a complete
-        phrase/sentence is ready, then synthesizes immediately.
-        """
+    async def _process_phrases_loop(self):
+        try:
+            while not self._interrupted and not self._closed:
+                phrase = await self._phrase_queue.get()
+                if phrase is None:
+                    await self._audio_queue.put(None)
+                    break
+                    
+                await self._synthesize_phrase(phrase)
+                self._phrase_queue.task_done()
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            logger.error(f"Error in TTS process loop: {e}")
+            
+    async def push_text(self, text: str):
         if self._closed or self._interrupted:
             return
             
-        self._text_buffer += text
-        
-        # Check for complete phrases
-        phrases = self._tts._split_into_phrases(self._text_buffer)
-        
-        if len(phrases) > 1:
-            # We have at least one complete phrase - synthesize it
-            complete_phrase = phrases[0]
-            self._text_buffer = "".join(phrases[1:])
-            
-            # Start synthesis task if not already running
-            await self._synthesize_phrase(complete_phrase)
+        phrases = self._chunker.feed(text)
+        for phrase in phrases:
+            normalized = normalize_text(phrase)
+            if normalized:
+                await self._phrase_queue.put(normalized)
     
     async def _synthesize_phrase(self, phrase: str):
-        """Synthesize a single phrase and queue the audio frames."""
         if self._interrupted:
             return
             
         try:
             start_time = time.time()
-            audio = await self._tts._synthesize_audio(phrase)
+            self._synthesis_task = asyncio.create_task(self._tts._synthesize_audio(phrase))
+            audio = await self._synthesis_task
             
             if len(audio) > 0 and not self._interrupted:
-                # Chunk into frames
                 chunk_samples = int(self._tts.config.sample_rate * 0.02)
-                
                 for i in range(0, len(audio), chunk_samples):
                     if self._interrupted:
                         break
@@ -260,112 +292,59 @@ class LocalTTSStream(tts.TTSStream):
             latency = (time.time() - start_time) * 1000
             logger.debug(f"Phrase synthesized: '{phrase[:30]}...' ({latency:.0f}ms)")
             
+        except asyncio.CancelledError:
+            logger.debug("TTS phrase synthesis was cancelled")
         except Exception as e:
             logger.error(f"Synthesis error: {e}")
     
     async def flush(self):
-        """
-        Flush remaining buffered text.
-        
-        Called when LLM response is complete to ensure any
-        remaining text is synthesized.
-        """
-        if self._text_buffer.strip() and not self._interrupted:
-            await self._synthesize_phrase(self._text_buffer.strip())
-            self._text_buffer = ""
+        if self._closed or self._interrupted:
+            return
             
-        # Signal end of stream
-        await self._audio_queue.put(None)
+        phrases = self._chunker.flush()
+        for phrase in phrases:
+            normalized = normalize_text(phrase)
+            if normalized:
+                await self._phrase_queue.put(normalized)
+                
+        await self._phrase_queue.put(None)
     
     async def __anext__(self) -> rtc.AudioFrame:
-        """Get the next audio frame from the queue."""
+        if self._interrupted:
+            raise StopAsyncIteration
+            
         frame = await self._audio_queue.get()
-        if frame is None:
+        if frame is None or self._interrupted:
             raise StopAsyncIteration
         return frame
     
     def __aiter__(self):
-        """Make this stream async iterable."""
         return self
     
     async def interrupt(self):
-        """
-        Interrupt the current synthesis.
-        
-        Called when user starts speaking (barge-in). Immediately
-        stops synthesis and clears all queued audio.
-        """
-        logger.info("TTS interrupted - clearing audio buffer")
+        logger.info("TTS interrupted - clearing audio and phrase buffers")
         self._interrupted = True
         
-        # Clear the audio queue
+        # Cancel the loops
+        if self._process_loop_task and not self._process_loop_task.done():
+            self._process_loop_task.cancel()
+            
+        if self._synthesis_task and not self._synthesis_task.done():
+            self._synthesis_task.cancel()
+            
+        # Clear queues
         while not self._audio_queue.empty():
             try:
                 self._audio_queue.get_nowait()
             except asyncio.QueueEmpty:
                 break
                 
-        # Clear text buffer
-        self._text_buffer = ""
-        
-        # Cancel any ongoing synthesis
-        if self._synthesis_task and not self._synthesis_task.done():
-            self._synthesis_task.cancel()
-    
+        while not self._phrase_queue.empty():
+            try:
+                self._phrase_queue.get_nowait()
+            except asyncio.QueueEmpty:
+                break
+                
     async def aclose(self):
-        """Close the streaming session."""
         self._closed = True
         await self.flush()
-
-
-class StreamingTTSAdapter:
-    """
-    Adapter for integrating streaming TTS with LiveKit's VoiceAssistant.
-    
-    This class bridges the gap between our streaming TTS implementation
-    and LiveKit's expected interface, handling:
-    - Token buffering from LLM
-    - Phrase detection and synthesis
-    - Audio frame yielding
-    - Interruption handling
-    """
-    
-    def __init__(self, tts: LocallyHostedKokoro):
-        self._tts = tts
-        self._current_stream: Optional[LocalTTSStream] = None
-        
-    async def synthesize_stream(
-        self,
-        text_stream: AsyncIterator[str]
-    ) -> AsyncIterator[rtc.AudioFrame]:
-        """
-        Synthesize streaming text to audio frames.
-        
-        Takes an async iterator of text chunks (from LLM) and yields
-        audio frames as phrases are synthesized.
-        """
-        self._current_stream = self._tts.stream()
-        
-        async def process_text():
-            async for text_chunk in text_stream:
-                await self._current_stream.push_text(text_chunk)
-            await self._current_stream.flush()
-        
-        # Start text processing in background
-        text_task = asyncio.create_task(process_text())
-        
-        try:
-            # Yield audio frames as they're synthesized
-            async for frame in self._current_stream:
-                yield frame
-        finally:
-            text_task.cancel()
-            try:
-                await text_task
-            except asyncio.CancelledError:
-                pass
-    
-    async def interrupt(self):
-        """Interrupt current synthesis."""
-        if self._current_stream:
-            await self._current_stream.interrupt()

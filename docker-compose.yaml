@@ -17,18 +17,25 @@ services:
     environment:
       - NVIDIA_VISIBLE_DEVICES=0
       - HF_TOKEN=${HF_TOKEN:-}
+      - VLLM_MODEL=${VLLM_MODEL:-meta-llama/Llama-3.1-8B-Instruct}
+      - VLLM_MAX_MODEL_LEN=${VLLM_MAX_MODEL_LEN:-4096}
+      - VLLM_GPU_MEMORY_UTILIZATION=${VLLM_GPU_MEMORY_UTILIZATION:-0.7}
+      - VLLM_QUANTIZATION=${VLLM_QUANTIZATION:-fp8}
+      - VLLM_ENABLE_PREFIX_CACHING=${VLLM_ENABLE_PREFIX_CACHING:-true}
     volumes:
       - vllm-cache:/root/.cache/huggingface
+    entrypoint: []
     command: >
-      --model meta-llama/Llama-3.1-8B-Instruct
-      --dtype auto
-      --quantization fp8
-      --gpu-memory-utilization 0.7
-      --max-model-len 8192
-      --enforce-eager
-      --host 0.0.0.0
-      --port 8000
-      --trust-remote-code
+      sh -c '
+      ARGS="--model $${VLLM_MODEL} --dtype auto --gpu-memory-utilization $${VLLM_GPU_MEMORY_UTILIZATION} --max-model-len $${VLLM_MAX_MODEL_LEN} --host 0.0.0.0 --port 8000 --trust-remote-code --enforce-eager"
+      if [ "$${VLLM_QUANTIZATION}" != "none" ] && [ -n "$${VLLM_QUANTIZATION}" ]; then
+        ARGS="$$ARGS --quantization $${VLLM_QUANTIZATION}"
+      fi
+      if [ "$${VLLM_ENABLE_PREFIX_CACHING}" = "true" ]; then
+        ARGS="$$ARGS --enable-prefix-caching"
+      fi
+      exec python3 -m vllm.entrypoints.openai.api_server $$ARGS
+      '
     deploy:
       resources:
         reservations:
@@ -65,6 +72,21 @@ services:
       - LIVEKIT_API_KEY=${LIVEKIT_API_KEY}
       - LIVEKIT_API_SECRET=${LIVEKIT_API_SECRET}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - DANA_OPENING_LINE=${DANA_OPENING_LINE:-}
+      - DANA_LLM_MODEL=${DANA_LLM_MODEL:-}
+      - DANA_MAX_TOKENS=${DANA_MAX_TOKENS:-}
+      - DANA_TEMPERATURE=${DANA_TEMPERATURE:-}
+      - DANA_TOP_P=${DANA_TOP_P:-}
+      - DANA_STT_MODEL=${DANA_STT_MODEL:-}
+      - DANA_STT_COMPUTE_TYPE=${DANA_STT_COMPUTE_TYPE:-}
+      - DANA_VAD_THRESHOLD=${DANA_VAD_THRESHOLD:-}
+      - DANA_MIN_SILENCE_MS=${DANA_MIN_SILENCE_MS:-}
+      - DANA_TTS_VOICE=${DANA_TTS_VOICE:-}
+      - DANA_TTS_SPEED=${DANA_TTS_SPEED:-}
+      - DANA_TURN_MIN_DELAY=${DANA_TURN_MIN_DELAY:-}
+      - DANA_TURN_MAX_DELAY=${DANA_TURN_MAX_DELAY:-}
+      - DANA_PREEMPTIVE_GENERATION=${DANA_PREEMPTIVE_GENERATION:-}
+      - DANA_STT_PROVIDER=${DANA_STT_PROVIDER:-}
     volumes:
       - ./:/app:ro
       - agent-cache:/root/.cache

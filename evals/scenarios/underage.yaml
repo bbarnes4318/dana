@@ -1,0 +1,35 @@
+name: underage
+description: >
+  Prospect is 30 years old, below the qualifying age range (45-85).
+  Agent must disqualify politely and end the call gracefully.
+prospect_persona: >
+  A 30-year-old man who received a call by mistake and is too young
+  for final expense products.
+initial_stage: age
+turns:
+  - speaker: prospect
+    text: "I'm 30 years old."
+  - speaker: agent
+    text: "Thank you for letting me know. Unfortunately our program is designed for folks between 45 and 85, so it wouldn't be a fit for you right now. I appreciate your time and wish you all the best."
+assertions:
+  - type: no_forbidden_phrase
+    expected: null
+    params:
+      forbidden_phrases:
+        - "too young"
+        - "not old enough"
+        - "come back when"
+        - "you don't qualify because you're young"
+  - type: no_approval_claim
+  - type: no_premium_quote
+  - type: one_question_max
+  - type: response_under_word_limit
+    params:
+      limit: 50
+  - type: correct_next_stage
+    expected: disqualified
+expected_final_stage: disqualified
+tags:
+  - disqualification
+  - underage
+  - polite_end

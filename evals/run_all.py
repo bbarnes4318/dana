@@ -125,7 +125,7 @@ def print_results(results: list[ScenarioResult]) -> None:
 
     for r in results:
         status = "PASS" if r.passed else "FAIL"
-        status_icon = "\u2705" if r.passed else "\u274c"
+        status_icon = "[+]" if r.passed else "[-]"
         assertion_summary = (
             f"{sum(1 for a in r.assertion_results if a.passed)}"
             f"/{len(r.assertion_results)} passed"
@@ -144,9 +144,9 @@ def print_results(results: list[ScenarioResult]) -> None:
             # Show failure details
             for ar in r.assertion_results:
                 if not ar.passed:
-                    print(f"  \u2514\u2500 [{ar.assertion_type}] {ar.message}")
+                    print(f"   |-- [{ar.assertion_type}] {ar.message}")
             for err in r.errors:
-                print(f"  \u2514\u2500 [ERROR] {err}")
+                print(f"   |-- [ERROR] {err}")
         else:
             passed_count += 1
 

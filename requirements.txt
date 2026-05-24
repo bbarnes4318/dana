@@ -1,11 +1,11 @@
 # Sovereign Voice Stack - Pinned Dependencies
 # Ultra-low-latency Voice AI Agent
 
-# LiveKit Agents Framework
-livekit>=0.17.0
-livekit-agents>=0.8.11
-livekit-plugins-openai>=0.8.5
-livekit-plugins-silero>=0.7.2
+# LiveKit Agents Framework (v1.5+)
+livekit>=1.1.8
+livekit-agents[silero,turn-detector]>=1.5.12
+livekit-plugins-openai>=1.5.12
+livekit-plugins-silero>=1.5.12
 
 # STT - Faster Whisper (Local)
 faster-whisper>=1.0.3

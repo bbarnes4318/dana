@@ -118,7 +118,7 @@ class ObjectionClassifier:
             keywords = sorted(defn.get("keywords", []), key=len, reverse=True)
             # Build a compiled regex for each keyword (word-boundary wrapped)
             defn["_compiled_keywords"] = [
-                (kw, re.compile(re.escape(kw.lower())))
+                (kw, re.compile(rf"\b{re.escape(kw.lower())}\b"))
                 for kw in keywords
             ]
 
@@ -165,33 +165,29 @@ class ObjectionClassifier:
         """Compute a confidence score for a keyword match.
 
         The score is based on:
-        - Proportion of the utterance covered by matched keywords (coverage)
-        - Number of keywords matched relative to total keywords
-        - Bonus for exact or near-exact matches
+        - Proportion of the utterance covered by the longest matched keyword
+        - Base confidence of 0.5 for any word-boundary match
+        - Exact match bonus
 
         Returns a float between 0.0 and 1.0.
         """
-        total_keywords = len(defn.get("keywords", []))
-        if total_keywords == 0:
+        if not matched_keywords:
             return 0.0
 
-        # Keyword hit ratio (how many of the defined keywords matched)
-        hit_ratio = len(matched_keywords) / total_keywords
-
-        # Coverage: how much of the utterance is covered by keyword text
-        total_keyword_chars = sum(len(kw) for kw in matched_keywords)
+        # Coverage: how much of the utterance is covered by the longest matched keyword
+        longest_kw_len = max(len(kw) for kw in matched_keywords)
         utterance_len = max(len(utterance), 1)
-        coverage = min(total_keyword_chars / utterance_len, 1.0)
+        coverage = min(longest_kw_len / utterance_len, 1.0)
 
         # Exact match bonus — if the utterance is essentially just a keyword
         exact_bonus = 0.0
         for kw in matched_keywords:
             if utterance.strip() == kw.lower().strip():
-                exact_bonus = 0.3
+                exact_bonus = 0.2
                 break
 
         # Weighted combination
-        confidence = (coverage * 0.5) + (hit_ratio * 0.2) + exact_bonus
+        confidence = 0.5 + (coverage * 0.3) + exact_bonus
 
         # Clamp to [0.0, 1.0]
         return min(max(confidence, 0.0), 1.0)

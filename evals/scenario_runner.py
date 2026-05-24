@@ -109,7 +109,7 @@ class ScenarioRunner:
         turn_count = 0
         last_response_guidance = ""
 
-        for turn in scenario.turns:
+        for turn_idx, turn in enumerate(scenario.turns):
             turn_count += 1
 
             if turn.speaker == "prospect":
@@ -146,6 +146,9 @@ class ScenarioRunner:
                 # fall back to the last response guidance.
                 agent_response = turn.text or last_response_guidance
 
+                # Check if this is the final agent turn
+                is_final = not any(t.speaker == "agent" for t in scenario.turns[turn_idx + 1:])
+
                 # Run assertions against this agent response
                 turn_assertions = self._run_assertions(
                     assertions=scenario.assertions,
@@ -153,6 +156,7 @@ class ScenarioRunner:
                     call_state=sm.call_state,
                     lead_profile=sm.lead,
                     expected_final_stage=scenario.expected_final_stage,
+                    is_final_turn=is_final,
                 )
                 all_assertion_results.extend(turn_assertions)
 
@@ -185,11 +189,18 @@ class ScenarioRunner:
         call_state: CallState,
         lead_profile: LeadProfile,
         expected_final_stage: str,
+        is_final_turn: bool = False,
     ) -> list[AssertionResult]:
         """Run each assertion in *assertions* and return results."""
         results: list[AssertionResult] = []
 
+        final_assertions = {"correct_next_stage", "dnc_honored", "callback_captured", "transfer_only_when_ready"}
+
         for assertion in assertions:
+            if assertion.type in final_assertions and not is_final_turn:
+                # Skip final-state assertions on intermediate turns
+                continue
+
             try:
                 result = _dispatch_assertion(
                     assertion=assertion,

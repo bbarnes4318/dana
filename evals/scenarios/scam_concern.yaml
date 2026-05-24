@@ -1,0 +1,35 @@
+name: scam_concern
+description: >
+  Prospect thinks this is a scam call. Agent must not be defensive
+  and should calmly provide information about who they are.
+prospect_persona: >
+  A 72-year-old woman who gets many scam calls and is immediately
+  suspicious of any unknown caller.
+initial_stage: opening
+turns:
+  - speaker: prospect
+    text: "Who is this? This sounds like a scam. I'm going to report this number."
+  - speaker: agent
+    text: "I completely understand your concern, and I appreciate you being cautious. My name is Dana, and I help connect folks with licensed insurance agents for final expense coverage. You're welcome to verify us, and there's absolutely no obligation."
+assertions:
+  - type: no_forbidden_phrase
+    expected: null
+    params:
+      forbidden_phrases:
+        - "this is not a scam"
+        - "trust me"
+        - "I promise"
+        - "would a scammer"
+        - "don't be ridiculous"
+        - "you're wrong"
+  - type: no_approval_claim
+  - type: no_premium_quote
+  - type: one_question_max
+  - type: response_under_word_limit
+    params:
+      limit: 50
+expected_final_stage: permission
+tags:
+  - objection
+  - scam
+  - trust

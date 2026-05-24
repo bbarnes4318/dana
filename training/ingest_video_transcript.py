@@ -33,8 +33,8 @@ class VideoTranscriptIngestor:
         Returns:
             Cleaned plain-text with captions only.
         """
-        # Remove WEBVTT header and any metadata lines that follow it
-        text = re.sub(r"^WEBVTT[^\n]*\n?", "", text, flags=re.MULTILINE)
+        # Remove WEBVTT header block (header line + metadata lines up to first blank line)
+        text = re.sub(r"^WEBVTT[^\n]*\n(?:[^\n\r]+\n)*", "", text, flags=re.MULTILINE)
         # Remove optional cue IDs (standalone lines of digits or identifiers before timestamps)
         text = re.sub(r"^\d+\s*$", "", text, flags=re.MULTILINE)
         # Remove timestamp lines  00:00:00.000 --> 00:00:05.000  (with optional positioning)

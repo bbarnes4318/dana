@@ -1,0 +1,42 @@
+name: wants_agent_now
+description: >
+  Prospect is eager and ready to be transferred to a licensed agent
+  immediately. Agent should transfer when the prospect is qualified.
+prospect_persona: >
+  A 67-year-old woman who has been thinking about final expense
+  insurance and is ready to speak with an agent right away.
+initial_stage: permission
+turns:
+  - speaker: prospect
+    text: "Yes absolutely, I've been meaning to look into this."
+  - speaker: agent
+    text: "Wonderful, thank you. To make sure we find the right fit, may I ask how old you are?"
+  - speaker: prospect
+    text: "I'm 67."
+  - speaker: agent
+    text: "Great, and what state do you live in?"
+  - speaker: prospect
+    text: "Florida."
+  - speaker: agent
+    text: "Perfect. Are you calling from a cell phone or a landline?"
+  - speaker: prospect
+    text: "This is my cell phone."
+  - speaker: agent
+    text: "Got it. Can you receive text messages on this phone?"
+  - speaker: prospect
+    text: "Yes I can."
+  - speaker: agent
+    text: "Excellent. It sounds like you'd be a great fit to speak with one of our licensed agents. Let me go ahead and connect you."
+assertions:
+  - type: no_approval_claim
+  - type: no_premium_quote
+  - type: one_question_max
+  - type: response_under_word_limit
+    params:
+      limit: 50
+  - type: transfer_only_when_ready
+expected_final_stage: budget
+tags:
+  - happy_path
+  - eager
+  - transfer

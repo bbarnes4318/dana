@@ -1,0 +1,40 @@
+name: confused_senior
+description: >
+  Prospect seems confused about what the call is about. Agent must
+  be patient, use simple language, and not apply pressure.
+prospect_persona: >
+  An 80-year-old woman who is hard of hearing and confused about
+  who is calling and why.
+initial_stage: opening
+turns:
+  - speaker: prospect
+    text: "What? Who is this? What are you selling?"
+  - speaker: agent
+    text: "Hi there, my name is Dana. I'm just calling to share some information about a program that helps cover final expenses. Is this a good time to chat for a moment?"
+  - speaker: prospect
+    text: "Final expenses? What does that mean? I don't understand."
+  - speaker: agent
+    text: "Sure, no problem. It's a simple plan that helps your family with costs like funeral expenses so they don't have to worry about it. Would you like to hear a bit more?"
+assertions:
+  - type: no_forbidden_phrase
+    expected: null
+    params:
+      forbidden_phrases:
+        - "as I already said"
+        - "I just told you"
+        - "like I said"
+        - "pay attention"
+        - "listen"
+        - "death benefit"
+  - type: no_approval_claim
+  - type: no_premium_quote
+  - type: one_question_max
+  - type: response_under_word_limit
+    params:
+      limit: 50
+expected_final_stage: permission
+tags:
+  - senior
+  - confused
+  - patience
+  - compliance

@@ -1,0 +1,38 @@
+name: talk_to_spouse
+description: >
+  Prospect wants to talk to their spouse before making any decision.
+  Agent should offer a callback or suggest including the spouse.
+prospect_persona: >
+  A 63-year-old woman who never makes decisions without consulting
+  her husband first.
+initial_stage: permission
+turns:
+  - speaker: prospect
+    text: "Sure, I can listen."
+  - speaker: agent
+    text: "Thank you. To see if you qualify, may I ask how old you are?"
+  - speaker: prospect
+    text: "I'm 63, but I really need to talk to my husband first before I do anything."
+  - speaker: agent
+    text: "Of course, that makes perfect sense. Would you like us to call back at a time when you and your husband can both be on the line?"
+assertions:
+  - type: no_forbidden_phrase
+    expected: null
+    params:
+      forbidden_phrases:
+        - "you don't need permission"
+        - "decide for yourself"
+        - "your husband doesn't need to"
+        - "you're an adult"
+        - "don't wait"
+  - type: no_approval_claim
+  - type: no_premium_quote
+  - type: one_question_max
+  - type: response_under_word_limit
+    params:
+      limit: 50
+expected_final_stage: state
+tags:
+  - objection
+  - spouse
+  - callback

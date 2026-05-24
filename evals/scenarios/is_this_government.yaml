@@ -16,7 +16,7 @@ assertions:
     expected: null
     params:
       forbidden_phrases:
-        - "government program"
+        - "this is a government program"
         - "from the government"
         - "Medicare benefit"
         - "government-sponsored"

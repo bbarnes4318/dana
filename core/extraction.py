@@ -130,10 +130,24 @@ def extract_state(text: str) -> Optional[str]:
             return abbr
 
     # Try two-letter abbreviations (word-boundary constrained)
-    upper = text.upper().strip()
-    match = re.search(r"\b([A-Z]{2})\b", upper)
-    if match and match.group(1) in _STATE_ABBREVS:
-        return match.group(1)
+    words = re.findall(r"\b([a-zA-Z]{2})\b", text)
+    candidates = []
+    conflict_words = {"in", "or", "me", "hi", "oh", "ok", "la", "id"}
+    for w in words:
+        w_upper = w.upper()
+        if w_upper in _STATE_ABBREVS:
+            is_conflict = w.lower() in conflict_words
+            if is_conflict:
+                score = 1 if w.isupper() else 0
+            else:
+                score = 2 if w.isupper() else 1
+            candidates.append((score, w_upper))
+
+    if candidates:
+        candidates.sort(key=lambda x: x[0], reverse=True)
+        best_score, best_abbr = candidates[0]
+        if best_score > 0:
+            return best_abbr
 
     return None
 
@@ -157,12 +171,14 @@ def extract_yes_no(text: str) -> Optional[bool]:
     """Return ``True`` for affirmative, ``False`` for negative, else ``None``."""
     lower = text.lower().strip()
 
-    # Check multi-word phrases first
+    # Check multi-word phrases first with word boundaries
     for phrase in sorted(_NO_WORDS, key=len, reverse=True):
-        if phrase in lower:
+        pattern = rf"\b{re.escape(phrase)}\b"
+        if re.search(pattern, lower):
             return False
     for phrase in sorted(_YES_WORDS, key=len, reverse=True):
-        if phrase in lower:
+        pattern = rf"\b{re.escape(phrase)}\b"
+        if re.search(pattern, lower):
             return True
 
     return None

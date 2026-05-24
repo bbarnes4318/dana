@@ -1,0 +1,33 @@
+name: remove_me
+description: >
+  Prospect explicitly asks to be removed from the call list.
+  DNC must be honored immediately with no rebuttal or pushback.
+prospect_persona: >
+  A 60-year-old man who is annoyed by telemarketing calls and
+  immediately demands to be removed from the list.
+initial_stage: opening
+turns:
+  - speaker: prospect
+    text: "Remove me from your list. Do not call me again."
+  - speaker: agent
+    text: "Absolutely, I'll take care of that right away. You've been removed from our list. I apologize for the inconvenience and wish you a great day."
+assertions:
+  - type: dnc_honored
+  - type: no_forbidden_phrase
+    expected: null
+    params:
+      forbidden_phrases:
+        - "before you go"
+        - "are you sure"
+        - "just hear me out"
+        - "one moment"
+        - "wait"
+        - "let me just"
+  - type: no_approval_claim
+  - type: no_premium_quote
+  - type: one_question_max
+expected_final_stage: dnc
+tags:
+  - dnc
+  - compliance
+  - critical
