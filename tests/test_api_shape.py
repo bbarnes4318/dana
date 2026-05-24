@@ -180,3 +180,29 @@ async def test_create_sip_participant_request_sip_number_logic():
             assert "sip_number" in kwargs, "sip_number must be passed when present in descriptor"
             assert kwargs["sip_number"] == "+15555550100"
 
+
+def test_safety_gate_naming_compliance():
+    """Statically verify that no deprecated safety gate names are used in the codebase, and only normalized names exist."""
+    import os
+    
+    deprecated_names = ["DANA_CONFIRM_LIVE" + "KIT_TRUNK", "DANA_CONFIRM_OUT" + "BOUND_CALL"]
+    
+    for root, dirs, files in os.walk("."):
+        if any(ignored in root for ignored in [".git", "__pycache__", ".pytest_cache", "venv", ".venv"]):
+            continue
+            
+        for file in files:
+            if not file.endswith((".md", ".py", ".sh", ".example", ".yaml", ".yml", "Dockerfile")):
+                continue
+                
+            file_path = os.path.join(root, file)
+            try:
+                with open(file_path, "r", encoding="utf-8") as f:
+                    content = f.read()
+            except Exception:
+                continue
+                
+            for dep in deprecated_names:
+                assert dep not in content, f"Deprecated safety gate name '{dep}' found in {file_path}. Use DANA_CONFIRM_CREATE_LIVEKIT_TRUNK or DANA_CONFIRM_PLACE_CALL."
+
+

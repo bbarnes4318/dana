@@ -261,8 +261,11 @@ docker ps            # should show nothing
 ### feTransfer Integration
 
 The final expense screening prompt (`prompts/final_expense_alex.md`) references a tool named `feTransfer` to connect qualified prospects to a licensed agent.
-- **Status:** Fully implemented and integrated.
-- The `feTransfer` tool is registered in the `ToolRegistry` and wired natively into both the dynamic agent orchestrator (`AgentRuntime`) and the LiveKit worker runtime (`DanaAgent` in `main.py`).
+- **Status:** Safe failure stub only. Real transfer/bridge functionality is not yet implemented.
+- The `feTransfer` tool is registered in the `ToolRegistry` for simulated environments and wired natively into `DanaAgent` in `main.py` for live voice calls.
 - **Safety Gate**: Actual transfer execution is gated by the environment variable `DANA_CONFIRM_TRANSFER_CALL=yes`. If not set or set to `no`, the tool will return `success=False` with `reason="transfer_not_confirmed"`.
-- **Failover / Callback Handler**: If the transfer fails (e.g. not implemented or not confirmed), the system automatically transitions the agent's internal state machine to the `CALLBACK` stage and overrides the spoken response to offer a callback instead of pretending that the transfer succeeded.
+- **Failover / Callback Handler**: 
+  - **In simulated environments (`AgentRuntime`):** If the transfer fails, the system transitions the state machine to `CALLBACK` and overrides the response to offer a callback.
+  - **In the live voice path (`main.py` / `DanaAgent`):** Since `main.py` does not run `AgentRuntime`, `DanaAgent` intercepts the failure in `llm_node` and deterministically speaks the callback fallback phrase: *"I'm sorry, but it looks like we're unable to connect to a licensed agent at the moment. Could we schedule a convenient time to call you back?"* bypassing the LLM entirely.
+
 

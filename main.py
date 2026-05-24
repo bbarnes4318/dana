@@ -141,6 +141,7 @@ class DanaAgent(Agent):
         self._config = shared.config
         self._latency_recorder = latency_recorder
         self.room = None
+        self._transfer_failed = False
 
     @function_tool(name="feTransfer")
     async def fe_transfer_tool(
@@ -152,7 +153,12 @@ class DanaAgent(Agent):
         call_summary: str,
         transfer_reason: str,
     ) -> str:
-        """Transfer the qualified lead to a licensed final expense insurance agent/benefits coordinator."""
+        """Transfer the qualified lead to a licensed final expense insurance agent/benefits coordinator.
+        
+        CRITICAL NOTE: This is a safe failure stub only. Real transfer/bridge functionality
+        is not yet implemented. It will fail safely and trigger the deterministic callback
+        fallback response.
+        """
         room_name = self.room.name if self.room else "unknown_room"
         logger.info(f"feTransfer tool called natively in room {room_name} via Agent function tool.")
         
@@ -168,9 +174,9 @@ class DanaAgent(Agent):
         )
         
         if not res.success:
-            logger.warning(f"feTransfer failed: success=False, reason={res.reason}")
-            # Return status so LLM knows it failed, letting it inform the user and offer a callback.
-            return f"Transfer failed: {res.reason}. Please inform the user that all licensed agents are busy, and offer to schedule a callback instead."
+            logger.warning(f"feTransfer failed: success=False, reason={res.reason}. Triggering deterministic callback fallback.")
+            self._transfer_failed = True
+            return f"Transfer failed: {res.reason}."
             
         return f"Transfer initiated successfully: {res.transfer_mode}"
 
@@ -185,6 +191,27 @@ class DanaAgent(Agent):
     ) -> AsyncIterable[llm.ChatChunk]:
         self._latency_recorder.mark("llm_request_start")
         
+        # Check if transfer failed in this turn
+        if getattr(self, "_transfer_failed", False):
+            self._transfer_failed = False  # Reset flag
+            logger.warning("Deterministic transfer failure path triggered. Yielding exact callback fallback phrase.")
+            
+            fallback_text = (
+                "I'm sorry, but it looks like we're unable to connect to a licensed agent at the moment. "
+                "Could we schedule a convenient time to call you back?"
+            )
+            
+            yield llm.ChatChunk(
+                id=f"fallback-{uuid.uuid4().hex[:8]}",
+                delta=llm.ChoiceDelta(
+                    role="assistant",
+                    content=fallback_text
+                )
+            )
+            self._latency_recorder.mark("llm_first_token")
+            self._latency_recorder.mark("llm_done")
+            return
+            
         # Stream response token-by-token using vLLM
         stream = self.llm.chat(
             chat_ctx=chat_ctx,

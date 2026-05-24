@@ -14,8 +14,8 @@ To prevent accidental charges, unauthorized resource creation, or unintended out
 |:---|:---|:---|:---|
 | `DANA_CONFIRM_TELNYX_READ` | Any Telnyx GET or list API calls | Allows fetching lists of numbers, profiles, and connections. | `no` |
 | `DANA_CONFIRM_TELNYX_MUTATION` | Creating/updating Telnyx connections or buying numbers | Allows creating SIP connections, outbound profiles, etc. | `no` |
-| `DANA_CONFIRM_LIVEKIT_TRUNK` | Creating LiveKit SIP Outbound Trunks | Allows registering Telnyx credentials into LiveKit Cloud. | `no` |
-| `DANA_CONFIRM_OUTBOUND_CALL` | Placing outbound test calls via LiveKit SIP | Triggers a live outbound call to the destination number. | `no` |
+| `DANA_CONFIRM_CREATE_LIVEKIT_TRUNK` | Creating LiveKit SIP Outbound Trunks | Allows registering Telnyx credentials into LiveKit Cloud. | `no` |
+| `DANA_CONFIRM_PLACE_CALL` | Placing outbound test calls via LiveKit SIP | Triggers a live outbound call to the destination number. | `no` |
 | `DANA_CONFIRM_TRANSFER_CALL` | Executing live prospect transfers to agents | Bridges a caller in the LiveKit room to the licensed agent. | `no` |
 
 ---
@@ -49,8 +49,8 @@ LIVEKIT_API_SECRET=your_livekit_api_secret_here
 # Telephony Safety Gates (change to "yes" when performing specific tasks)
 DANA_CONFIRM_TELNYX_READ=no
 DANA_CONFIRM_TELNYX_MUTATION=no
-DANA_CONFIRM_LIVEKIT_TRUNK=no
-DANA_CONFIRM_OUTBOUND_CALL=no
+DANA_CONFIRM_CREATE_LIVEKIT_TRUNK=no
+DANA_CONFIRM_PLACE_CALL=no
 DANA_CONFIRM_TRANSFER_CALL=no
 ```
 
@@ -92,7 +92,7 @@ python -m telephony.telnyx_provision
 Bridge Telnyx to LiveKit by creating the LiveKit SIP Outbound Trunk. This gives LiveKit the credentials to place outbound calls through Telnyx:
 
 ```bash
-export DANA_CONFIRM_LIVEKIT_TRUNK=yes
+export DANA_CONFIRM_CREATE_LIVEKIT_TRUNK=yes
 python -m telephony.create_livekit_telnyx_outbound_trunk
 ```
 
@@ -103,7 +103,7 @@ python -m telephony.create_livekit_telnyx_outbound_trunk
 Place a test call to a destination phone number (e.g., your personal mobile number) to verify media and signaling:
 
 ```bash
-export DANA_CONFIRM_OUTBOUND_CALL=yes
+export DANA_CONFIRM_PLACE_CALL=yes
 python -m telephony.create_outbound_call --to +15551234567
 ```
 
