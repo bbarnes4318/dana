@@ -371,7 +371,11 @@ class AgentRuntime:
             call_state, lead.to_summary_dict()
         )
         for action in recommended_actions:
-            tool = self.tool_registry.get_tool(action.tool_name)
+            try:
+                tool = self.tool_registry.get_tool(action.tool_name)
+            except KeyError as exc:
+                logger.error("Recommended action tool '%s' not found: %s", action.tool_name, exc)
+                continue
             if tool:
                 params = {**action.params}
                 if action.tool_name == "save_lead":

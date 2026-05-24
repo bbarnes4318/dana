@@ -9,7 +9,7 @@ qualification:
     - health_snapshot
 
   # Age boundaries for qualification
-  disqualifier_age_min: 45
+  disqualifier_age_min: 40
   disqualifier_age_max: 85
 
   # Maximum number of gentle objection-handling attempts before gracefully ending

@@ -9,6 +9,12 @@ perform an actual SIP/LiveKit transfer.
     logic once the infrastructure is wired up.  The integration point
     is the ``execute`` method below — swap the JSONL append with
     a LiveKit ``TransferParticipant`` RPC or SIP REFER flow.
+
+    NOTE: The strict outbound screening prompt mentions the tool name 'feTransfer'.
+    If migrating the transfer tool to 'feTransfer', make sure to register a tool 
+    under the name 'feTransfer' in `ToolRegistry` (or register an alias for this tool), 
+    and update `ActionPolicy` and `AgentRuntime` to fire 'feTransfer' instead of 
+    'transfer_to_agent'.
 """
 
 from __future__ import annotations

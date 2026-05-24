@@ -253,3 +253,12 @@ docker ps            # should show nothing
 | Leave the VM running overnight | Shut down/pause/delete when not testing |
 | Commit `.env` or secrets | Use `.env.production.example` as a template; keep `.env` out of git |
 | Open ports for LiveKit | LiveKit Cloud is reached outbound — no inbound ports needed |
+
+---
+
+## Developer Notes
+
+### feTransfer Integration TODO
+The final expense screening prompt (`prompts/final_expense_alex.md`) references a tool named `feTransfer` to connect qualified prospects to a licensed agent.
+- Currently, the voice agent is configured to use the dry-run `transfer_to_agent` tool which logs events to `data/transfers.jsonl`.
+- **TODO:** When the SIP/LiveKit transfer infrastructure is ready, implement the real `feTransfer` tool in the `tools/` package, register it in `ToolRegistry` (or register it as an alias), and update `ActionPolicy` and `AgentRuntime` to invoke it upon successful qualification.
