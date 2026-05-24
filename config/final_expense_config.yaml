@@ -3,10 +3,10 @@
 qualification:
   # Order in which qualification steps should be completed
   order:
-    - identity_and_interest
-    - age
-    - location
-    - health_snapshot
+    - interest_confirmed
+    - age_range_confirmed
+    - living_independently
+    - financial_decision_maker
 
   # Age boundaries for qualification
   disqualifier_age_min: 40
@@ -18,12 +18,12 @@ qualification:
 transfer:
   # Requirements that must be met before transferring to a licensed agent
   requirements:
-    - identity_confirmed
-    - age_qualified
-    - state_qualified
-    - health_snapshot_clear
+    - interest_confirmed
+    - age_range_confirmed
+    - living_independently
+    - financial_decision_maker
   # Whether to summarize qualification before transfer
-  summarize_before_transfer: true
+  summarize_before_transfer: false
   # Maximum hold time before offering callback (seconds)
   max_hold_time_sec: 120
 
