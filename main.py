@@ -1,13 +1,22 @@
 """
-Sovereign Voice Stack - Main Agent Entry Point
+Dana Voice Agent — Main Entry Point
 Ultra-low-latency Voice AI using LiveKit Agents Framework.
+
+Orchestrator responsibilities:
+1. Load agent instructions from DANA_AGENT_PROMPT_PATH (file on disk).
+2. Connect to LiveKit room.
+3. Use local faster-whisper for STT (zero network latency).
+4. Use local Kokoro ONNX for TTS (zero network latency).
+5. Use vLLM for LLM via OpenAI-compatible API.
+6. Respect DANA_OPENING_MODE (wait_for_user | immediate).
 """
 
 import asyncio
 import logging
 import os
-import uuid
-from typing import AsyncIterable, Optional
+from pathlib import Path
+from typing import Optional
+from dataclasses import dataclass, field
 
 from dotenv import load_dotenv
 from livekit import rtc
@@ -18,289 +27,302 @@ from livekit.agents import (
     WorkerOptions,
     cli,
     llm,
-    Agent,
-    AgentSession,
-    room_io,
-    TurnHandlingOptions,
 )
+from livekit.agents.voice_assistant import VoiceAssistant
 from livekit.plugins import openai as lk_openai
-from livekit.plugins import silero
 
+from stt_service import LocallyHostedSTT, STTConfig
+from tts_service import LocallyHostedKokoro, TTSConfig, StreamingTTSAdapter
 from voice_config import VoiceConfig
-from latency_metrics import LatencyRecorder
-from stt_service import create_stt
 
 # Load environment variables
 load_dotenv()
 
+# Build global config once
+CONFIG = VoiceConfig()
+
 # Configure logging
 logging.basicConfig(
-    level=getattr(logging, os.getenv("LOG_LEVEL", "INFO")),
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    level=getattr(logging, CONFIG.log_level, logging.INFO),
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
 logger = logging.getLogger(__name__)
 
+# ---- Default fallback prompt (used when file is missing) --------------------
+_DEFAULT_INSTRUCTIONS = (
+    "You are a helpful, friendly, and professional AI voice assistant. "
+    "You are having a natural phone conversation with a human. "
+    "Keep responses concise (1-3 sentences). Be warm and personable. "
+    "Never use markdown or formatting — speak naturally."
+)
 
-class SharedComponents:
-    """Heavyweight models and configs cached in the process userdata."""
-    def __init__(self, config: VoiceConfig):
+
+# =============================================================================
+# Instruction Loader
+# =============================================================================
+
+def load_instructions(path: str) -> str:
+    """Load agent instructions from a file path.
+
+    Falls back to ``_DEFAULT_INSTRUCTIONS`` if the file is missing, empty,
+    or unreadable — the agent will still work, just without the custom prompt.
+    """
+    if not path:
+        logger.warning("No DANA_AGENT_PROMPT_PATH configured — using default instructions")
+        return _DEFAULT_INSTRUCTIONS
+
+    resolved = Path(path)
+    if not resolved.is_absolute():
+        # Relative paths are resolved from the app working directory
+        resolved = Path.cwd() / resolved
+
+    try:
+        content = resolved.read_text(encoding="utf-8").strip()
+        if not content:
+            logger.warning("Prompt file %s is empty — using default instructions", resolved)
+            return _DEFAULT_INSTRUCTIONS
+        logger.info("Loaded agent instructions from %s (%d chars)", resolved, len(content))
+        return content
+    except FileNotFoundError:
+        logger.warning("Prompt file %s not found — using default instructions", resolved)
+        return _DEFAULT_INSTRUCTIONS
+    except Exception as exc:
+        logger.warning("Could not read prompt file %s: %s — using default instructions", resolved, exc)
+        return _DEFAULT_INSTRUCTIONS
+
+
+# =============================================================================
+# Context Manager (sliding-window)
+# =============================================================================
+
+class ContextManager:
+    """Manages conversation context with sliding-window truncation.
+
+    Prevents token overflow by keeping only recent conversation turns
+    when context exceeds the maximum length.
+    """
+
+    def __init__(self, max_tokens: int = 6000, keep_turns: int = 10):
+        self.max_tokens = max_tokens
+        self.keep_turns = keep_turns
+        self._messages: list[llm.ChatMessage] = []
+        self._system_message: Optional[llm.ChatMessage] = None
+
+    def set_system_message(self, content: str):
+        """Set the system message (always retained)."""
+        self._system_message = llm.ChatMessage(role="system", content=content)
+
+    def add_message(self, role: str, content: str):
+        """Add a message to the conversation history."""
+        self._messages.append(llm.ChatMessage(role=role, content=content))
+        self._maybe_truncate()
+
+    def _estimate_tokens(self, text: str) -> int:
+        """Rough token estimation (4 chars per token average)."""
+        return len(text) // 4
+
+    def _maybe_truncate(self):
+        """Truncate conversation if exceeding max tokens."""
+        total_tokens = sum(self._estimate_tokens(m.content or "") for m in self._messages)
+        if self._system_message:
+            total_tokens += self._estimate_tokens(self._system_message.content or "")
+
+        if total_tokens > self.max_tokens:
+            if len(self._messages) > self.keep_turns * 2:
+                self._messages = self._messages[-(self.keep_turns * 2):]
+                logger.info("Context truncated to %d messages", len(self._messages))
+
+    def get_messages(self) -> list[llm.ChatMessage]:
+        """Get all messages including system message."""
+        messages = []
+        if self._system_message:
+            messages.append(self._system_message)
+        messages.extend(self._messages)
+        return messages
+
+    def clear(self):
+        """Clear conversation history (keeps system message)."""
+        self._messages.clear()
+
+
+# =============================================================================
+# Dana Agent
+# =============================================================================
+
+class DanaAgent:
+    """The Dana voice agent.
+
+    Orchestrates STT, LLM, and TTS with aggressive latency optimisation
+    and barge-in handling.
+    """
+
+    def __init__(self, config: VoiceConfig, instructions: str):
         self.config = config
-        self.stt = None
-        self.tts = None
-        self.llm = None
-        self.vad = None
+        self.instructions = instructions
+
+        # Components (initialised lazily)
+        self._stt: Optional[LocallyHostedSTT] = None
+        self._tts: Optional[LocallyHostedKokoro] = None
+        self._tts_adapter: Optional[StreamingTTSAdapter] = None
+        self._llm: Optional[lk_openai.LLM] = None
+        self._assistant: Optional[VoiceAssistant] = None
+
+        # Context management
+        self._context = ContextManager(max_tokens=6000, keep_turns=10)
+        self._context.set_system_message(self.instructions)
+
+        # State
+        self._is_speaking = False
+        self._is_processing = False
+        self._current_speech_handle = None
 
     async def initialize(self):
-        # 1. Initialize STT
-        self.stt = create_stt(self.config)
-        if hasattr(self.stt, "initialize"):
-            await self.stt.initialize()
-            
-        # 2. Initialize TTS
-        from tts_service import LocallyHostedKokoro, TTSConfig
-        tts_config = TTSConfig(
+        """Initialise all AI components."""
+        logger.info("Initialising Dana Voice Agent…")
+
+        # STT
+        self._stt = LocallyHostedSTT(STTConfig(
+            model_size=self.config.stt_model,
+            compute_type=self.config.stt_compute_type,
+            device="cuda",
+            language="en",
+            beam_size=1,
+            vad_threshold=self.config.vad_threshold,
+        ))
+        await self._stt.initialize()
+
+        # TTS
+        self._tts = LocallyHostedKokoro(TTSConfig(
+            model_name="kokoro-v1.0",
             voice=self.config.tts_voice,
             speed=self.config.tts_speed,
-        )
-        self.tts = LocallyHostedKokoro(tts_config)
-        await self.tts.initialize()
-        
-        # 3. Initialize LLM (vLLM OpenAI compatible)
-        self.llm = lk_openai.LLM(
+        ))
+        await self._tts.initialize()
+        self._tts_adapter = StreamingTTSAdapter(self._tts)
+
+        # LLM via vLLM
+        self._llm = lk_openai.LLM(
             model=self.config.llm_model,
             base_url=self.config.vllm_base_url,
-            api_key="not-needed",
+            api_key="not-needed",  # vLLM doesn't require an API key
         )
-        
-        # 4. Initialize VAD (Silero VAD)
-        loop = asyncio.get_event_loop()
-        self.vad = await loop.run_in_executor(None, silero.VAD.load)
-        logger.info("All shared components initialized successfully")
 
+        logger.info("All components initialised successfully")
 
-class DanaAgent(Agent):
-    """
-    Subclass of livekit.agents.Agent implementing our phone-optimized Dana personality
-    and wrapping LLM & TTS streaming nodes with latency recorder hooks.
-    """
-    def __init__(self, shared: SharedComponents, latency_recorder: LatencyRecorder):
-        instructions = (
-            "You are Dana, a warm, professional outbound voice AI. "
-            "You are having a natural phone conversation. "
-            "Follow these rules strictly:\n"
-            "- Keep responses very brief: respond in 1 sentence by default.\n"
-            "- Ask only one question at a time.\n"
-            "- Use natural, spoken language and short acknowledgment phrases (like 'Right', 'Got it', 'Okay').\n"
-            "- Use contractions naturally (e.g. I'm, you're, we'll).\n"
-            "- NEVER use markdown formatting, bullet points, or lists.\n"
-            "- Speak in a friendly, conversational tone."
-        )
-        super().__init__(instructions=instructions)
-        self.llm = shared.llm
-        self.tts = shared.tts
-        self.stt = shared.stt
-        self._config = shared.config
-        self._latency_recorder = latency_recorder
+    async def handle_user_speech(self, text: str) -> str:
+        """Handle transcribed user speech and generate response."""
+        if not text.strip():
+            return ""
 
-    async def on_user_turn_completed(self, turn_ctx: llm.ChatContext, new_message: llm.ChatMessage) -> None:
-        logger.debug(f"User turn completed: '{new_message.content}'")
+        logger.info("User said: %s", text)
+        self._context.add_message("user", text)
 
-    async def llm_node(
-        self,
-        chat_ctx: llm.ChatContext,
-        tools: list[llm.Tool],
-        model_settings: any,
-    ) -> AsyncIterable[llm.ChatChunk]:
-        self._latency_recorder.mark("llm_request_start")
-        
-        # Stream response token-by-token using vLLM
-        stream = self.llm.chat(
-            chat_ctx=chat_ctx,
-            temperature=self._config.temperature,
-            top_p=self._config.top_p,
-            max_tokens=self._config.max_tokens,
-            frequency_penalty=0.15,
-        )
-        
-        first_token = True
-        async for chunk in stream:
-            if first_token:
-                first_token = False
-                self._latency_recorder.mark("llm_first_token")
-            yield chunk
-            
-        self._latency_recorder.mark("llm_done")
-
-    async def tts_node(
-        self,
-        text: AsyncIterable[str],
-        model_settings: any,
-    ) -> AsyncIterable[rtc.AudioFrame]:
-        tts_stream = self.tts.stream()
-        first_text = True
-        
-        async def push_text_loop():
-            nonlocal first_text
-            try:
-                async for chunk in text:
-                    if chunk and first_text:
-                        first_text = False
-                        self._latency_recorder.mark("tts_first_text")
-                    await tts_stream.push_text(chunk)
-                await tts_stream.flush()
-            except asyncio.CancelledError:
-                pass
-            except Exception as e:
-                logger.error(f"Error in tts_node push loop: {e}")
-            
-        push_task = asyncio.create_task(push_text_loop())
-        
-        first_audio = True
+        self._is_processing = True
         try:
-            async for frame in tts_stream:
-                if first_audio:
-                    first_audio = False
-                    self._latency_recorder.mark("tts_first_audio")
-                    self._latency_recorder.mark("first_audio_published")
-                yield frame
-        finally:
-            await tts_stream.interrupt()
-            await tts_stream.aclose()
-            push_task.cancel()
+            response = await self._llm.chat(
+                messages=self._context.get_messages(),
+                temperature=self.config.temperature,
+                max_tokens=self.config.max_tokens,
+            )
 
+            assistant_text = response.choices[0].message.content or ""
+            self._context.add_message("assistant", assistant_text)
+            logger.info("Assistant response: %s", assistant_text)
+            return assistant_text
+        finally:
+            self._is_processing = False
+
+    async def interrupt_speech(self):
+        """Handle barge-in by immediately stopping all audio output."""
+        logger.info("Barge-in detected — interrupting speech")
+
+        if self._tts_adapter:
+            await self._tts_adapter.interrupt()
+
+        if self._current_speech_handle:
+            try:
+                self._current_speech_handle.interrupt()
+            except Exception as e:
+                logger.warning("Error interrupting speech handle: %s", e)
+
+        self._is_speaking = False
+
+
+# =============================================================================
+# LiveKit Entry-point
+# =============================================================================
 
 async def entrypoint(ctx: JobContext):
-    logger.info(f"New connection: room={ctx.room.name}")
-    
-    # Retrieve prewarmed components
-    shared = ctx.proc.userdata.get("shared_components")
-    if not shared:
-        logger.warning("Shared components not found in process userdata. Initializing now...")
-        config = VoiceConfig()
-        shared = SharedComponents(config)
-        await shared.initialize()
-        ctx.proc.userdata["shared_components"] = shared
-        
-    call_id = str(uuid.uuid4())
-    latency_recorder = LatencyRecorder(call_id)
-    latency_recorder.mark("call_start")
-    
-    # Configure low-latency turn handling
-    turn_handling = TurnHandlingOptions(
-        turn_detection="vad",
-        endpointing={
-            "mode": "fixed",
-            "min_delay": shared.config.turn_min_delay,
-            "max_delay": shared.config.turn_max_delay,
-        },
-        interruption={
-            "enabled": True,
-            "mode": "adaptive",
-            "resume_false_interruption": True,
-            "false_interruption_timeout": 1.0,
-        },
-        preemptive_generation=shared.config.preemptive_generation,
-    )
-    
-    # Initialize the AgentSession
-    session = AgentSession(
-        stt=shared.stt,
-        llm=shared.llm,
-        tts=shared.tts,
-        vad=shared.vad,
-        turn_handling=turn_handling,
-    )
-    
-    agent = DanaAgent(shared, latency_recorder)
-    
-    # Set up session event hooks
-    @session.on("user_state_changed")
-    def on_user_state_changed(ev):
-        state_str = str(ev.new_state).lower()
-        old_state_str = str(ev.old_state).lower()
-        if "speaking" in state_str:
-            logger.info("User speaking started")
-            latency_recorder.mark("user_speech_start")
-            
-            # Check for barge-in interruption
-            if session.agent_state == "speaking" or getattr(session.agent_state, "value", None) == "speaking":
-                latency_recorder.mark("barge_in_detected")
-                logger.info("Barge-in detected - interrupting agent response")
-                
-                # Interrupt the session
-                if asyncio.iscoroutinefunction(session.interrupt):
-                    asyncio.create_task(session.interrupt())
-                else:
-                    session.interrupt()
-                latency_recorder.mark("barge_in_stopped_audio")
-                
-        elif "listening" in state_str or "idle" in state_str:
-            if "speaking" in old_state_str:
-                logger.info("User speaking stopped")
-                latency_recorder.mark("user_speech_end")
-                
-    @session.on("agent_state_changed")
-    def on_agent_state_changed(ev):
-        state_str = str(ev.new_state).lower()
-        old_state_str = str(ev.old_state).lower()
-        if "speaking" in state_str:
-            latency_recorder.mark("agent_speech_started")
-        elif "speaking" in old_state_str:
-            latency_recorder.mark("agent_speech_stopped")
-            
-    @session.on("user_input_transcribed")
-    def on_user_input_transcribed(event):
-        if event.is_final:
-            latency_recorder.mark("transcript_final")
-            
-    # Connect to room (audio only)
-    await ctx.connect(auto_subscribe=AutoSubscribe.AUDIO_ONLY)
-    
-    # Wait for participant
-    participant = await ctx.wait_for_participant()
-    latency_recorder.mark("participant_joined")
-    logger.info(f"Participant joined: {participant.identity}")
-    
-    # Start AgentSession with RoomOptions
-    await session.start(
-        room=ctx.room,
-        agent=agent,
-        room_options=room_io.RoomOptions(
-            audio_input=room_io.AudioInputOptions(enabled=True),
-            audio_output=room_io.AudioOutputOptions(enabled=True),
-            video_input=room_io.VideoInputOptions(enabled=False),
-            text_input=room_io.TextInputOptions(enabled=False),
+    """LiveKit Agent entrypoint — called for each new participant connection."""
+    logger.info("New connection: room=%s", ctx.room.name)
+
+    # Load instructions from file
+    instructions = load_instructions(CONFIG.agent_prompt_path)
+
+    # Build the agent
+    agent = DanaAgent(config=CONFIG, instructions=instructions)
+    await agent.initialize()
+
+    # Build the VoiceAssistant
+    min_endpointing = CONFIG.turn_min_delay
+    assistant = VoiceAssistant(
+        stt=agent._stt,
+        tts=agent._tts,
+        llm=agent._llm,
+        chat_ctx=llm.ChatContext().append(
+            role="system",
+            text=instructions,
         ),
+        min_endpointing_delay=min_endpointing,
+        allow_interruptions=True,
     )
-    
-    # Speak greeting immediately after join
-    latency_recorder.mark("greeting_started")
-    logger.info(f"Speaking opening line: {shared.config.opening_line}")
-    await session.say(shared.config.opening_line)
-    
-    try:
-        # Loop until room disconnected
-        while ctx.room.is_connected():
-            await asyncio.sleep(1.0)
-    finally:
-        latency_recorder.log_summary()
-        logger.info(f"Session finished for call {call_id}")
+
+    # ---- Event handlers ----
+    @assistant.on("user_started_speaking")
+    async def on_user_started_speaking():
+        if agent._is_speaking:
+            logger.info("User started speaking during assistant speech — interrupting")
+            await agent.interrupt_speech()
+
+    @assistant.on("agent_started_speaking")
+    async def on_agent_started_speaking():
+        agent._is_speaking = True
+        logger.debug("Agent started speaking")
+
+    @assistant.on("agent_stopped_speaking")
+    async def on_agent_stopped_speaking():
+        agent._is_speaking = False
+        logger.debug("Agent stopped speaking")
+
+    # ---- Connect ----
+    await ctx.connect(auto_subscribe=AutoSubscribe.AUDIO_ONLY)
+    participant = await ctx.wait_for_participant()
+    logger.info("Participant joined: %s", participant.identity)
+
+    # ---- Start ----
+    assistant.start(ctx.room, participant)
+
+    # ---- Opening behaviour ----
+    if CONFIG.opening_mode == "immediate" and CONFIG.opening_line:
+        await assistant.say(CONFIG.opening_line, allow_interruptions=True)
+    elif CONFIG.opening_mode == "wait_for_user":
+        # Do nothing — the agent will respond only after the user speaks.
+        logger.info("Opening mode: wait_for_user — agent will not speak first")
+    else:
+        # Unknown mode or immediate with no line — stay silent.
+        logger.info("Opening mode: %s (no opening line) — agent is silent", CONFIG.opening_mode)
 
 
 def prewarm(proc: JobProcess):
-    """
-    Prewarm the worker process:
-    Called once when the worker starts to pre-load all models into GPU memory.
-    """
-    logger.info("Prewarming worker process - loading STT, TTS, and VAD...")
-    
+    """Prewarm the worker process — pre-load models for fast first response."""
+    logger.info("Prewarming worker process…")
+
     async def _prewarm():
-        config = VoiceConfig()
-        shared = SharedComponents(config)
-        await shared.initialize()
-        proc.userdata["shared_components"] = shared
-        logger.info("Prewarm complete - components cached")
-        
+        instructions = load_instructions(CONFIG.agent_prompt_path)
+        agent = DanaAgent(config=CONFIG, instructions=instructions)
+        await agent.initialize()
+        logger.info("Prewarm complete — models loaded")
+
     asyncio.run(_prewarm())
 
 

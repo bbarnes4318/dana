@@ -1,41 +1,47 @@
-# Sovereign Voice Stack - Docker Compose
-# Ultra-low-latency Voice AI on single L40S GPU
-
-version: "3.8"
+# =============================================================================
+# Dana Voice Agent — Docker Compose
+# Ultra-low-latency Voice AI on single L40/L40S GPU
+# =============================================================================
+# Usage:
+#   Validate:  docker compose config
+#   Start:     docker compose --env-file .env up -d --build vllm-server voice-agent
+#   Logs:      docker compose logs -f --tail=100 voice-agent
+#   Stop:      docker compose down
+#
+# vLLM is PRIVATE — not exposed outside Docker's internal network.
+# =============================================================================
 
 services:
   # ============================================
-  # vLLM Server - The Brain (Llama-3.1-8B-Instruct)
+  # vLLM Server — LLM Inference (PRIVATE)
   # ============================================
   vllm-server:
     image: vllm/vllm-openai:latest
-    container_name: sovereign-vllm
+    container_name: dana-vllm
     runtime: nvidia
-    restart: unless-stopped
-    ports:
-      - "8000:8000"
+    restart: "no"
+    ipc: host
+    shm_size: "16gb"
+    # vLLM is NOT publicly exposed. Only accessible via Docker internal network.
+    # For local debug ONLY, uncomment the next two lines:
+    # ports:
+    #   - "127.0.0.1:8000:8000"
     environment:
       - NVIDIA_VISIBLE_DEVICES=0
       - HF_TOKEN=${HF_TOKEN:-}
-      - VLLM_MODEL=${VLLM_MODEL:-meta-llama/Llama-3.1-8B-Instruct}
-      - VLLM_MAX_MODEL_LEN=${VLLM_MAX_MODEL_LEN:-4096}
-      - VLLM_GPU_MEMORY_UTILIZATION=${VLLM_GPU_MEMORY_UTILIZATION:-0.7}
-      - VLLM_QUANTIZATION=${VLLM_QUANTIZATION:-fp8}
-      - VLLM_ENABLE_PREFIX_CACHING=${VLLM_ENABLE_PREFIX_CACHING:-true}
     volumes:
       - vllm-cache:/root/.cache/huggingface
-    entrypoint: []
     command: >
-      sh -c '
-      ARGS="--model $${VLLM_MODEL} --dtype auto --gpu-memory-utilization $${VLLM_GPU_MEMORY_UTILIZATION} --max-model-len $${VLLM_MAX_MODEL_LEN} --host 0.0.0.0 --port 8000 --trust-remote-code --enforce-eager"
-      if [ "$${VLLM_QUANTIZATION}" != "none" ] && [ -n "$${VLLM_QUANTIZATION}" ]; then
-        ARGS="$$ARGS --quantization $${VLLM_QUANTIZATION}"
-      fi
-      if [ "$${VLLM_ENABLE_PREFIX_CACHING}" = "true" ]; then
-        ARGS="$$ARGS --enable-prefix-caching"
-      fi
-      exec python3 -m vllm.entrypoints.openai.api_server $$ARGS
-      '
+      --model ${VLLM_MODEL:-meta-llama/Llama-3.1-8B-Instruct}
+      --dtype auto
+      --quantization ${VLLM_QUANTIZATION:-fp8}
+      --gpu-memory-utilization ${VLLM_GPU_MEMORY_UTILIZATION:-0.70}
+      --max-model-len ${VLLM_MAX_MODEL_LEN:-4096}
+      --enforce-eager
+      --enable-prefix-caching
+      --host 0.0.0.0
+      --port 8000
+      --trust-remote-code
     deploy:
       resources:
         reservations:
@@ -51,42 +57,57 @@ services:
       start_period: 120s
 
   # ============================================
-  # Voice Agent - STT/TTS/Orchestration
+  # Voice Agent — STT / TTS / Orchestration
   # ============================================
   voice-agent:
     build:
       context: .
       dockerfile: Dockerfile
       target: production
-    container_name: sovereign-voice-agent
+    container_name: dana-voice-agent
     runtime: nvidia
-    restart: unless-stopped
+    restart: "no"
+    ipc: host
+    shm_size: "16gb"
     depends_on:
       vllm-server:
         condition: service_healthy
     environment:
       - NVIDIA_VISIBLE_DEVICES=0
       - CUDA_VISIBLE_DEVICES=0
+      # ---- vLLM (internal network) ----
       - VLLM_BASE_URL=http://vllm-server:8000/v1
-      - LIVEKIT_URL=${LIVEKIT_URL}
-      - LIVEKIT_API_KEY=${LIVEKIT_API_KEY}
-      - LIVEKIT_API_SECRET=${LIVEKIT_API_SECRET}
-      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      # ---- LiveKit ----
+      - LIVEKIT_URL=${LIVEKIT_URL:-wss://replace-me.livekit.cloud}
+      - LIVEKIT_API_KEY=${LIVEKIT_API_KEY:-replace_me}
+      - LIVEKIT_API_SECRET=${LIVEKIT_API_SECRET:-replace_me}
+      # ---- Agent Identity ----
+      - DANA_AGENT_NAME=${DANA_AGENT_NAME:-Alex}
+      - DANA_COMPANY_NAME=${DANA_COMPANY_NAME:-American Beneficiary}
+      - DANA_AGENT_PROMPT_PATH=${DANA_AGENT_PROMPT_PATH:-prompts/final_expense_alex.md}
+      # ---- Opening Behavior ----
+      - DANA_OPENING_MODE=${DANA_OPENING_MODE:-wait_for_user}
       - DANA_OPENING_LINE=${DANA_OPENING_LINE:-}
-      - DANA_LLM_MODEL=${DANA_LLM_MODEL:-}
+      # ---- LLM Inference ----
+      - DANA_LLM_MODEL=${DANA_LLM_MODEL:-meta-llama/Llama-3.1-8B-Instruct}
       - DANA_MAX_TOKENS=${DANA_MAX_TOKENS:-70}
       - DANA_TEMPERATURE=${DANA_TEMPERATURE:-0.45}
       - DANA_TOP_P=${DANA_TOP_P:-0.9}
+      # ---- STT ----
+      - DANA_STT_PROVIDER=${DANA_STT_PROVIDER:-local}
       - DANA_STT_MODEL=${DANA_STT_MODEL:-large-v3-turbo}
       - DANA_STT_COMPUTE_TYPE=${DANA_STT_COMPUTE_TYPE:-float16}
       - DANA_VAD_THRESHOLD=${DANA_VAD_THRESHOLD:-0.5}
-      - DANA_MIN_SILENCE_MS=${DANA_MIN_SILENCE_MS:-200}
+      - DANA_MIN_SILENCE_MS=${DANA_MIN_SILENCE_MS:-180}
+      # ---- TTS ----
       - DANA_TTS_VOICE=${DANA_TTS_VOICE:-af_bella}
-      - DANA_TTS_SPEED=${DANA_TTS_SPEED:-1.0}
+      - DANA_TTS_SPEED=${DANA_TTS_SPEED:-1.03}
+      # ---- Turn-Taking ----
       - DANA_TURN_MIN_DELAY=${DANA_TURN_MIN_DELAY:-0.15}
       - DANA_TURN_MAX_DELAY=${DANA_TURN_MAX_DELAY:-0.55}
       - DANA_PREEMPTIVE_GENERATION=${DANA_PREEMPTIVE_GENERATION:-true}
-      - DANA_STT_PROVIDER=${DANA_STT_PROVIDER:-local}
+      # ---- Logging ----
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
     volumes:
       - ./:/app:ro
       - agent-cache:/root/.cache
@@ -97,37 +118,38 @@ services:
             - driver: nvidia
               count: 1
               capabilities: [gpu]
-    # Use remaining ~30% of GPU memory (14.4GB on L40S)
-    # STT (Whisper large-v3-turbo): ~3GB
-    # TTS (Kokoro ONNX): ~1GB
-    # Buffers/Overhead: ~10GB
+    # GPU memory budget (L40S 48GB):
+    #   vLLM:  ~70% → 33.6GB
+    #   STT (Whisper large-v3-turbo): ~3GB
+    #   TTS (Kokoro ONNX): ~1GB
+    #   Buffers/Overhead: ~10GB
 
   # ============================================
-  # LiveKit Server (Optional - for local testing)
+  # LiveKit Server (local testing ONLY)
   # ============================================
   livekit:
     image: livekit/livekit-server:latest
-    container_name: sovereign-livekit
-    restart: unless-stopped
+    container_name: dana-livekit-local
+    restart: "no"
     ports:
-      - "7880:7880" # HTTP API
-      - "7881:7881" # RTC (WebRTC)
-      - "7882:7882/udp" # RTC UDP
+      - "7880:7880"      # HTTP API
+      - "7881:7881"      # RTC (WebRTC)
+      - "7882:7882/udp"  # RTC UDP
     environment:
-      - LIVEKIT_KEYS=${LIVEKIT_API_KEY}:${LIVEKIT_API_SECRET}
+      - LIVEKIT_KEYS=${LIVEKIT_API_KEY:-devkey}:${LIVEKIT_API_SECRET:-devsecret}
     command: --dev --bind 0.0.0.0
     profiles:
       - local-testing
 
   # ============================================
-  # Redis (for LiveKit state, optional)
+  # Redis (for LiveKit state, local testing ONLY)
   # ============================================
   redis:
     image: redis:7-alpine
-    container_name: sovereign-redis
-    restart: unless-stopped
+    container_name: dana-redis-local
+    restart: "no"
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
     volumes:
       - redis-data:/data
     profiles:
@@ -143,5 +165,5 @@ volumes:
 
 networks:
   default:
-    name: sovereign-voice-network
+    name: dana-voice-network
     driver: bridge

@@ -1,0 +1,52 @@
+# =============================================================================
+# Dana Voice Agent — .gitignore
+# =============================================================================
+
+# --------------- Environment & Secrets ---------------
+.env
+.env.*
+!.env.example
+!.env.production.example
+
+# --------------- SSH / Crypto Keys ---------------
+*.pem
+*.key
+id_rsa
+id_ed25519
+secrets/
+private/
+
+# --------------- Infrastructure State ---------------
+infra/hyperstack/last_vm.json
+
+# --------------- Logs & Backups ---------------
+*.log
+*.bak
+*.backup
+
+# --------------- Python ---------------
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+*.egg
+.venv/
+venv/
+env/
+
+# --------------- IDE ---------------
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# --------------- OS ---------------
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# --------------- Docker ---------------
+# Don't ignore docker-compose.yaml or Dockerfile — those are tracked.
