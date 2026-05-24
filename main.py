@@ -21,8 +21,8 @@ from livekit.agents import (
     Agent,
     AgentSession,
     room_io,
+    TurnHandlingOptions,
 )
-from livekit.agents.voice import TurnHandlingOptions
 from livekit.plugins import openai as lk_openai
 from livekit.plugins import silero
 
@@ -136,13 +136,16 @@ class DanaAgent(Agent):
         text: AsyncIterable[str],
         model_settings: any,
     ) -> AsyncIterable[rtc.AudioFrame]:
-        self._latency_recorder.mark("tts_first_text")
-        
         tts_stream = self.tts.stream()
+        first_text = True
         
         async def push_text_loop():
+            nonlocal first_text
             try:
                 async for chunk in text:
+                    if chunk and first_text:
+                        first_text = False
+                        self._latency_recorder.mark("tts_first_text")
                     await tts_stream.push_text(chunk)
                 await tts_stream.flush()
             except asyncio.CancelledError:
@@ -161,6 +164,7 @@ class DanaAgent(Agent):
                     self._latency_recorder.mark("first_audio_published")
                 yield frame
         finally:
+            await tts_stream.interrupt()
             await tts_stream.aclose()
             push_task.cancel()
 
@@ -190,7 +194,10 @@ async def entrypoint(ctx: JobContext):
             "max_delay": shared.config.turn_max_delay,
         },
         interruption={
+            "enabled": True,
             "mode": "adaptive",
+            "resume_false_interruption": True,
+            "false_interruption_timeout": 1.0,
         },
         preemptive_generation=shared.config.preemptive_generation,
     )
@@ -220,9 +227,6 @@ async def entrypoint(ctx: JobContext):
                 latency_recorder.mark("barge_in_detected")
                 logger.info("Barge-in detected - interrupting agent response")
                 
-                if shared.tts._active_stream:
-                    asyncio.create_task(shared.tts._active_stream.interrupt())
-                    
                 # Interrupt the session
                 if asyncio.iscoroutinefunction(session.interrupt):
                     asyncio.create_task(session.interrupt())

@@ -156,6 +156,7 @@ class LocallyHostedKokoro(tts.TTS):
         self._model: Optional[Kokoro] = None
         self._initialized = False
         self._lock = asyncio.Lock()
+        self._active_stream: Optional["LocalTTSStream"] = None
         
     @property
     def sample_rate(self) -> int:
@@ -223,7 +224,9 @@ class LocallyHostedKokoro(tts.TTS):
                     yield self._numpy_to_audio_frame(chunk)
     
     def stream(self) -> "LocalTTSStream":
-        return LocalTTSStream(self)
+        stream = LocalTTSStream(self)
+        self._active_stream = stream
+        return stream
 
 
 class LocalTTSStream(tts.TTSStream):
@@ -348,3 +351,5 @@ class LocalTTSStream(tts.TTSStream):
     async def aclose(self):
         self._closed = True
         await self.flush()
+        if self._tts._active_stream is self:
+            self._tts._active_stream = None
