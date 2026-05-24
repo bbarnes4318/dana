@@ -580,3 +580,180 @@ async def test_apply_mode_fails_if_purchase_country_missing(clean_env, monkeypat
     assert excinfo.value.code == 1
     assert orchestrator.report["phone_number"] == "missing"
     assert "TELNYX_PURCHASE_COUNTRY" in orchestrator.report["operator_action"]
+
+
+@pytest.mark.asyncio
+async def test_apply_mode_phone_number_id_not_assigned_fails_without_mutation(clean_env, monkeypatch):
+    monkeypatch.setenv("DANA_PROVISION_MODE", "apply")
+    monkeypatch.setenv("DANA_PROVISION_APPLY_CONFIRM", "yes")
+    monkeypatch.setenv("DANA_CONFIRM_TELNYX_READ", "yes")
+    monkeypatch.setenv("DANA_CONFIRM_TELNYX_MUTATION", "no")  # mutation not confirmed
+    monkeypatch.setenv("TELNYX_PHONE_NUMBER_ID", "num-1")
+    monkeypatch.setenv("TELNYX_SIP_USERNAME", "test-user")
+    monkeypatch.setenv("TELNYX_SIP_PASSWORD", "test-pass")
+
+    orchestrator = ProvisioningOrchestrator()
+    orchestrator.client.list_outbound_voice_profiles = AsyncMock(return_value=[{"id": "vp-existing", "name": "dana-voice-profile"}])
+    orchestrator.client.list_credential_connections = AsyncMock(return_value=[{
+        "id": "conn-existing",
+        "connection_name": "dana-sip-connection",
+        "username": "test-user",
+        "outbound_voice_profile_id": "vp-existing"
+    }])
+    # Phone number is assigned to a different connection "conn-wrong"
+    orchestrator.client.get_phone_number_details = AsyncMock(return_value={
+        "id": "num-1",
+        "phone_number": "+15551234567",
+        "connection_id": "conn-wrong"
+    })
+
+    with pytest.raises(SystemExit) as excinfo:
+        await orchestrator.run()
+    assert excinfo.value.code == 1
+    assert orchestrator.report["phone_number"] == "failed"
+    assert "not assigned to connection ID" in orchestrator.report["operator_action"]
+
+
+@pytest.mark.asyncio
+async def test_apply_mode_phone_number_id_not_assigned_assigns_with_mutation(clean_env, monkeypatch, tmp_path):
+    monkeypatch.setenv("DANA_PROVISION_MODE", "apply")
+    monkeypatch.setenv("DANA_PROVISION_APPLY_CONFIRM", "yes")
+    monkeypatch.setenv("DANA_CONFIRM_TELNYX_READ", "yes")
+    monkeypatch.setenv("DANA_CONFIRM_TELNYX_MUTATION", "yes")  # mutation confirmed
+    monkeypatch.setenv("TELNYX_PHONE_NUMBER_ID", "num-1")
+    monkeypatch.setenv("TELNYX_SIP_USERNAME", "test-user")
+    monkeypatch.setenv("TELNYX_SIP_PASSWORD", "test-pass")
+
+    orchestrator = ProvisioningOrchestrator()
+    orchestrator.client.list_outbound_voice_profiles = AsyncMock(return_value=[{"id": "vp-existing", "name": "dana-voice-profile"}])
+    orchestrator.client.list_credential_connections = AsyncMock(return_value=[{
+        "id": "conn-existing",
+        "connection_name": "dana-sip-connection",
+        "username": "test-user",
+        "outbound_voice_profile_id": "vp-existing"
+    }])
+    # Phone number is assigned to a different connection "conn-wrong"
+    orchestrator.client.get_phone_number_details = AsyncMock(return_value={
+        "id": "num-1",
+        "phone_number": "+15551234567",
+        "connection_id": "conn-wrong"
+    })
+
+    # Mock assign_phone_number_connection to succeed
+    orchestrator.client.assign_phone_number_connection = AsyncMock(return_value={"id": "num-1"})
+
+    # Mock LiveKit API client and trunk checking (reuse)
+    mock_trunk = MagicMock()
+    mock_trunk.sip_trunk_id = "lk-trunk-existing"
+    mock_trunk.name = "Dana Telnyx Outbound Trunk"
+    mock_trunk.address = "sip.telnyx.com"
+    mock_trunk.numbers = ["+15551234567"]
+    
+    mock_list_response = MagicMock()
+    mock_list_response.results = [mock_trunk]
+    
+    mock_lkapi = MagicMock()
+    mock_lkapi.sip = MagicMock()
+    mock_lkapi.sip.list_sip_outbound_trunk = AsyncMock(return_value=mock_list_response)
+    mock_lkapi.aclose = AsyncMock()
+
+    monkeypatch.setattr(orchestrator, "_determine_env_file", lambda: str(tmp_path / "provisioned.env"))
+
+    with patch("livekit.api.LiveKitAPI", return_value=mock_lkapi), \
+         pytest.raises(SystemExit) as excinfo:
+        await orchestrator.run()
+    
+    assert excinfo.value.code == 0
+    assert orchestrator.report["phone_number"] == "reused"
+    orchestrator.client.assign_phone_number_connection.assert_called_once_with("num-1", "conn-existing")
+
+
+@pytest.mark.asyncio
+async def test_apply_mode_purchase_number_assignment_failure(clean_env, monkeypatch):
+    monkeypatch.setenv("DANA_PROVISION_MODE", "apply")
+    monkeypatch.setenv("DANA_PROVISION_APPLY_CONFIRM", "yes")
+    monkeypatch.setenv("DANA_CONFIRM_TELNYX_READ", "yes")
+    monkeypatch.setenv("DANA_CONFIRM_TELNYX_MUTATION", "yes")
+    monkeypatch.setenv("DANA_CONFIRM_PURCHASE_NUMBER", "yes")
+    monkeypatch.setenv("TELNYX_PURCHASE_COUNTRY", "US")
+    monkeypatch.setenv("TELNYX_SIP_USERNAME", "test-user")
+    monkeypatch.setenv("TELNYX_SIP_PASSWORD", "test-pass")
+
+    orchestrator = ProvisioningOrchestrator()
+    orchestrator.client.list_outbound_voice_profiles = AsyncMock(return_value=[{"id": "vp-existing", "name": "dana-voice-profile"}])
+    orchestrator.client.list_credential_connections = AsyncMock(return_value=[{
+        "id": "conn-existing",
+        "connection_name": "dana-sip-connection",
+        "username": "test-user",
+        "outbound_voice_profile_id": "vp-existing"
+    }])
+    orchestrator.client.list_phone_numbers = AsyncMock(side_effect=[
+        [],  # initial search
+        [{"id": "num-new", "phone_number": "+15559998888"}]  # verification call after order
+    ])
+
+    orchestrator.client.search_available_phone_numbers = AsyncMock(return_value=[{"phone_number": "+15559998888"}])
+    orchestrator.client.purchase_phone_number = AsyncMock(return_value={"id": "order-1"})
+
+    # assign_phone_number_connection fails (returns None)
+    orchestrator.client.assign_phone_number_connection = AsyncMock(return_value=None)
+
+    with pytest.raises(SystemExit) as excinfo:
+        await orchestrator.run()
+    assert excinfo.value.code == 1
+    assert orchestrator.report["phone_number"] == "failed"
+
+
+@pytest.mark.asyncio
+async def test_apply_mode_purchase_number_assignment_success(clean_env, monkeypatch, tmp_path):
+    monkeypatch.setenv("DANA_PROVISION_MODE", "apply")
+    monkeypatch.setenv("DANA_PROVISION_APPLY_CONFIRM", "yes")
+    monkeypatch.setenv("DANA_CONFIRM_TELNYX_READ", "yes")
+    monkeypatch.setenv("DANA_CONFIRM_TELNYX_MUTATION", "yes")
+    monkeypatch.setenv("DANA_CONFIRM_PURCHASE_NUMBER", "yes")
+    monkeypatch.setenv("TELNYX_PURCHASE_COUNTRY", "US")
+    monkeypatch.setenv("TELNYX_SIP_USERNAME", "test-user")
+    monkeypatch.setenv("TELNYX_SIP_PASSWORD", "test-pass")
+
+    orchestrator = ProvisioningOrchestrator()
+    orchestrator.client.list_outbound_voice_profiles = AsyncMock(return_value=[{"id": "vp-existing", "name": "dana-voice-profile"}])
+    orchestrator.client.list_credential_connections = AsyncMock(return_value=[{
+        "id": "conn-existing",
+        "connection_name": "dana-sip-connection",
+        "username": "test-user",
+        "outbound_voice_profile_id": "vp-existing"
+    }])
+    orchestrator.client.list_phone_numbers = AsyncMock(side_effect=[
+        [],  # initial search
+        [{"id": "num-new", "phone_number": "+15559998888"}]  # verification call after order
+    ])
+
+    orchestrator.client.search_available_phone_numbers = AsyncMock(return_value=[{"phone_number": "+15559998888"}])
+    orchestrator.client.purchase_phone_number = AsyncMock(return_value={"id": "order-1"})
+
+    # assign_phone_number_connection succeeds (returns truthy)
+    orchestrator.client.assign_phone_number_connection = AsyncMock(return_value={"id": "num-new"})
+
+    # Mock LiveKit API client and trunk checking (reuse)
+    mock_trunk = MagicMock()
+    mock_trunk.sip_trunk_id = "lk-trunk-existing"
+    mock_trunk.name = "Dana Telnyx Outbound Trunk"
+    mock_trunk.address = "sip.telnyx.com"
+    mock_trunk.numbers = ["+15559998888"]
+    
+    mock_list_response = MagicMock()
+    mock_list_response.results = [mock_trunk]
+    
+    mock_lkapi = MagicMock()
+    mock_lkapi.sip = MagicMock()
+    mock_lkapi.sip.list_sip_outbound_trunk = AsyncMock(return_value=mock_list_response)
+    mock_lkapi.aclose = AsyncMock()
+
+    monkeypatch.setattr(orchestrator, "_determine_env_file", lambda: str(tmp_path / "provisioned.env"))
+
+    with patch("livekit.api.LiveKitAPI", return_value=mock_lkapi), \
+         pytest.raises(SystemExit) as excinfo:
+        await orchestrator.run()
+    
+    assert excinfo.value.code == 0
+    assert orchestrator.report["phone_number"] == "purchased"

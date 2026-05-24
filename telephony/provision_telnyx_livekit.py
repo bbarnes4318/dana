@@ -594,6 +594,27 @@ class ProvisioningOrchestrator:
                     return
 
             res_details["outbound_number"] = num_val
+
+            # Check connection assignment
+            current_conn_id = details.get("connection_id")
+            if current_conn_id != res_details["connection_id"]:
+                if self.config.dana_confirm_telnyx_mutation:
+                    logger.info("Assigning phone number ID %s to connection ID %s...", res_details["phone_number_id"], res_details["connection_id"])
+                    assign_res = await self.client.assign_phone_number_connection(res_details["phone_number_id"], res_details["connection_id"])
+                    if not assign_res:
+                        logger.error("Failed to assign phone number to SIP connection.")
+                        self.report["phone_number"] = "failed"
+                        self.print_report("failed_api_error")
+                        sys.exit(1)
+                        return
+                else:
+                    logger.error("Phone number ID %s is not assigned to connection ID %s, and mutation is not confirmed.", res_details["phone_number_id"], res_details["connection_id"])
+                    self.report["phone_number"] = "failed"
+                    self.report["operator_action"] = f"Phone number ID {res_details['phone_number_id']} is not assigned to connection ID {res_details['connection_id']}. Assign it in Telnyx dashboard, or enable DANA_CONFIRM_TELNYX_MUTATION=yes."
+                    self.print_report("failed_requires_operator_action")
+                    sys.exit(1)
+                    return
+
             logger.info("Successfully verified Phone Number ID. Number is: %s", num_val)
             self.report["phone_number"] = "reused"
 
@@ -725,7 +746,13 @@ class ProvisioningOrchestrator:
                             
                             # Assign number to SIP connection
                             logger.info("Assigning purchased number %s to connection...", res_details["outbound_number"])
-                            await self.client.assign_phone_number_connection(res_details["phone_number_id"], res_details["connection_id"])
+                            assign_res = await self.client.assign_phone_number_connection(res_details["phone_number_id"], res_details["connection_id"])
+                            if not assign_res:
+                                logger.error("Failed to assign purchased phone number to SIP connection.")
+                                self.report["phone_number"] = "failed"
+                                self.print_report("failed_api_error")
+                                sys.exit(1)
+                                return
                             self.report["phone_number"] = "purchased"
                         else:
                             # Strict requirement: Fail if purchased number is not yet visible/provisioned.
