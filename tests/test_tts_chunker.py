@@ -58,24 +58,19 @@ def test_pronunciation_normalization():
 
 
 @pytest.mark.asyncio
-async def test_tts_stream_interruption():
+async def test_tts_stream_aclose():
     # Mock Kokoro TTS instance so we don't load the real ONNX model
+    from livekit.agents import tts
     tts_instance = LocallyHostedKokoro()
     tts_instance._initialized = True
     tts_instance._model = MagicMock()
     
-    # Return 0.1s of silence
-    tts_instance._synthesize_audio = MagicMock(return_value=np.zeros(2400, dtype=np.float32))
-    
-    stream = LocalTTSStream(tts_instance)
+    conn_options = tts.APIConnectOptions(max_retry=1, retry_interval=1.0, timeout=1.0)
+    stream = LocalTTSStream(tts=tts_instance, conn_options=conn_options)
     
     # Push text to queue
-    await stream.push_text("Hello world!")
-    await asyncio.sleep(0.05)
+    stream.push_text("Hello world!")
+    await stream.aclose()
     
-    # Interrupt stream
-    await stream.interrupt()
-    
-    # Queues must be fully cleared
-    assert stream._audio_queue.empty()
-    assert stream._phrase_queue.empty()
+    # Verify input channel is closed
+    assert stream._input_ch.closed

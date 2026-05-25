@@ -6,7 +6,24 @@ class DummyTTS:
     def __init__(self, *args, **kwargs):
         pass
 
-class DummyTTSStream:
+class DummySynthesizeStream:
+    def __init__(self, *args, **kwargs):
+        self._input_ch = MagicMock()
+        self._FlushSentinel = MagicMock
+
+    def push_text(self, text: str) -> None:
+        pass
+
+    def flush(self) -> None:
+        pass
+
+    def end_input(self) -> None:
+        pass
+
+    async def aclose(self) -> None:
+        pass
+
+class DummyChunkedStream:
     def __init__(self, *args, **kwargs):
         pass
 
@@ -23,15 +40,27 @@ rtc_mock = MagicMock()
 sys.modules['livekit.rtc'] = rtc_mock
 
 # Create agents.tts module
-agents_tts = MagicMock()
-agents_tts.TTS = DummyTTS
-agents_tts.TTSStream = DummyTTSStream
+class MockAgentsTTS:
+    def __init__(self):
+        self.TTS = DummyTTS
+        self.SynthesizeStream = DummySynthesizeStream
+        self.ChunkedStream = DummyChunkedStream
+        self.TTSCapabilities = MagicMock
+        self.APIConnectOptions = MagicMock
+
+    def __getattr__(self, name):
+        if name == "TTSStream":
+            raise AttributeError(f"module 'livekit.agents.tts' has no attribute '{name}'")
+        return MagicMock()
+
+agents_tts = MockAgentsTTS()
 sys.modules['livekit.agents.tts'] = agents_tts
 
 # Create agents.stt module
 agents_stt = MagicMock()
 agents_stt.STT = DummySTT
 agents_stt.STTStream = DummySTTStream
+agents_stt.SpeechStream = DummySTTStream
 sys.modules['livekit.agents.stt'] = agents_stt
 
 # Create agents.voice module

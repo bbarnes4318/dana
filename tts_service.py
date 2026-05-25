@@ -10,10 +10,12 @@ import time
 from typing import AsyncIterator, Optional, List
 from dataclasses import dataclass
 import numpy as np
+import os
+import uuid
 
 from kokoro_onnx import Kokoro
 from livekit import rtc
-from livekit.agents import tts
+from livekit.agents import tts, APIConnectOptions
 
 logger = logging.getLogger(__name__)
 
@@ -151,8 +153,12 @@ class LocallyHostedKokoro(tts.TTS):
     """
     
     def __init__(self, config: Optional[TTSConfig] = None):
-        super().__init__()
         self.config = config or TTSConfig()
+        super().__init__(
+            capabilities=tts.TTSCapabilities(streaming=True),
+            sample_rate=self.config.sample_rate,
+            num_channels=1,
+        )
         self._model: Optional[Kokoro] = None
         self._initialized = False
         self._lock = asyncio.Lock()
@@ -167,13 +173,25 @@ class LocallyHostedKokoro(tts.TTS):
             if self._initialized:
                 return
                 
-            logger.info(f"Loading Kokoro TTS model: {self.config.model_name}...")
+            model_path = os.environ.get("KOKORO_MODEL_PATH", "/root/.cache/kokoro/kokoro-v1.0.onnx")
+            voices_path = os.environ.get("KOKORO_VOICES_PATH", "/root/.cache/kokoro/voices-v1.0.bin")
+            
+            # Local fallback for tests
+            if not os.path.exists(model_path):
+                if os.path.exists("models/kokoro-v1.0.onnx"):
+                    model_path = "models/kokoro-v1.0.onnx"
+                    voices_path = "models/voices-v1.0.bin"
+                else:
+                    model_path = self.config.model_name
+                    voices_path = "voices.bin"
+                    
+            logger.info(f"Loading Kokoro TTS model: {model_path} with voices: {voices_path}...")
             start_time = time.time()
             
             loop = asyncio.get_event_loop()
             self._model = await loop.run_in_executor(
                 None,
-                lambda: Kokoro(self.config.model_name)
+                lambda: Kokoro(model_path, voices_path)
             )
             
             load_time = time.time() - start_time
@@ -202,154 +220,136 @@ class LocallyHostedKokoro(tts.TTS):
         audio = await loop.run_in_executor(None, _run_synthesis)
         return audio
     
-    def _numpy_to_audio_frame(self, audio: np.ndarray) -> rtc.AudioFrame:
-        audio_int16 = (audio * 32767).astype(np.int16)
-        frame = rtc.AudioFrame(
-            data=audio_int16.tobytes(),
-            sample_rate=self.config.sample_rate,
-            num_channels=1,
-            samples_per_channel=len(audio_int16)
+    def synthesize(
+        self,
+        text: str,
+        *,
+        conn_options: Optional[APIConnectOptions] = None,
+    ) -> tts.ChunkedStream:
+        conn_options = conn_options or APIConnectOptions(
+            max_retry=3, retry_interval=2.0, timeout=10.0
         )
-        return frame
+        return LocalChunkedStream(
+            tts=self,
+            text=text,
+            conn_options=conn_options,
+        )
     
-    async def synthesize(self, text: str) -> AsyncIterator[rtc.AudioFrame]:
-        await self._ensure_initialized()
-        audio = await self._synthesize_audio(text)
-        
-        if len(audio) > 0:
-            chunk_samples = int(self.config.sample_rate * 0.02)  # 20ms
-            for i in range(0, len(audio), chunk_samples):
-                chunk = audio[i:i + chunk_samples]
-                if len(chunk) > 0:
-                    yield self._numpy_to_audio_frame(chunk)
-    
-    def stream(self) -> "LocalTTSStream":
-        stream = LocalTTSStream(self)
+    def stream(
+        self,
+        *,
+        conn_options: Optional[APIConnectOptions] = None,
+    ) -> "LocalTTSStream":
+        conn_options = conn_options or APIConnectOptions(
+            max_retry=3, retry_interval=2.0, timeout=10.0
+        )
+        stream = LocalTTSStream(tts=self, conn_options=conn_options)
         self._active_stream = stream
         return stream
 
 
-class LocalTTSStream(tts.TTSStream):
+class LocalTTSStream(tts.SynthesizeStream):
     """
     Streaming TTS implementation for phrase-by-phrase synthesis.
     """
     
-    def __init__(self, tts_instance: LocallyHostedKokoro):
-        super().__init__()
-        self._tts = tts_instance
+    def __init__(self, *, tts: LocallyHostedKokoro, conn_options: APIConnectOptions):
+        super().__init__(tts=tts, conn_options=conn_options)
+        self._tts = tts
         self._chunker = FastPhraseChunker()
-        self._audio_queue: asyncio.Queue[Optional[rtc.AudioFrame]] = asyncio.Queue()
-        self._phrase_queue: asyncio.Queue[Optional[str]] = asyncio.Queue()
-        self._synthesis_task: Optional[asyncio.Task] = None
-        self._process_loop_task: Optional[asyncio.Task] = None
-        self._closed = False
-        self._interrupted = False
         
-        # Start background phrase processing loop
-        self._process_loop_task = asyncio.create_task(self._process_phrases_loop())
-        
-    async def _process_phrases_loop(self):
-        try:
-            while not self._interrupted and not self._closed:
-                phrase = await self._phrase_queue.get()
-                if phrase is None:
-                    await self._audio_queue.put(None)
-                    break
-                    
-                await self._synthesize_phrase(phrase)
-                self._phrase_queue.task_done()
-        except asyncio.CancelledError:
-            pass
-        except Exception as e:
-            logger.error(f"Error in TTS process loop: {e}")
-            
-    async def push_text(self, text: str):
-        if self._closed or self._interrupted:
-            return
-            
-        phrases = self._chunker.feed(text)
-        for phrase in phrases:
+    async def _run(self, output_emitter: tts.AudioEmitter) -> None:
+        request_id = str(uuid.uuid4())
+        output_emitter.initialize(
+            request_id=request_id,
+            sample_rate=self._tts.config.sample_rate,
+            num_channels=1,
+            mime_type="audio/pcm",
+            stream=True,
+        )
+
+        segment_id = None
+
+        async def _process_phrase(phrase: str):
+            nonlocal segment_id
             normalized = normalize_text(phrase)
-            if normalized:
-                await self._phrase_queue.put(normalized)
-    
-    async def _synthesize_phrase(self, phrase: str):
-        if self._interrupted:
-            return
+            if not normalized:
+                return
             
+            if segment_id is None:
+                segment_id = str(uuid.uuid4())
+                output_emitter.start_segment(segment_id=segment_id)
+
+            # Synthesize audio to numpy array
+            audio = await self._tts._synthesize_audio(normalized)
+            if len(audio) > 0:
+                audio_int16 = (audio * 32767).astype(np.int16)
+                output_emitter.push(audio_int16.tobytes())
+
         try:
-            start_time = time.time()
-            self._synthesis_task = asyncio.create_task(self._tts._synthesize_audio(phrase))
-            audio = await self._synthesis_task
+            async for input_data in self._input_ch:
+                if isinstance(input_data, str):
+                    phrases = self._chunker.feed(input_data)
+                    for p in phrases:
+                        await _process_phrase(p)
+                elif isinstance(input_data, self._FlushSentinel):
+                    phrases = self._chunker.flush()
+                    for p in phrases:
+                        await _process_phrase(p)
+                    if segment_id is not None:
+                        output_emitter.end_segment()
+                        segment_id = None
             
-            if len(audio) > 0 and not self._interrupted:
-                chunk_samples = int(self._tts.config.sample_rate * 0.02)
-                for i in range(0, len(audio), chunk_samples):
-                    if self._interrupted:
-                        break
-                    chunk = audio[i:i + chunk_samples]
-                    if len(chunk) > 0:
-                        frame = self._tts._numpy_to_audio_frame(chunk)
-                        await self._audio_queue.put(frame)
-                        
-            latency = (time.time() - start_time) * 1000
-            logger.debug(f"Phrase synthesized: '{phrase[:30]}...' ({latency:.0f}ms)")
-            
+            # Input channel closed (EOF)
+            phrases = self._chunker.flush()
+            for p in phrases:
+                await _process_phrase(p)
+            if segment_id is not None:
+                output_emitter.end_segment()
+                segment_id = None
+
         except asyncio.CancelledError:
-            logger.debug("TTS phrase synthesis was cancelled")
+            logger.debug("TTS stream _run cancelled")
+            raise
         except Exception as e:
-            logger.error(f"Synthesis error: {e}")
-    
-    async def flush(self):
-        if self._closed or self._interrupted:
-            return
-            
-        phrases = self._chunker.flush()
-        for phrase in phrases:
-            normalized = normalize_text(phrase)
-            if normalized:
-                await self._phrase_queue.put(normalized)
-                
-        await self._phrase_queue.put(None)
-    
-    async def __anext__(self) -> rtc.AudioFrame:
-        if self._interrupted:
-            raise StopAsyncIteration
-            
-        frame = await self._audio_queue.get()
-        if frame is None or self._interrupted:
-            raise StopAsyncIteration
-        return frame
-    
-    def __aiter__(self):
-        return self
-    
-    async def interrupt(self):
-        logger.info("TTS interrupted - clearing audio and phrase buffers")
-        self._interrupted = True
-        
-        # Cancel the loops
-        if self._process_loop_task and not self._process_loop_task.done():
-            self._process_loop_task.cancel()
-            
-        if self._synthesis_task and not self._synthesis_task.done():
-            self._synthesis_task.cancel()
-            
-        # Clear queues
-        while not self._audio_queue.empty():
-            try:
-                self._audio_queue.get_nowait()
-            except asyncio.QueueEmpty:
-                break
-                
-        while not self._phrase_queue.empty():
-            try:
-                self._phrase_queue.get_nowait()
-            except asyncio.QueueEmpty:
-                break
-                
-    async def aclose(self):
-        self._closed = True
-        await self.flush()
+            logger.error(f"Error in TTS stream _run: {e}")
+            raise
+
+    async def aclose(self) -> None:
+        await super().aclose()
         if self._tts._active_stream is self:
             self._tts._active_stream = None
+
+
+class LocalChunkedStream(tts.ChunkedStream):
+    """
+    Chunked TTS implementation for synthesizing a full block of text.
+    """
+    def __init__(self, *, tts: LocallyHostedKokoro, text: str, conn_options: APIConnectOptions):
+        super().__init__(tts=tts, text=text, conn_options=conn_options)
+        self._tts = tts
+        self._text = text
+
+    async def _run(self, output_emitter: tts.AudioEmitter) -> None:
+        request_id = str(uuid.uuid4())
+        output_emitter.initialize(
+            request_id=request_id,
+            sample_rate=self._tts.config.sample_rate,
+            num_channels=1,
+            mime_type="audio/pcm",
+            stream=False,
+        )
+
+        try:
+            normalized = normalize_text(self._text)
+            if normalized:
+                audio = await self._tts._synthesize_audio(normalized)
+                if len(audio) > 0:
+                    audio_int16 = (audio * 32767).astype(np.int16)
+                    output_emitter.push(audio_int16.tobytes())
+        except asyncio.CancelledError:
+            logger.debug("TTS chunked stream _run cancelled")
+            raise
+        except Exception as e:
+            logger.error(f"Error in TTS chunked stream _run: {e}")
+            raise
