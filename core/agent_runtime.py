@@ -37,6 +37,11 @@ from core.runtime_events import (
     ToolTriggeredEvent,
     ValidationFailedEvent,
 )
+from voice.backchannel_policy import BackchannelPolicy, check_confusion_or_hostility
+from voice.dialogue_style import DialogueStyleController
+from voice.repetition_guard import RepetitionGuard
+from voice.prosody_controller import ProsodyController
+from voice.spoken_output_auditor import SpokenOutputAuditor
 
 logger = logging.getLogger(__name__)
 
@@ -92,6 +97,13 @@ class AgentRuntime:
         self.response_builder = ResponseBuilder()
         
         self.events: list[RuntimeEvent] = []
+
+        # Human-likeness layer components
+        self.backchannel_policy = BackchannelPolicy()
+        self.dialogue_style_controller = DialogueStyleController()
+        self.repetition_guard = RepetitionGuard()
+        self.prosody_controller = ProsodyController()
+        self.spoken_output_auditor = SpokenOutputAuditor()
 
         # Lazy-import state handlers to prevent circular dependencies
         from states.opening import OpeningState
@@ -313,7 +325,7 @@ class AgentRuntime:
         redacted = self.pii_redactor.redact(agent_response)
         agent_response = redacted.redacted_text
 
-        # 11. Run output validation and compliance checks
+        # 11. Run output validation and compliance checks (First Validation)
         compliance_res = self.compliance_filter.check(agent_response)
         output_val_res = self.output_validator.validate(agent_response, call_state.current_stage.value)
         
@@ -341,6 +353,83 @@ class AgentRuntime:
                         "A licensed agent would be the best person to cover pricing and approval. "
                         "I am just helping to see if you qualify. May I ask a few quick questions?"
                     )
+
+        # 11b. Apply Human-likeness layer
+        # A. Prepend backchannel
+        backchannel = self.backchannel_policy.select_backchannel(
+            current_stage=call_state.current_stage.value,
+            user_text=user_text,
+            turn_count=call_state.turn_count,
+            objection_handled=objection_intent is not None,
+        )
+        if backchannel:
+            agent_response = f"{backchannel} {agent_response}"
+
+        # B. Clean "Perfect" usage
+        is_confused, is_hostile = check_confusion_or_hostility(user_text)
+        agent_response = self.backchannel_policy.clean_perfect_usage(
+            text=agent_response,
+            current_stage=call_state.current_stage.value,
+            user_text=user_text,
+            objection_handled=objection_intent is not None,
+            is_confused=is_confused,
+            is_hostile=is_hostile,
+        )
+
+        # C. Dialogue Style and Brevity
+        agent_response = self.dialogue_style_controller.process(
+            text=agent_response,
+            stage=call_state.current_stage.value,
+        )
+
+        # D. Repetition Guard
+        agent_response = self.repetition_guard.filter_response(
+            text=agent_response,
+            is_objection=objection_intent is not None,
+        )
+
+        # E. Prosody Controller (TTS formatting)
+        agent_response = self.prosody_controller.format_for_tts(agent_response)
+
+        # F. Second Validation Check (ComplianceFilter and OutputValidator again)
+        compliance_res_2 = self.compliance_filter.check(agent_response)
+        output_val_res_2 = self.output_validator.validate(agent_response, call_state.current_stage.value)
+
+        def get_stage_fallback(stage: str) -> str:
+            stage_lower = stage.lower()
+            if stage_lower in ("dnc", "disqualified"):
+                return "Understood. I’ll make a note of that. Take care."
+            elif stage_lower == "callback":
+                return "No problem. Would later today or tomorrow be better?"
+            elif stage_lower in ("transfer_consent", "transfer_ready"):
+                return "Perfect. Stay right there for me."
+            else:
+                return "Okay."
+
+        # If modified response fails compliance/output validation, or is empty, use stage fallback
+        if not agent_response.strip() or not compliance_res_2.is_safe or not output_val_res_2.is_valid:
+            agent_response = get_stage_fallback(call_state.current_stage.value)
+            compliance_ok = False
+            issues_2 = []
+            if not compliance_res_2.is_safe:
+                issues_2.extend(compliance_res_2.violations)
+            if not output_val_res_2.is_valid:
+                issues_2.extend(output_val_res_2.issues)
+            if issues_2:
+                self._publish_event(
+                    ValidationFailedEvent(
+                        call_id=lead.call_id,
+                        response=agent_response,
+                        validator_type="compliance" if not compliance_res_2.is_safe else "formatting",
+                        issues=issues_2,
+                    )
+                )
+
+        # G. Spoken Output Auditor
+        violations = self.spoken_output_auditor.audit(agent_response, call_state.current_stage.value)
+        if violations:
+            logger.warning("Spoken output auditor found violations in final response: %s. Using stage-specific fallback.", violations)
+            agent_response = get_stage_fallback(call_state.current_stage.value)
 
         # 12. Determine and fire recommended actions/tools
         tool_results = []
