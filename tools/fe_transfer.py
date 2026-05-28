@@ -43,7 +43,9 @@ class FeTransferTool(BaseTool):
         room_name = params.get("room_name") or params.get("call_id") or "unknown_room"
         prospect_identity = params.get("prospect_identity") or params.get("lead_name") or "Prospect"
         licensed_agent_phone_number = params.get("licensed_agent_phone_number")
-        call_summary = str(params.get("call_summary") or params.get("lead_summary") or "Lead qualified")
+        call_summary = params.get("call_summary") or params.get("lead_summary")
+        if not isinstance(call_summary, dict):
+            call_summary = {"notes": [str(call_summary)]} if call_summary else {}
         transfer_reason = params.get("transfer_reason") or "Lead qualified for final expense"
 
         logger.info("FeTransferTool: Executing transfer for room %s", room_name)
@@ -64,7 +66,9 @@ class FeTransferTool(BaseTool):
                     "success": res.success,
                     "reason": res.reason,
                     "transfer_mode": res.transfer_mode,
-                    "call_summary": res.call_summary
+                    "agent_id": res.agent_id,
+                    "call_summary": res.call_summary,
+                    "provider_call_id": res.provider_call_id
                 },
                 message=f"Transfer execution: success={res.success}, reason={res.reason}",
                 error=None if res.success else res.reason

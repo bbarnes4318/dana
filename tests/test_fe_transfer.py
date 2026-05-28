@@ -59,16 +59,21 @@ async def test_fe_transfer_unconfigured_phone(monkeypatch):
     # Ensure agent phone is unconfigured or replace_me
     monkeypatch.delenv("LICENSED_AGENT_PHONE_NUMBER", raising=False)
     
+    from telephony.fe_transfer import _agent_store
+    # Clear any default agents in the store
+    _agent_store._agents.clear()
+    
     res = await fe_transfer(
         room_name="test_room",
         prospect_identity="John Doe",
         licensed_agent_phone_number=None,
-        call_summary="Qualified lead summary",
+        call_summary={"call_id": "test_room", "lead_state": None},
         transfer_reason="Lead qualified"
     )
     
     assert res.success is False
-    assert res.reason == "licensed_agent_phone_number_not_configured"
+    assert res.transfer_mode == "callback_required"
+    assert res.reason in ("missing_state_for_licensed_routing", "no_agent_available")
 
 
 @pytest.mark.asyncio
@@ -76,16 +81,21 @@ async def test_fe_transfer_not_confirmed(monkeypatch):
     monkeypatch.setenv("LICENSED_AGENT_PHONE_NUMBER", "+15551234567")
     monkeypatch.setenv("DANA_CONFIRM_TRANSFER_CALL", "no")
     
+    # Reload explicit agent if any, or clear first
+    from telephony.fe_transfer import _agent_store
+    _agent_store._agents.clear()
+    
     res = await fe_transfer(
         room_name="test_room",
         prospect_identity="John Doe",
-        licensed_agent_phone_number=None,
-        call_summary="Qualified lead summary",
+        licensed_agent_phone_number="+15551234567",
+        call_summary={"call_id": "test_room", "lead_state": None},
         transfer_reason="Lead qualified"
     )
     
     assert res.success is False
     assert res.reason == "transfer_not_confirmed"
+    assert res.transfer_mode == "dry_run"
 
 
 @pytest.mark.asyncio
@@ -93,16 +103,21 @@ async def test_fe_transfer_not_implemented(monkeypatch):
     monkeypatch.setenv("LICENSED_AGENT_PHONE_NUMBER", "+15551234567")
     monkeypatch.setenv("DANA_CONFIRM_TRANSFER_CALL", "yes")
     
+    # Clear and set up the agent
+    from telephony.fe_transfer import _agent_store
+    _agent_store._agents.clear()
+    
     res = await fe_transfer(
         room_name="test_room",
         prospect_identity="John Doe",
-        licensed_agent_phone_number=None,
-        call_summary="Qualified lead summary",
+        licensed_agent_phone_number="+15551234567",
+        call_summary={"call_id": "test_room", "lead_state": None},
         transfer_reason="Lead qualified"
     )
     
     assert res.success is False
-    assert res.reason == "fe_transfer_not_implemented"
+    assert res.reason == "provider_not_configured"
+    assert res.transfer_mode == "failed"
 
 
 @pytest.mark.asyncio
@@ -130,6 +145,6 @@ async def test_runtime_transfer_failure_transitions_to_callback(runtime: AgentRu
     assert result.stage == "callback"
 
     # 2. Agent response should be overridden to offer a callback
-    assert "unable to connect" in result.agent_response
-    assert "schedule a convenient time" in result.agent_response
+    assert "couldn't get the licensed agent" in result.agent_response.lower()
+    assert "later today or tomorrow" in result.agent_response.lower()
 

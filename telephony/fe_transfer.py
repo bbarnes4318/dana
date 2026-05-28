@@ -1,12 +1,20 @@
 """
-Final Expense Licensed Agent Call Transfer
-Core transfer module for bridging qualified leads to a licensed insurance agent.
+Final Expense Licensed Agent Call Transfer Orchestrator
+Uses TransferRouter to coordinate warm bridging, cold transferring, and callback fallbacks.
 """
+
+from __future__ import annotations
 
 import os
 import logging
 from dataclasses import dataclass
-from typing import Optional
+from typing import Optional, Any
+
+from telephony.agent_availability import LicensedAgent, InMemoryAgentAvailabilityStore
+from telephony.handoff_summary import build_handoff_summary
+from telephony.transfer_router import TransferRouter
+from telephony.warm_bridge import LiveKitWarmBridgeProvider
+from telephony.cold_transfer import TelnyxColdTransferProvider
 
 # Setup logger
 logger = logging.getLogger(__name__)
@@ -17,70 +25,106 @@ class FeTransferResult:
     """Outcome status returned by the fe_transfer workflow."""
     success: bool
     reason: str
-    transfer_mode: str
+    transfer_mode: str  # "warm_bridge" | "cold_transfer" | "failed" | "callback_required" | "dry_run"
+    agent_id: Optional[str] = None
     call_summary: Optional[str] = None
+    provider_call_id: Optional[str] = None
+
+
+# Package-level defaults for routing
+_agent_store = InMemoryAgentAvailabilityStore()
+
+# Populate default agent from environment if set
+_default_agent_num = os.getenv("LICENSED_AGENT_PHONE_NUMBER")
+if _default_agent_num and _default_agent_num != "replace_me":
+    _agent_store.add_agent(
+        LicensedAgent(
+            agent_id="default-agent",
+            name="Default Licensed Agent",
+            phone_number=_default_agent_num,
+            licensed_states=["*"],
+            status="available"
+        )
+    )
+
+_warm_bridge_provider = LiveKitWarmBridgeProvider()
+_cold_transfer_provider = TelnyxColdTransferProvider()
+_transfer_router = TransferRouter(_agent_store)
 
 
 async def fe_transfer(
     room_name: str,
     prospect_identity: Optional[str],
     licensed_agent_phone_number: Optional[str],
-    call_summary: str,
+    call_summary: dict[str, Any],
     transfer_reason: str,
 ) -> FeTransferResult:
-    """Bridge qualified prospect to a licensed agent.
-    
-    feTransfer is currently a safe failure stub only. Real transfer/bridge is not implemented yet.
-    
-    Checks licensed agent number, validates DANA_CONFIRM_TRANSFER_CALL gate,
-    and attempts SIP transfer or returns a safe placeholder failure.
-    """
-    logger.info("Initializing fe_transfer for room: %s", room_name)
+    """Bridge qualified prospect to a licensed agent using TransferRouter routing logic."""
+    logger.info("Initializing fe_transfer routing for room: %s", room_name)
 
-    # 1. Resolve agent phone number
-    target_agent_num = licensed_agent_phone_number or os.getenv("LICENSED_AGENT_PHONE_NUMBER")
-    if not target_agent_num or target_agent_num == "replace_me":
-        logger.error("Licensed agent phone number is not configured.")
+    # 1. Update/Add agent dynamically if a phone number was passed explicitly
+    if licensed_agent_phone_number and licensed_agent_phone_number != "replace_me":
+        agent = await _agent_store.get_available_agent(None)
+        if not agent or agent.phone_number != licensed_agent_phone_number:
+            _agent_store.add_agent(
+                LicensedAgent(
+                    agent_id="explicit-agent",
+                    name="Explicit Licensed Agent",
+                    phone_number=licensed_agent_phone_number,
+                    licensed_states=["*"],
+                    status="available"
+                )
+            )
+
+    # 2. Execute routing decision
+    decision = await _transfer_router.route_transfer(call_summary)
+    logger.info("Transfer routing decision: mode=%s, success=%s", decision.transfer_mode, decision.success)
+
+    if decision.transfer_mode == "warm_bridge" and decision.agent:
+        # Build internal agent summary
+        summary_text = build_handoff_summary(call_summary)
+        
+        # Execute warm bridge
+        res = await _warm_bridge_provider.initiate_warm_bridge(
+            room_name=room_name,
+            agent=decision.agent,
+            summary=summary_text
+        )
+        
+        # If warm bridge execution failed, release agent
+        if not res.success:
+            await _agent_store.release_agent(decision.agent.agent_id, call_summary.get("call_id", "unknown"))
+
         return FeTransferResult(
-            success=False,
-            reason="licensed_agent_phone_number_not_configured",
-            transfer_mode="failed",
-            call_summary=call_summary
+            success=res.success,
+            reason=res.reason,
+            transfer_mode=res.transfer_mode or "warm_bridge",
+            agent_id=decision.agent.agent_id,
+            call_summary=summary_text,
+            provider_call_id=res.provider_call_id
         )
 
-    # 2. Check safety gate
-    confirm_transfer = os.getenv("DANA_CONFIRM_TRANSFER_CALL", "no").strip().lower() == "yes"
-    if not confirm_transfer:
-        logger.warning("Call transfer not initiated (requires DANA_CONFIRM_TRANSFER_CALL=yes).")
+    elif decision.transfer_mode == "cold_transfer" and decision.phone_number:
+        # Execute cold transfer
+        res = await _cold_transfer_provider.initiate_cold_transfer(
+            room_name=room_name,
+            phone_number=decision.phone_number
+        )
         return FeTransferResult(
-            success=False,
-            reason="transfer_not_confirmed",
-            transfer_mode="dry_run",
-            call_summary=call_summary
+            success=res.success,
+            reason=res.reason,
+            transfer_mode=res.transfer_mode or "cold_transfer",
+            agent_id=None,
+            call_summary=None,
+            provider_call_id=res.provider_call_id
         )
 
-    # 3. SIP/LiveKit Transfer Execution (Placeholder)
-    logger.info("Transfer attempt failed: real transfer logic is not yet implemented.")
-    
-    # TODO: Implement cold transfer / SIP REFER
-    # - Send a SIP REFER request to Telnyx using the LiveKit SIP/Participant API.
-    # - This disconnects the current voice-agent and connects the caller straight to the agent.
-    
-    # TODO: Implement warm transfer / Licensed Agent Bridge
-    # - Place an outbound call to the licensed agent's number via LiveKit.
-    # - Place both the prospect and the licensed agent in the same room.
-    # - The agent introduces themselves, and the voice-agent then leaves the room.
-    
-    # TODO: Implement Hopwhistle Licensed Agent Browser Join
-    # - Send a webhook notification to Hopwhistle with room_name and call_id.
-    # - Hopwhistle prompts the browser client, letting a licensed agent click and enter the WebRTC room directly.
-    
-    # TODO: Callback Fallback
-    # - When transfer fails (e.g. no agents available), schedule a callback.
-    
+    # Fallback callback required
     return FeTransferResult(
         success=False,
-        reason="fe_transfer_not_implemented",
-        transfer_mode="failed",
-        call_summary=call_summary
+        reason=decision.reason or "no_agent_available",
+        transfer_mode="callback_required",
+        agent_id=None,
+        call_summary=None,
+        provider_call_id=None
     )

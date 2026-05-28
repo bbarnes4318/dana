@@ -32,6 +32,7 @@ class LeadProfile(BaseModel):
     transfer_consent_confirmed: Optional[bool] = None
     callback_time_local: Optional[str] = None
     callback_timezone: Optional[str] = None
+    lead_state: Optional[str] = None
 
     # Qualification fields (Legacy / optional)
     age: Optional[int] = None
@@ -111,6 +112,7 @@ class LeadProfile(BaseModel):
             "transfer_consent_confirmed": self.transfer_consent_confirmed,
             "callback_time_local": self.callback_time_local,
             "callback_timezone": self.callback_timezone,
+            "lead_state": self.lead_state,
             "callback_requested": self.callback_requested,
             "do_not_call_requested": self.do_not_call_requested,
             "disqualified_reason": self.disqualified_reason,

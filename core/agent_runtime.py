@@ -413,8 +413,8 @@ class AgentRuntime:
                         )
                         # Override agent_response to offer a callback
                         agent_response = (
-                            "I'm sorry, but it looks like we're unable to connect to a licensed agent at the moment. "
-                            "Could we schedule a convenient time to call you back?"
+                            "Looks like I couldn't get the licensed agent on the line right this second. "
+                            "I can have them call you back instead. Would later today or tomorrow work better?"
                         )
                 except Exception as exc:
                     logger.error("Error executing tool %s: %s", action.tool_name, exc)
