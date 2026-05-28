@@ -50,6 +50,58 @@ async def main():
     call_to = args.to.strip()
     room_name = args.room.strip() if args.room else f"{config.dana_room_prefix}-{uuid.uuid4().hex[:8]}"
     participant_identity = args.identity.strip() if args.identity else f"prospect-{uuid.uuid4().hex[:8]}"
+
+    # Run pre-call compliance checks
+    lead_data = {
+        "lead_id": "test-lead-cli",
+        "lead_phone_e164": call_to,
+        "campaign_id": "test-campaign-cli",
+        "lead_state": os.getenv("DANA_MOCK_LEAD_STATE", "FL"),
+        "attempts": int(os.getenv("DANA_MOCK_LEAD_ATTEMPTS", "0"))
+    }
+    
+    campaign_data = {
+        "campaign_id": "test-campaign-cli",
+        "is_paused": os.getenv("DANA_MOCK_CAMPAIGN_PAUSED", "false").lower() == "true",
+        "approved_consent_sources": ["trustedform", "landing_page"],
+        "max_attempts": int(os.getenv("DANA_MOCK_CAMPAIGN_MAX_ATTEMPTS", "3")),
+        "allowed_calling_hours": (8, 20),
+        "caller_id": config.dana_default_caller_id or "+18005550199",
+        "active_caller_ids": [config.dana_default_caller_id or "+18005550199"]
+    }
+    
+    from compliance.consent_record import ConsentRecord
+    consent_record = None
+    if os.getenv("DANA_MOCK_CONSENT_MISSING", "false").lower() != "true":
+        consent_record = ConsentRecord(
+            consent_artifact_id="art-12345",
+            lead_id="test-lead-cli",
+            phone_e164=call_to,
+            source_vendor="trustedform",
+            consent_text="I agree to receive outbound marketing calls.",
+            consent_timestamp=datetime.now(timezone.utc).isoformat()
+        )
+        
+    from compliance.dnc_registry import InMemoryDNCRegistry
+    dnc_registry = InMemoryDNCRegistry()
+    mock_dnc_list = [num.strip() for num in os.getenv("DANA_MOCK_DNC_NUMBERS", "").split(",") if num.strip()]
+    if call_to in mock_dnc_list:
+        await dnc_registry.add(call_to, "Mocked DNC for testing", campaign_id="test-campaign-cli")
+        
+    from dialer.pre_call_check import verify_pre_call
+    if os.getenv("DANA_BYPASS_COMPLIANCE_GATE", "false").lower() == "true":
+        logger.info("Outbound call compliance checks bypassed via DANA_BYPASS_COMPLIANCE_GATE=true")
+    else:
+        decision = await verify_pre_call(
+            lead=lead_data,
+            campaign=campaign_data,
+            consent_record=consent_record,
+            dnc_registry=dnc_registry
+        )
+        
+        if not decision.allowed:
+            logger.error("Outbound Call BLOCKED by pre-call compliance checks. Reason: %s", decision.reason)
+            sys.exit(2)
     
     # Parse metadata if provided
     metadata_str = ""

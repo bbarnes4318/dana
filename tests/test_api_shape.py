@@ -108,6 +108,7 @@ def test_create_sip_participant_request_fields_introspected():
 @pytest.mark.asyncio
 async def test_create_sip_participant_request_sip_number_logic():
     """Verify that CreateSIPParticipantRequest does not receive sip_number if not present in descriptor, but does if present."""
+    import os
     from unittest.mock import AsyncMock, MagicMock, patch
     from telephony import create_outbound_call
     from tests.conftest import MockDescriptor, MockCreateSIPParticipantRequest
@@ -131,7 +132,8 @@ async def test_create_sip_participant_request_sip_number_logic():
     
     with patch("argparse.ArgumentParser.parse_args", return_value=mock_args), \
          patch("telephony.create_outbound_call.TelephonyConfig", return_value=mock_config), \
-         patch("livekit.api.LiveKitAPI") as mock_lkapi_cls:
+         patch("livekit.api.LiveKitAPI") as mock_lkapi_cls, \
+         patch.dict(os.environ, {"DANA_BYPASS_COMPLIANCE_GATE": "true"}):
          
         mock_lkapi = MagicMock()
         mock_lkapi.aclose = AsyncMock()
