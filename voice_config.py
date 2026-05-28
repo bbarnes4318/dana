@@ -97,6 +97,16 @@ class VoiceConfig:
     vad_threshold: float = field(default_factory=lambda: env_float("DANA_VAD_THRESHOLD", 0.5))
     min_silence_ms: int = field(default_factory=lambda: env_int("DANA_MIN_SILENCE_MS", 180))
 
+    # ---- Hybrid STT Routing, Preprocessing, and Endpointing ----
+    stt_routing_mode: str = field(default_factory=lambda: env_str("DANA_STT_ROUTING_MODE", "local"))
+    enable_audio_preprocessing: bool = field(default_factory=lambda: env_bool("DANA_ENABLE_AUDIO_PREPROCESSING", False))
+    endpoint_mode: str = field(default_factory=lambda: env_str("DANA_ENDPOINT_MODE", "fixed"))
+    cloud_stt_on_failure: bool = field(default_factory=lambda: env_bool("DANA_CLOUD_STT_ON_FAILURE", False))
+    premium_stt_campaigns: str = field(default_factory=lambda: env_str("DANA_PREMIUM_STT_CAMPAIGNS", ""))
+    enable_pstn_bandpass: bool = field(default_factory=lambda: env_bool("DANA_ENABLE_PSTN_BANDPASS", False))
+    allow_cloud_stt_for_poor_line: bool = field(default_factory=lambda: env_bool("DANA_ALLOW_CLOUD_STT_FOR_POOR_LINE", False))
+    local_stt_max_concurrent_tasks: int = field(default_factory=lambda: env_int("DANA_LOCAL_STT_MAX_CONCURRENT_TASKS", 3))
+
     # ---- TTS ----
     tts_voice: str = field(default_factory=lambda: env_str("DANA_TTS_VOICE", "af_bella"))
     tts_speed: float = field(default_factory=lambda: env_float("DANA_TTS_SPEED", 1.03))

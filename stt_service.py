@@ -94,7 +94,12 @@ class LocallyHostedSTT(stt.STT):
     """
     
     def __init__(self, config: Optional[STTConfig] = None):
-        super().__init__()
+        super().__init__(
+            capabilities=stt.STTCapabilities(
+                streaming=True,
+                interim_results=True,
+            )
+        )
         self.config = config or STTConfig()
         self._model: Optional[WhisperModel] = None
         self._vad = SileroVAD(
@@ -166,7 +171,7 @@ class LocallyHostedSTT(stt.STT):
         transcription = await loop.run_in_executor(None, _run_transcription)
         return transcription.strip()
     
-    async def recognize(
+    async def _recognize_impl(
         self,
         buffer: utils.AudioBuffer,
         *,
@@ -190,7 +195,7 @@ class LocallyHostedSTT(stt.STT):
         return LocalSTTStream(self)
 
 
-class LocalSTTStream(stt.STTStream):
+class LocalSTTStream(stt.SpeechStream):
     """
     Queue/Event-driven streaming STT implementation with VAD speech boundary detection.
     """
@@ -302,20 +307,30 @@ class LocalSTTStream(stt.STTStream):
 def create_stt(config: VoiceConfig) -> stt.STT:
     """
     Factory function for STT:
-    Allows hot-swapping Deepgram STT or local Whisper STT based on configuration.
+    Allows hot-swapping Deepgram STT, local Whisper STT, or Hybrid routing based on configuration.
     """
-    provider = os.getenv("DANA_STT_PROVIDER", "local").lower()
-    if provider == "deepgram":
-        from livekit.plugins import deepgram
-        return deepgram.STT(
-            model=os.getenv("DEEPGRAM_MODEL", "nova-3"),
-            language="en",
-        )
-        
     stt_config = STTConfig(
         model_size=config.stt_model,
         compute_type=config.stt_compute_type,
         vad_threshold=config.vad_threshold,
         min_silence_ms=config.min_silence_ms,
     )
-    return LocallyHostedSTT(stt_config)
+    local_stt = LocallyHostedSTT(stt_config)
+
+    provider = os.getenv("DANA_STT_PROVIDER", "local").lower()
+    mode = config.stt_routing_mode.lower()
+    
+    if provider == "deepgram" or mode == "cloud":
+        from speech.hybrid_stt_router import HybridSTTRouter
+        # Force cloud mode
+        config.stt_routing_mode = "cloud"
+        router = HybridSTTRouter(config, local_stt)
+        if not router.deepgram_stt:
+            raise RuntimeError("Cloud STT requested but Deepgram provider is not configured.")
+        return router
+        
+    if mode == "hybrid":
+        from speech.hybrid_stt_router import HybridSTTRouter
+        return HybridSTTRouter(config, local_stt)
+
+    return local_stt

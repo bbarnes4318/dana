@@ -243,6 +243,25 @@ class DanaAgent(Agent):
         # Process user turn via the adapter exactly once
         result = await self.adapter.process_user_turn(user_text, chat_fn)
         
+        # Update stage in registry
+        from speech.context_registry import update_call_stage
+        update_call_stage(self.adapter.call_id, result.stage)
+
+        # Safely apply adaptive endpointing
+        if self._config.endpoint_mode == "adaptive" and getattr(self, "session", None):
+            from speech.endpoint_tuner import get_endpoint_delays, safe_update_endpointing
+            
+            # Check if objection was detected during this turn
+            is_objection = False
+            for ev in self.adapter.runtime.events:
+                from core.runtime_events import ObjectionDetectedEvent
+                if isinstance(ev, ObjectionDetectedEvent) and getattr(ev, "utterance", None) == user_text:
+                    is_objection = True
+                    break
+            
+            min_d, max_d = get_endpoint_delays(result.stage, is_objection_or_confusion=is_objection)
+            safe_update_endpointing(self.session, min_d, max_d)
+        
         self._latency_recorder.mark("llm_first_token")
         
         # Handle disconnect timing based on outcome
@@ -435,6 +454,47 @@ async def entrypoint(ctx: JobContext):
     latency_recorder.mark("participant_joined")
     logger.info(f"Participant joined: {participant.identity}")
     
+    # Resolve campaign_id from room metadata, participant metadata, or lead profile in database
+    campaign_id = None
+    import json
+    if ctx.room and ctx.room.metadata:
+        try:
+            data = json.loads(ctx.room.metadata)
+            if isinstance(data, dict):
+                campaign_id = data.get("campaign_id") or data.get("campaignId")
+        except Exception:
+            pass
+
+    if not campaign_id and participant and participant.metadata:
+        try:
+            data = json.loads(participant.metadata)
+            if isinstance(data, dict):
+                campaign_id = data.get("campaign_id") or data.get("campaignId")
+        except Exception:
+            pass
+
+    if not campaign_id and participant.identity:
+        try:
+            lead_data = await shared.repository.get_lead_by_phone(participant.identity)
+            if lead_data:
+                campaign_id = lead_data.get("campaign_id")
+        except Exception as e:
+            logger.error(f"Failed to fetch lead campaign_id: {e}")
+
+    # Register call in context registry
+    from speech.context_registry import register_call, update_call_stage
+    register_call(call_id, campaign_id)
+    update_call_stage(call_id, "OPENING")
+
+    # Update endpointing options if adaptive mode is enabled
+    if shared.config.endpoint_mode == "adaptive":
+        from speech.endpoint_tuner import get_endpoint_delays, safe_update_endpointing
+        min_d, max_d = get_endpoint_delays("OPENING")
+        safe_update_endpointing(session, min_d, max_d)
+
+    # Attach session to agent
+    agent.session = session
+    
     # Instantiate per-call adapter freshly
     agent.adapter = LiveKitRuntimeAdapter(
         call_id=call_id,
@@ -482,6 +542,8 @@ async def entrypoint(ctx: JobContext):
             await asyncio.sleep(1.0)
     finally:
         latency_recorder.log_summary()
+        from speech.context_registry import unregister_call
+        unregister_call(call_id)
         logger.info(f"Session finished for call {call_id}")
 
 
