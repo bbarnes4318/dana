@@ -94,6 +94,68 @@ async def test_sql_injection_query_guard():
         await store.query("call_turns", {"invalid_col": "val"})
 
 
+async def test_postgres_store_maps_existing_models_correctly():
+    """Verify that PostgresStore successfully maps existing models (LeadSnapshot, CallTurn, ToolEvent, QAReport, TrainingNote) without ValueError."""
+    store = PostgresStore(dsn="postgresql://localhost/test")
+    # Mock pool and connection to capture executed queries
+    mock_pool = mock.MagicMock()
+    mock_conn = mock.AsyncMock()
+    mock_ctx = mock.AsyncMock()
+    mock_ctx.__aenter__.return_value = mock_conn
+    mock_pool.acquire.return_value = mock_ctx
+    store._pool = mock_pool
+    store._migrations_checked = True
+    
+    repo = Repository(store=store)
+    
+    # 1. LeadSnapshot (emits timestamp)
+    lead_id = await repo.save_lead_snapshot(
+        call_id="call-123",
+        lead_profile={"lead_id": "prospect-1", "lead_phone_e164": "+13055550199"},
+        stage="opening"
+    )
+    assert isinstance(lead_id, str)
+    
+    # 2. CallTurn (emits timestamp)
+    turn_id = await repo.save_call_turn(
+        call_id="call-123",
+        turn_number=1,
+        speaker="user",
+        text="Hello",
+        stage="opening"
+    )
+    assert isinstance(turn_id, str)
+    
+    # 3. ToolEvent (emits timestamp)
+    event_id = await repo.save_tool_event(
+        call_id="call-123",
+        tool_name="web_search",
+        params={"query": "weather"},
+        result={"temp": 72}
+    )
+    assert isinstance(event_id, str)
+    
+    # 4. QAReport (emits timestamp, recommendations)
+    qa_id = await repo.save_qa_report(
+        call_id="call-123",
+        scores={"empathy": 0.9},
+        issues=[],
+        recommendations=["Good job"]
+    )
+    assert isinstance(qa_id, str)
+    
+    # 5. TrainingNote (emits timestamp)
+    note_id = await repo.save_training_note(
+        source="review",
+        topic="closing",
+        sales_lesson="Always ask for the sale"
+    )
+    assert isinstance(note_id, str)
+
+    # Verify mock was called for each execute
+    assert mock_conn.execute.call_count == 5
+
+
 # ------------------------------------------------------------------
 # Integration Tests (Run only when Postgres is available)
 # ------------------------------------------------------------------

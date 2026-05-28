@@ -31,7 +31,7 @@ TABLE_COLUMNS: dict[str, set[str]] = {
     "callbacks": {"id", "call_id", "lead_id", "phone_e164", "callback_time_local", "callback_timezone", "status", "notes", "created_at"},
     "dnc_requests": {"id", "call_id", "lead_id", "phone_e164", "campaign_id", "reason", "requested_at", "created_at"},
     "consent_records": {"id", "consent_artifact_id", "lead_id", "phone_e164", "source_vendor", "consent_text", "consent_timestamp", "landing_page_url", "ip_address", "user_agent", "tcpa_consent_version", "campaign_id", "payload", "created_at"},
-    "qa_reports": {"id", "call_id", "overall_score", "grade", "scores", "issues", "created_at"},
+    "qa_reports": {"id", "call_id", "overall_score", "grade", "scores", "issues", "recommendations", "created_at"},
     "latency_metrics": {"id", "call_id", "metric_name", "metric_value_ms", "created_at"},
     "agent_availability": {"id", "agent_id", "name", "phone_number", "licensed_states", "status", "priority", "max_concurrent_calls", "current_call_count", "last_call_at", "browser_join_enabled", "created_at", "updated_at"},
     "training_notes": {"id", "source", "topic", "sales_lesson", "good_example", "bad_example", "call_stage", "created_at"}
@@ -141,8 +141,16 @@ class PostgresStore(BaseStore):
         mapped: dict[str, Any] = {}
         extra: dict[str, Any] = {}
 
+        # Normalize timestamp to created_at if the target table uses created_at
+        record_copy = dict(record)
+        if "timestamp" in record_copy:
+            if "created_at" in columns and "created_at" not in record_copy:
+                record_copy["created_at"] = record_copy["timestamp"]
+            if "timestamp" not in columns:
+                record_copy.pop("timestamp", None)
+
         # 1. Simple direct matching & extra partitioning
-        for k, v in record.items():
+        for k, v in record_copy.items():
             if k in columns:
                 if isinstance(v, (dict, list)):
                     mapped[k] = json.dumps(v)

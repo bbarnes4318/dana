@@ -152,6 +152,7 @@ CREATE TABLE IF NOT EXISTS qa_reports (
     grade TEXT,
     scores JSONB,
     issues JSONB,
+    recommendations JSONB,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
