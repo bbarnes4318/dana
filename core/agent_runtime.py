@@ -365,8 +365,11 @@ class AgentRuntime:
                     params["room_name"] = lead.call_id
                     params["prospect_identity"] = f"{lead.first_name or ''} {lead.last_name or ''}".strip() or "Prospect"
                     params["licensed_agent_phone_number"] = os.getenv("LICENSED_AGENT_PHONE_NUMBER")
-                    params["call_summary"] = lead.to_summary_dict()
+                    params["call_summary"] = "Lead qualified for final expense options"
                     params["transfer_reason"] = action.reason
+                    params["lead_profile"] = lead.to_summary_dict()
+                    params["lead_state"] = lead.lead_state
+                    params["call_id"] = lead.call_id
                 elif action.tool_name == "schedule_callback":
                     params["call_id"] = lead.call_id
                     params["lead_name"] = f"{lead.first_name or ''} {lead.last_name or ''}".strip() or "Prospect"

@@ -30,7 +30,11 @@ class AgentAvailabilityStore:
     """Abstract interface for managing and querying licensed agent availability."""
 
     async def get_available_agent(self, state: Optional[str]) -> Optional[LicensedAgent]:
-        """Find the best available agent for a given state and atomically reserve them if possible."""
+        """Find the best available agent for a given state."""
+        raise NotImplementedError
+
+    async def select_and_reserve_agent(self, state: Optional[str], call_id: str) -> Optional[LicensedAgent]:
+        """Atomically find and reserve the best available agent for a given state and call."""
         raise NotImplementedError
 
     async def update_agent_status(self, agent_id: str, status: str) -> None:
@@ -68,6 +72,68 @@ class InMemoryAgentAvailabilityStore(AgentAvailabilityStore):
     def add_agent(self, agent: LicensedAgent) -> None:
         """Add an agent to the store (primarily for tests/dev configuration)."""
         self._agents[agent.agent_id] = agent
+
+    async def select_and_reserve_agent(self, state: Optional[str], call_id: str) -> Optional[LicensedAgent]:
+        """Atomically select and reserve the best available agent inside one lock block."""
+        async with self._lock:
+            matched_agents: List[LicensedAgent] = []
+            
+            # Normalize state for matching
+            target_state = state.strip().upper() if state else None
+            
+            for agent in self._agents.values():
+                # 1. Filter out offline/busy agents
+                if agent.status != "available":
+                    continue
+                    
+                # 2. Filter out agents at capacity
+                if agent.current_call_count >= agent.max_concurrent_calls:
+                    continue
+                    
+                # 3. Check licensed states
+                licensed_upper = [s.upper() for s in agent.licensed_states]
+                
+                # If state is provided, agent must have specific state or wildcard "*"
+                if target_state:
+                    if target_state in licensed_upper or "*" in licensed_upper:
+                        matched_agents.append(agent)
+                else:
+                    # If state is not provided, agent must be wildcard licensed
+                    if "*" in licensed_upper:
+                        matched_agents.append(agent)
+            
+            if not matched_agents:
+                return None
+                
+            # Sort matched agents based on rules:
+            # 1. Higher priority first (descending)
+            # 2. Lower current call count first (ascending)
+            # 3. Oldest last_call_at first (ascending), treating None as oldest (never called)
+            def sort_key(a: LicensedAgent) -> tuple[int, int, float]:
+                # Priority: higher is better, so negate it for ascending sort
+                priority_key = -a.priority
+                
+                # Load: lower is better
+                load_key = a.current_call_count
+                
+                # Recency: older timestamp is better
+                if a.last_call_at is None:
+                    timestamp_key = 0.0
+                else:
+                    timestamp_key = a.last_call_at.replace(tzinfo=timezone.utc).timestamp()
+                    
+                return (priority_key, load_key, timestamp_key)
+                
+            matched_agents.sort(key=sort_key)
+            selected_agent = matched_agents[0]
+            
+            # Reserve atomically
+            selected_agent.current_call_count += 1
+            if selected_agent.current_call_count >= selected_agent.max_concurrent_calls:
+                selected_agent.status = "busy"
+            selected_agent.last_call_at = datetime.now(timezone.utc)
+            
+            return selected_agent
 
     async def get_available_agent(self, state: Optional[str]) -> Optional[LicensedAgent]:
         """Find the best available agent for a given state. Does NOT reserve them automatically.

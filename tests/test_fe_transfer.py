@@ -67,8 +67,11 @@ async def test_fe_transfer_unconfigured_phone(monkeypatch):
         room_name="test_room",
         prospect_identity="John Doe",
         licensed_agent_phone_number=None,
-        call_summary={"call_id": "test_room", "lead_state": None},
-        transfer_reason="Lead qualified"
+        call_summary="Lead qualified for final expense options",
+        transfer_reason="Lead qualified",
+        lead_profile={"call_id": "test_room", "lead_state": None},
+        lead_state=None,
+        call_id="test_room"
     )
     
     assert res.success is False
@@ -89,8 +92,11 @@ async def test_fe_transfer_not_confirmed(monkeypatch):
         room_name="test_room",
         prospect_identity="John Doe",
         licensed_agent_phone_number="+15551234567",
-        call_summary={"call_id": "test_room", "lead_state": None},
-        transfer_reason="Lead qualified"
+        call_summary="Lead qualified for final expense options",
+        transfer_reason="Lead qualified",
+        lead_profile={"call_id": "test_room", "lead_state": None},
+        lead_state=None,
+        call_id="test_room"
     )
     
     assert res.success is False
@@ -111,8 +117,11 @@ async def test_fe_transfer_not_implemented(monkeypatch):
         room_name="test_room",
         prospect_identity="John Doe",
         licensed_agent_phone_number="+15551234567",
-        call_summary={"call_id": "test_room", "lead_state": None},
-        transfer_reason="Lead qualified"
+        call_summary="Lead qualified for final expense options",
+        transfer_reason="Lead qualified",
+        lead_profile={"call_id": "test_room", "lead_state": None},
+        lead_state=None,
+        call_id="test_room"
     )
     
     assert res.success is False

@@ -56,33 +56,38 @@ async def fe_transfer(
     room_name: str,
     prospect_identity: Optional[str],
     licensed_agent_phone_number: Optional[str],
-    call_summary: dict[str, Any],
+    call_summary: str,
     transfer_reason: str,
+    lead_profile: dict[str, Any],
+    lead_state: Optional[str],
+    call_id: str,
 ) -> FeTransferResult:
     """Bridge qualified prospect to a licensed agent using TransferRouter routing logic."""
     logger.info("Initializing fe_transfer routing for room: %s", room_name)
 
     # 1. Update/Add agent dynamically if a phone number was passed explicitly
     if licensed_agent_phone_number and licensed_agent_phone_number != "replace_me":
-        agent = await _agent_store.get_available_agent(None)
-        if not agent or agent.phone_number != licensed_agent_phone_number:
-            _agent_store.add_agent(
-                LicensedAgent(
-                    agent_id="explicit-agent",
-                    name="Explicit Licensed Agent",
-                    phone_number=licensed_agent_phone_number,
-                    licensed_states=["*"],
-                    status="available"
-                )
+        _agent_store.add_agent(
+            LicensedAgent(
+                agent_id="explicit-agent",
+                name="Explicit Licensed Agent",
+                phone_number=licensed_agent_phone_number,
+                licensed_states=["*"],
+                status="available"
             )
+        )
 
     # 2. Execute routing decision
-    decision = await _transfer_router.route_transfer(call_summary)
+    decision = await _transfer_router.route_transfer(
+        lead_state=lead_state,
+        call_id=call_id,
+        lead_profile=lead_profile
+    )
     logger.info("Transfer routing decision: mode=%s, success=%s", decision.transfer_mode, decision.success)
 
     if decision.transfer_mode == "warm_bridge" and decision.agent:
-        # Build internal agent summary
-        summary_text = build_handoff_summary(call_summary)
+        # Build internal agent summary using the structured lead profile
+        summary_text = build_handoff_summary(lead_profile)
         
         # Execute warm bridge
         res = await _warm_bridge_provider.initiate_warm_bridge(
@@ -93,7 +98,7 @@ async def fe_transfer(
         
         # If warm bridge execution failed, release agent
         if not res.success:
-            await _agent_store.release_agent(decision.agent.agent_id, call_summary.get("call_id", "unknown"))
+            await _agent_store.release_agent(decision.agent.agent_id, call_id)
 
         return FeTransferResult(
             success=res.success,

@@ -30,19 +30,20 @@ class TransferRouter:
 
     async def route_transfer(
         self,
+        lead_state: Optional[str],
+        call_id: str,
         lead_profile: dict[str, Any]
     ) -> TransferRouteDecision:
-        """Analyze lead profile and system config, select the routing method, and reserve agent if needed.
+        """Analyze lead profile and system config, select the routing method, and reserve agent atomically.
         
         Args:
-            lead_profile: Lead details dictionary (contains lead_state, call_id, etc.)
+            lead_state: Optional[str] state of residence metadata
+            call_id: Unique identifier for the call
+            lead_profile: Lead profile details snapshot dictionary
             
         Returns:
             A TransferRouteDecision indicating the resolved destination.
         """
-        call_id = lead_profile.get("call_id", "unknown-call")
-        state = lead_profile.get("lead_state")
-        
         # Load environment settings
         transfer_mode_config = os.getenv("DANA_TRANSFER_MODE", "auto").strip().lower()
         cold_transfer_enabled = os.getenv("DANA_COLD_TRANSFER_ENABLED", "false").strip().lower() == "true"
@@ -50,22 +51,19 @@ class TransferRouter:
 
         # 1. Warm Bridge Route
         if transfer_mode_config in ("warm_bridge", "auto"):
-            # Attempt to find an available licensed agent
-            agent = await self.store.get_available_agent(state)
+            # Atomically select and reserve the best available agent
+            agent = await self.store.select_and_reserve_agent(lead_state, call_id)
             if agent:
-                # Atomically reserve the agent
-                reserved = await self.store.reserve_agent(agent.agent_id, call_id)
-                if reserved:
-                    return TransferRouteDecision(
-                        success=True,
-                        transfer_mode="warm_bridge",
-                        agent=agent,
-                        phone_number=agent.phone_number
-                    )
+                return TransferRouteDecision(
+                    success=True,
+                    transfer_mode="warm_bridge",
+                    agent=agent,
+                    phone_number=agent.phone_number
+                )
             
             # If warm_bridge is the ONLY configured option, fail directly to callback
             if transfer_mode_config == "warm_bridge":
-                reason = "no_agent_available" if state else "missing_state_for_licensed_routing"
+                reason = "no_agent_available" if lead_state else "missing_state_for_licensed_routing"
                 return TransferRouteDecision(
                     success=False,
                     transfer_mode="callback_required",
@@ -90,7 +88,7 @@ class TransferRouter:
                 )
 
         # 3. Callback Fallback Route (when both warm and cold routing fails)
-        reason = "no_agent_available" if state else "missing_state_for_licensed_routing"
+        reason = "no_agent_available" if lead_state else "missing_state_for_licensed_routing"
         return TransferRouteDecision(
             success=False,
             transfer_mode="callback_required",

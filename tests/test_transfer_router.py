@@ -23,7 +23,11 @@ async def test_router_warm_bridge_preferred(monkeypatch) -> None:
 
     # Lead has state FL
     lead = {"call_id": "call-123", "lead_state": "FL"}
-    decision = await router.route_transfer(lead)
+    decision = await router.route_transfer(
+        lead_state="FL",
+        call_id="call-123",
+        lead_profile=lead
+    )
 
     assert decision.success is True
     assert decision.transfer_mode == "warm_bridge"
@@ -48,7 +52,11 @@ async def test_router_cold_transfer_fallback(monkeypatch) -> None:
 
     # Lead has state FL
     lead = {"call_id": "call-123", "lead_state": "FL"}
-    decision = await router.route_transfer(lead)
+    decision = await router.route_transfer(
+        lead_state="FL",
+        call_id="call-123",
+        lead_profile=lead
+    )
 
     assert decision.success is True
     assert decision.transfer_mode == "cold_transfer"
@@ -66,7 +74,11 @@ async def test_router_callback_fallback(monkeypatch) -> None:
 
     # Lead has state FL
     lead = {"call_id": "call-123", "lead_state": "FL"}
-    decision = await router.route_transfer(lead)
+    decision = await router.route_transfer(
+        lead_state="FL",
+        call_id="call-123",
+        lead_profile=lead
+    )
 
     assert decision.success is False
     assert decision.transfer_mode == "callback_required"
@@ -90,7 +102,11 @@ async def test_router_missing_state_routing(monkeypatch) -> None:
 
     # 1. Lead has NO state (None) -> should route to wildcard agent
     lead_no_state = {"call_id": "call-123", "lead_state": None}
-    decision = await router.route_transfer(lead_no_state)
+    decision = await router.route_transfer(
+        lead_state=None,
+        call_id="call-123",
+        lead_profile=lead_no_state
+    )
     assert decision.success is True
     assert decision.transfer_mode == "warm_bridge"
     assert decision.agent.agent_id == "agent-wild"
@@ -100,7 +116,11 @@ async def test_router_missing_state_routing(monkeypatch) -> None:
 
     # 2. If wildcard agent is busy, and lead has NO state -> should fail to callback_required with missing_state_for_licensed_routing
     agent_wildcard.status = "busy"
-    decision2 = await router.route_transfer(lead_no_state)
+    decision2 = await router.route_transfer(
+        lead_state=None,
+        call_id="call-123",
+        lead_profile=lead_no_state
+    )
     assert decision2.success is False
     assert decision2.transfer_mode == "callback_required"
     assert decision2.reason == "missing_state_for_licensed_routing"
