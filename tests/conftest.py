@@ -150,7 +150,12 @@ sys.modules['livekit.plugins.deepgram'] = MagicMock()
 sys.modules['kokoro_onnx'] = MagicMock()
 sys.modules['faster_whisper'] = MagicMock()
 
+class DummyTensor:
+    pass
+
 torch_mock = MagicMock()
+torch_mock.Tensor = DummyTensor
 torch_mock.hub.load.return_value = (MagicMock(), MagicMock())
 sys.modules['torch'] = torch_mock
+
 

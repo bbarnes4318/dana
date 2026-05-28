@@ -33,6 +33,18 @@ from voice_config import VoiceConfig
 from latency_metrics import LatencyRecorder
 from stt_service import create_stt
 
+from core.prompt_loader import PromptLoader
+from core.objection_classifier import ObjectionClassifier
+from core.objection_response_policy import ObjectionResponsePolicy
+from rag.context_builder import ContextBuilder
+from core.action_policy import ActionPolicy
+from tools.tool_registry import ToolRegistry
+from safety.compliance_filter import ComplianceFilter
+from safety.output_validator import OutputValidator
+from safety.pii_redaction import PIIRedactor
+from storage.repository import Repository
+from core.livekit_runtime_adapter import LiveKitRuntimeAdapter
+
 # Load environment variables
 load_dotenv()
 
@@ -98,6 +110,17 @@ class SharedComponents:
         self.tts = None
         self.llm = None
         self.vad = None
+        # AgentRuntime shared components
+        self.prompt_loader = None
+        self.objection_classifier = None
+        self.objection_policy = None
+        self.context_builder = None
+        self.action_policy = None
+        self.tool_registry = None
+        self.compliance_filter = None
+        self.output_validator = None
+        self.pii_redactor = None
+        self.repository = None
 
     async def initialize(self):
         # 1. Initialize STT
@@ -124,6 +147,20 @@ class SharedComponents:
         # 4. Initialize VAD (Silero VAD)
         loop = asyncio.get_event_loop()
         self.vad = await loop.run_in_executor(None, silero.VAD.load)
+
+        # 5. Initialize stateless AgentRuntime components
+        project_root = Path(__file__).resolve().parent
+        self.prompt_loader = PromptLoader(project_root=project_root)
+        self.objection_classifier = ObjectionClassifier()
+        self.objection_policy = ObjectionResponsePolicy()
+        self.context_builder = ContextBuilder()
+        self.action_policy = ActionPolicy()
+        self.tool_registry = ToolRegistry()
+        self.compliance_filter = ComplianceFilter()
+        self.output_validator = OutputValidator()
+        self.pii_redactor = PIIRedactor()
+        self.repository = Repository()
+
         logger.info("All shared components initialized successfully")
 
 
@@ -141,45 +178,10 @@ class DanaAgent(Agent):
         self._config = shared.config
         self._latency_recorder = latency_recorder
         self.room = None
-
-    @function_tool(name="feTransfer")
-    async def fe_transfer_tool(
-        self,
-        context: RunContext,
-        age_range_confirmed: bool,
-        living_independently: bool,
-        financial_decision_maker: bool,
-        call_summary: str,
-        transfer_reason: str,
-    ) -> str:
-        """Transfer the qualified lead to a licensed final expense insurance agent/benefits coordinator.
-        
-        CRITICAL NOTE: This is a safe failure stub only. Real transfer/bridge functionality
-        is not yet implemented. It will fail safely and return a instruction message to the LLM.
-        """
-        room_name = self.room.name if self.room else "unknown_room"
-        logger.info(f"feTransfer tool called natively in room {room_name} via Agent function tool.")
-        
-        # Invoke the core fe_transfer function
-        from telephony.fe_transfer import fe_transfer
-        
-        res = await fe_transfer(
-            room_name=room_name,
-            prospect_identity=None,  # falls back to E.164 details
-            licensed_agent_phone_number=None,  # falls back to LICENSED_AGENT_PHONE_NUMBER env var
-            call_summary=call_summary,
-            transfer_reason=transfer_reason
-        )
-        
-        if not res.success:
-            logger.warning(f"feTransfer failed: success=False, reason={res.reason}.")
-            return (
-                f"Transfer failed: {res.reason}. feTransfer is currently a safe failure stub only. "
-                f"Real transfer/bridge is not implemented yet. Please inform the user that all licensed "
-                f"agents are busy, and offer to schedule a callback instead."
-            )
-            
-        return f"Transfer initiated successfully: {res.transfer_mode}"
+        self.adapter: Optional[LiveKitRuntimeAdapter] = None
+        self.should_disconnect = False
+        self.warm_bridge_active = False
+        self.fallback_disconnect_task: Optional[asyncio.Task] = None
 
     async def on_user_turn_completed(self, turn_ctx: llm.ChatContext, new_message: llm.ChatMessage) -> None:
         logger.debug(f"User turn completed: '{new_message.content}'")
@@ -192,21 +194,102 @@ class DanaAgent(Agent):
     ) -> AsyncIterable[llm.ChatChunk]:
         self._latency_recorder.mark("llm_request_start")
         
-        # Stream response token-by-token using vLLM
-        stream = self.llm.chat(
-            chat_ctx=chat_ctx,
-            tools=tools,
-            temperature=self._config.temperature,
-            top_p=self._config.top_p,
-            max_tokens=self._config.max_tokens,
-            frequency_penalty=0.15,
-        )
+        # Get the latest user message
+        user_msg = chat_ctx.messages[-1] if chat_ctx.messages else None
+        user_text = user_msg.content if user_msg else ""
         
-        first_token = True
-        async for chunk in stream:
-            if first_token:
-                first_token = False
-                self._latency_recorder.mark("llm_first_token")
+        if not user_text:
+            logger.warning("llm_node called but no user message found in chat_ctx")
+            self._latency_recorder.mark("llm_done")
+            return
+
+        if not self.adapter:
+            logger.error("LiveKitRuntimeAdapter is not initialized on the agent!")
+            self._latency_recorder.mark("llm_done")
+            return
+        
+        # Define clean chat function to call vLLM client directly without re-entering DanaAgent.llm_node
+        async def chat_fn(instructions: str) -> str:
+            new_ctx = llm.ChatContext()
+            
+            # Add compiled instructions as the system prompt
+            new_ctx.messages.append(llm.ChatMessage(
+                role="system",
+                content=instructions
+            ))
+            
+            # Copy conversation history (user and assistant messages only)
+            for msg in chat_ctx.messages:
+                if msg.role in ("user", "assistant"):
+                    new_ctx.messages.append(llm.ChatMessage(
+                        role=msg.role,
+                        content=msg.content
+                    ))
+            
+            # Run LLM chat directly
+            stream = self.llm.chat(
+                chat_ctx=new_ctx,
+                temperature=self._config.temperature,
+                top_p=self._config.top_p,
+                max_tokens=self._config.max_tokens,
+                frequency_penalty=0.15,
+            )
+            
+            response_text = ""
+            async for chunk in stream:
+                content = chunk.choices[0].delta.content if chunk.choices else ""
+                if content:
+                    response_text += content
+            return response_text
+
+        # Process user turn via the adapter exactly once
+        result = await self.adapter.process_user_turn(user_text, chat_fn)
+        
+        self._latency_recorder.mark("llm_first_token")
+        
+        # Handle disconnect timing based on outcome
+        if result.should_end_call:
+            # Check if it was a successful warm bridge transfer
+            is_warm_bridge = False
+            for ev in self.adapter.runtime.events:
+                from core.runtime_events import ToolTriggeredEvent
+                if isinstance(ev, ToolTriggeredEvent) and ev.tool_name in ("feTransfer", "transfer_to_agent") and ev.success:
+                    if "warm" in ev.result_message.lower() or os.getenv("DANA_TRANSFER_MODE", "").lower() == "warm_bridge":
+                        is_warm_bridge = True
+                        break
+            
+            if is_warm_bridge:
+                logger.info("Warm bridge transfer succeeded. Dana will mute and leave later.")
+                self.should_disconnect = False
+                self.warm_bridge_active = True
+                
+                async def warm_bridge_leave():
+                    await asyncio.sleep(15.0)
+                    logger.info("Warm bridge completed: Dana leaving room.")
+                    if self.room and self.room.is_connected():
+                        await self.room.disconnect()
+                asyncio.create_task(warm_bridge_leave())
+            else:
+                # DNC, disqualified, wrong number, callback scheduled, or cold transfer -> disconnect after TTS finishes speaking
+                self.should_disconnect = True
+                
+                # Register cancellable fallback task
+                if self.fallback_disconnect_task:
+                    self.fallback_disconnect_task.cancel()
+                
+                async def disconnect_after_delay(delay: float = 8.0):
+                    try:
+                        await asyncio.sleep(delay)
+                        if self.room and self.room.is_connected():
+                            logger.info("Fallback: Disconnecting room after delay...")
+                            await self.room.disconnect()
+                    except asyncio.CancelledError:
+                        logger.info("Fallback disconnect task cancelled.")
+                
+                self.fallback_disconnect_task = asyncio.create_task(disconnect_after_delay())
+        
+        # Yield the response to TTS node as a ChatChunk stream
+        async for chunk in self.adapter.convert_response_to_stream(result.agent_response):
             yield chunk
             
         self._latency_recorder.mark("llm_done")
@@ -315,6 +398,12 @@ async def entrypoint(ctx: JobContext):
                     session.interrupt()
                 latency_recorder.mark("barge_in_stopped_audio")
                 
+            # Cancellable fallback task cancellation on barge-in
+            if getattr(agent, "fallback_disconnect_task", None):
+                agent.fallback_disconnect_task.cancel()
+                agent.fallback_disconnect_task = None
+            agent.should_disconnect = False
+                
         elif "listening" in state_str or "idle" in state_str:
             if "speaking" in old_state_str:
                 logger.info("User speaking stopped")
@@ -328,6 +417,12 @@ async def entrypoint(ctx: JobContext):
             latency_recorder.mark("agent_speech_started")
         elif "speaking" in old_state_str:
             latency_recorder.mark("agent_speech_stopped")
+            if getattr(agent, "should_disconnect", False):
+                logger.info("Agent stopped speaking and should_disconnect is True. Disconnecting...")
+                if getattr(agent, "fallback_disconnect_task", None):
+                    agent.fallback_disconnect_task.cancel()
+                    agent.fallback_disconnect_task = None
+                asyncio.create_task(ctx.room.disconnect())
             
     @session.on("user_input_transcribed")
     def on_user_input_transcribed(event):
@@ -341,6 +436,23 @@ async def entrypoint(ctx: JobContext):
     participant = await ctx.wait_for_participant()
     latency_recorder.mark("participant_joined")
     logger.info(f"Participant joined: {participant.identity}")
+    
+    # Instantiate per-call adapter freshly
+    agent.adapter = LiveKitRuntimeAdapter(
+        call_id=call_id,
+        phone_number=participant.identity or "unknown",
+        project_root=Path(__file__).resolve().parent,
+        prompt_loader=shared.prompt_loader,
+        objection_classifier=shared.objection_classifier,
+        objection_policy=shared.objection_policy,
+        context_builder=shared.context_builder,
+        action_policy=shared.action_policy,
+        tool_registry=shared.tool_registry,
+        compliance_filter=shared.compliance_filter,
+        output_validator=shared.output_validator,
+        pii_redactor=shared.pii_redactor,
+        repository=shared.repository,
+    )
     
     # Start AgentSession with RoomOptions
     await session.start(

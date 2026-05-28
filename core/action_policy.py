@@ -50,12 +50,18 @@ class ActionPolicy:
         A lead is worth saving when we have collected enough qualification
         data *and* the call has progressed to the transfer-ready stage.
         """
-        return state.current_stage == CallStage.TRANSFER_READY
+        return (
+            state.current_stage == CallStage.TRANSFER_READY
+            or (state.current_stage == CallStage.END and profile.get("transfer_ready") is True)
+        )
 
     @staticmethod
     def should_transfer(state: CallState, profile: dict[str, Any]) -> bool:
         """Transfer when the lead is fully qualified and ready."""
-        return state.current_stage == CallStage.TRANSFER_READY
+        return (
+            state.current_stage == CallStage.TRANSFER_READY
+            or (state.current_stage == CallStage.END and profile.get("transfer_ready") is True)
+        )
 
     @staticmethod
     def should_schedule_callback(

@@ -12,7 +12,7 @@ from latency_metrics import LatencyRecorder
 
 
 def test_agent_function_tool_registration():
-    """Verify DanaAgent registers feTransfer natively via LiveKit's decorator."""
+    """Verify DanaAgent does NOT register feTransfer natively anymore."""
     mock_shared = MagicMock(spec=SharedComponents)
     mock_shared.config = MagicMock()
     mock_shared.config.agent_prompt_path = "prompts/final_expense_alex.md"
@@ -24,25 +24,14 @@ def test_agent_function_tool_registration():
     
     agent = DanaAgent(mock_shared, mock_latency)
     
-    # Assert DanaAgent registers feTransfer tool
-    assert hasattr(agent, "tools"), "Agent subclass must have tools attribute"
-    assert len(agent.tools) > 0, "Agent must register at least one tool"
-    
-    transfer_tool = next((t for t in agent.tools if t.id == "feTransfer" or t.info.name == "feTransfer"), None)
-    assert transfer_tool is not None, "feTransfer tool is not registered on DanaAgent"
-    
-    # Verify tool decorator parameter names
-    sig = inspect.signature(agent.fe_transfer_tool)
-    assert "age_range_confirmed" in sig.parameters
-    assert "living_independently" in sig.parameters
-    assert "financial_decision_maker" in sig.parameters
-    assert "call_summary" in sig.parameters
-    assert "transfer_reason" in sig.parameters
+    registered_tools = [t.info.name for t in agent.tools] if hasattr(agent, "tools") else []
+    assert "feTransfer" not in registered_tools, "feTransfer must not be registered natively on DanaAgent"
 
 
 @pytest.mark.asyncio
-async def test_llm_node_passes_tools_argument():
-    """Verify llm_node passes tools=tools kwarg down to LLM.chat."""
+async def test_llm_node_does_not_pass_tools_argument():
+    """Verify llm_node does not pass tools kwarg down to LLM.chat."""
+    from pathlib import Path
     mock_shared = MagicMock(spec=SharedComponents)
     mock_shared.config = MagicMock()
     mock_shared.config.agent_prompt_path = "prompts/final_expense_alex.md"
@@ -61,7 +50,12 @@ async def test_llm_node_passes_tools_argument():
     
     agent = DanaAgent(mock_shared, mock_latency)
     
+    # Setup the adapter
+    from core.livekit_runtime_adapter import LiveKitRuntimeAdapter
+    agent.adapter = LiveKitRuntimeAdapter(call_id="test-call-id", project_root=Path(__file__).resolve().parent.parent)
+    
     chat_ctx = MagicMock()
+    chat_ctx.messages = [MagicMock(role="user", content="Hello")]
     tools = ["mock_tool_1", "mock_tool_2"]
     
     gen = agent.llm_node(chat_ctx, tools, None)
@@ -70,8 +64,7 @@ async def test_llm_node_passes_tools_argument():
         
     mock_shared.llm.chat.assert_called_once()
     _, kwargs = mock_shared.llm.chat.call_args
-    assert "tools" in kwargs, "tools must be passed down to LLM.chat"
-    assert kwargs["tools"] == tools
+    assert "tools" not in kwargs, "tools must not be passed down to LLM.chat"
     assert "fnc_ctx" not in kwargs, "fnc_ctx must not be passed to LLM.chat"
 
 

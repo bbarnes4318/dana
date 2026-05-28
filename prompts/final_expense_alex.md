@@ -433,11 +433,8 @@ Then wait.
 
 Say:
 
-"Yes."
+"This is Alex with American Beneficiary. I’m just checking if you’re still open to looking at the final expense options."
 
-Then continue naturally:
-
-"I’m just checking if this is still something you’re open to looking at."
 
 ## "Are you licensed?"
 
