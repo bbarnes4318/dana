@@ -531,6 +531,19 @@ async def entrypoint(ctx: JobContext):
         ),
     )
     
+    # Emit call.session_started event
+    from integrations.crm_webhooks import emit_crm_event
+    lead_prof = agent.adapter.state_machine.lead.to_summary_dict() if agent.adapter else None
+    emit_crm_event(
+        "call.session_started",
+        repository=shared.repository,
+        call_id=call_id,
+        lead_id=lead_prof.get("lead_id") if lead_prof else None,
+        campaign_id=campaign_id,
+        phone_e164=participant.identity,
+        lead_profile=lead_prof
+    )
+
     # Speak greeting depending on opening_mode
     if shared.config.opening_mode == "immediate" and shared.config.opening_line:
         latency_recorder.mark("greeting_started")
@@ -552,6 +565,127 @@ async def entrypoint(ctx: JobContext):
         from speech.context_registry import unregister_call
         unregister_call(call_id)
         logger.info(f"Session finished for call {call_id}")
+
+        # Re-fetch latest lead profile
+        lead_prof = agent.adapter.state_machine.lead.to_summary_dict() if agent.adapter else {}
+        lead_id = lead_prof.get("lead_id") or lead_prof.get("id")
+
+        # Emit call.session_completed event
+        from integrations.crm_webhooks import emit_crm_event
+        emit_crm_event(
+            "call.session_completed",
+            repository=shared.repository,
+            call_id=call_id,
+            lead_id=lead_id,
+            campaign_id=campaign_id,
+            phone_e164=participant.identity,
+            lead_profile=lead_prof
+        )
+
+        # Run post-call QA and scoring
+        outcome = "ended"
+        try:
+            from qa.call_record import CallRecord as QACallRecord, CallTurn as QACallTurn
+            from qa.scoring import CallScorer
+            from storage.repository import parse_dt
+
+            # Load turns from DB
+            raw_turns = await shared.repository._store.query("call_turns", {"call_id": call_id})
+            raw_turns.sort(key=lambda t: t.get("turn_number", 0))
+            
+            turns_data = []
+            for t in raw_turns:
+                turns_data.append(QACallTurn(
+                    speaker="agent" if t.get("speaker") == "agent" else "prospect",
+                    text=t.get("text", ""),
+                    stage=t.get("stage", ""),
+                    timestamp=parse_dt(t.get("timestamp") or t.get("created_at")) or datetime.now(timezone.utc)
+                ))
+            
+            # Load tools
+            raw_tools = await shared.repository._store.query("tool_events", {"call_id": call_id})
+            tool_events_data = [dict(t) for t in raw_tools]
+
+            # Reconstruct CallRecord
+            ended_at = datetime.now(timezone.utc)
+            started_at = latency_recorder.get_timestamp("call_start") or ended_at
+            duration = (ended_at - started_at).total_seconds()
+            final_stage = agent.adapter.state_machine.call_state.current_stage.value if agent.adapter else "end"
+            
+            if lead_prof.get("is_qualified"):
+                outcome = "transferred"
+            elif lead_prof.get("callback_requested"):
+                outcome = "callback"
+            elif lead_prof.get("do_not_call_requested"):
+                outcome = "dnc"
+            elif lead_prof.get("disqualified_reason"):
+                outcome = "disqualified"
+
+            call_record = QACallRecord(
+                call_id=call_id,
+                turns=turns_data,
+                lead_profile=lead_prof,
+                final_stage=final_stage,
+                duration_seconds=duration,
+                tool_events=tool_events_data,
+                started_at=started_at,
+                ended_at=ended_at,
+                outcome=outcome
+            )
+
+            # Score call
+            scorer = CallScorer()
+            scorecard = scorer.score_call(call_record)
+            
+            # Save QA report
+            await shared.repository.save_qa_report(
+                call_id=call_id,
+                overall_score=scorecard.overall_score,
+                grade=scorecard.grade,
+                scores=scorecard.scores,
+                issues=scorecard.issues,
+                recommendations=[]
+            )
+
+            # If score is too low or grade is F, emit qa.failed
+            if scorecard.overall_score < 7.0 or scorecard.grade == "F":
+                emit_crm_event(
+                    "qa.failed",
+                    repository=shared.repository,
+                    call_id=call_id,
+                    lead_id=lead_id,
+                    campaign_id=campaign_id,
+                    phone_e164=participant.identity,
+                    qa={
+                        "overall_score": scorecard.overall_score,
+                        "grade": scorecard.grade,
+                        "issues": scorecard.issues,
+                        "scores": scorecard.scores
+                    },
+                    lead_profile=lead_prof
+                )
+        except Exception as e:
+            logger.error(f"Failed to execute QA scoring or emit qa.failed: {e}")
+
+        # Emit call.completed exactly once at the very end of the call cycle
+        emit_crm_event(
+            "call.completed",
+            repository=shared.repository,
+            call_id=call_id,
+            lead_id=lead_id,
+            campaign_id=campaign_id,
+            phone_e164=participant.identity,
+            outcome=outcome,
+            lead_profile=lead_prof
+        )
+
+
+async def graceful_shutdown(timeout: float = 10.0) -> None:
+    """Graceful shutdown hook for Integrations and webhook dispatcher."""
+    logger.info("Graceful shutdown initiated. Draining webhook dispatcher outbox...")
+    from integrations.webhook_dispatcher import get_dispatcher
+    await get_dispatcher().shutdown(timeout=timeout)
+
 
 
 def prewarm(proc: JobProcess):

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
+import os
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional, Union
 
@@ -24,6 +25,8 @@ logger = logging.getLogger(__name__)
 
 class CampaignRunner:
     """Orchestrates outbound call dialing for a campaign."""
+
+    status_label = "dry-run and orchestration-ready, live AgentSession handoff pending"
 
     def __init__(
         self,
@@ -279,6 +282,18 @@ class CampaignRunner:
         await self.caller_id_pool.mark_used(caller_id, campaign_id, now)
         self._call_timestamps.append(now)
 
+        # Emit call.attempt_started event
+        from integrations.crm_webhooks import emit_crm_event
+        emit_crm_event(
+            "call.attempt_started",
+            repository=self.repository,
+            call_id=call_id,
+            lead_id=lead_id,
+            campaign_id=campaign_id,
+            phone_e164=phone_e164,
+            lead_profile=lead
+        )
+
         # Place the call
         call_details = None
         try:
@@ -299,16 +314,30 @@ class CampaignRunner:
             )
             return "failed_to_place_call"
 
+        # Create initial call record in database for webhook/AMD outcome tracking
+        is_dry_run = call_details.get("status") == "dry_run"
+        await self.repository.save_call(
+            call_id=call_id,
+            lead_id=lead_id,
+            campaign_id=campaign_id,
+            phone_e164=phone_e164,
+            caller_id=caller_id,
+            outcome="placed",
+            amd_result="initiated",
+            dry_run=is_dry_run,
+            started_at=now
+        )
+
         # 9. Evaluate Outcome and Answering Machine Detection (AMD)
         # Use simulated outcome if provided (mainly for testing)
         outcome = simulated_outcome
         if not outcome:
             # Map CallService dry-run status to default simulated outcome
-            if call_details.get("status") == "dry_run":
+            if is_dry_run:
                 outcome = "human_answered"  # default dry run connects
             else:
-                # In real scenario, wait/parse webhook AMD. We fall back to human_answered
-                outcome = "human_answered"
+                # In real scenario, wait/parse webhook AMD and VAD updates from DB
+                outcome = await self._wait_for_amd_outcome(call_id)
 
         # Update caller ID metrics
         await self.caller_id_pool.update_metrics_and_cooldown(caller_id, campaign_id, campaign, outcome, now)
@@ -330,8 +359,7 @@ class CampaignRunner:
         attempts = (lead.get("attempts", 0)) + 1
         retry_after = RetryPolicy.get_retry_after(outcome, campaign, attempts, now, callback_time=lead_callback_time)
 
-        # Save call disposition
-        is_dry_run = call_details.get("status") == "dry_run"
+        # Save call disposition (merges with the initial record)
         await self.repository.save_call_disposition(
             call_id=call_id,
             lead_id=lead_id,
@@ -343,15 +371,42 @@ class CampaignRunner:
             dry_run=is_dry_run
         )
 
+        # Emit call.connection_dispositioned event
+        from integrations.crm_webhooks import emit_crm_event
+        emit_crm_event(
+            "call.connection_dispositioned",
+            repository=self.repository,
+            call_id=call_id,
+            lead_id=lead_id,
+            campaign_id=campaign_id,
+            phone_e164=phone_e164,
+            outcome=outcome,
+            lead_profile=lead
+        )
+
         # 10. Process Outcome Statuses
         if outcome == "human_answered":
             # For human answer: Bridge call and start AgentSession voice flow.
-            # In testing/dry-run, this is handled.
             logger.info("Call %s answered by human. Starting conversational session.", call_id)
+            if not is_dry_run:
+                await self._handoff_to_live_agent_session(call_id, lead, campaign)
             await self.lead_queue.mark_completed(lead_id, outcome="completed")
             return "success_human_answered"
+
+        # Emit call.completed event for all other outcomes
+        from integrations.crm_webhooks import emit_crm_event
+        emit_crm_event(
+            "call.completed",
+            repository=self.repository,
+            call_id=call_id,
+            lead_id=lead_id,
+            campaign_id=campaign_id,
+            phone_e164=phone_e164,
+            outcome=outcome,
+            lead_profile=lead
+        )
             
-        elif outcome == "dnc":
+        if outcome == "dnc":
             # Lead requested DNC
             logger.info("Call %s returned DNC request. Registering DNC.", call_id)
             await self.lead_queue.mark_dnc(lead_id, phone_e164, campaign_id, "prospect_dnc_request")
@@ -385,3 +440,91 @@ class CampaignRunner:
                 
             await self.lead_queue.release_lead_on_failure(lead_id, release_reason, retry_after)
             return f"retryable_failure_{outcome}"
+
+    async def _wait_for_amd_outcome(self, call_id: str, timeout: float = 15.0) -> str:
+        """Polls the database/repository for updates to the call's AMD result or outcome.
+        
+        Checks for:
+        1. Telnyx AMD webhook result (stored in call's amd_result or outcome field)
+        2. LiveKit VAD classification (stored in call's amd_result or outcome field)
+        
+        Falls back to 'no_answer' if no outcome is determined within the timeout.
+        """
+        start_time = datetime.now(timezone.utc)
+        elapsed = 0.0
+        env_timeout = os.environ.get("DANA_AMD_TIMEOUT")
+        if env_timeout:
+            try:
+                timeout = float(env_timeout)
+            except ValueError:
+                pass
+                
+        while elapsed < timeout:
+            call_rec = await self.repository.get_call_record(call_id)
+            if call_rec:
+                amd_res = call_rec.get("amd_result")
+                outcome = call_rec.get("outcome")
+                
+                for val in (outcome, amd_res):
+                    if val and val not in ("placed", "initiated", "ringing"):
+                        if val in ("human", "human_answered"):
+                            return "human_answered"
+                        if val in ("voicemail", "machine_greeting", "silence", "busy", "no_answer", "wrong_number", "dnc", "hostile_refusal", "disconnected", "disconnected_bad_number", "consent_invalid", "carrier_failure"):
+                            return val
+                            
+            await asyncio.sleep(0.05)
+            elapsed = (datetime.now(timezone.utc) - start_time).total_seconds()
+            
+        logger.info("AMD outcome wait timed out for call %s. Falling back to no_answer.", call_id)
+        return "no_answer"
+
+    async def _handoff_to_live_agent_session(
+        self,
+        call_id: str,
+        lead: dict[str, Any],
+        campaign: dict[str, Any]
+    ) -> None:
+        """Handoff the connected call to Dana's LiveKit AgentSession.
+        
+        This method:
+        - Creates/connects LiveKit room / SIP participant (if not already done)
+        - Attaches campaign/lead metadata
+        - Starts the AgentSession by allowing the LiveKit worker/agent to join
+        - Let Dana runtime handle the conversation
+        """
+        logger.info("Initiating handoff for call %s to Dana live AgentSession", call_id)
+        
+        confirm_place_call = os.environ.get("DANA_CONFIRM_PLACE_CALL", "").lower() == "yes"
+        if confirm_place_call:
+            try:
+                from livekit import api
+                import json
+                
+                config = self.call_service.config
+                lkapi = api.LiveKitAPI(
+                    url=config.livekit_url,
+                    api_key=config.livekit_api_key,
+                    api_secret=config.livekit_api_secret
+                )
+                try:
+                    # Resolve room name
+                    call_rec = await self.repository.get_call_record(call_id)
+                    actual_room = call_rec.get("room_name") if call_rec else f"{config.dana_room_prefix or 'dana-call'}-{call_id[-8:]}"
+                    
+                    metadata_payload = json.dumps({
+                        "campaign_id": campaign.get("campaign_id") or campaign.get("id"),
+                        "lead_id": lead.get("id") or lead.get("lead_id"),
+                        "call_id": call_id
+                    })
+                    # Update room metadata
+                    await lkapi.room.update_room_metadata(
+                        room=actual_room,
+                        metadata=metadata_payload
+                    )
+                    logger.info("Successfully updated room %s metadata for handoff", actual_room)
+                finally:
+                    await lkapi.aclose()
+            except Exception as e:
+                logger.error("Failed to update LiveKit room metadata during handoff: %s", e)
+        else:
+            logger.info("[Dry Run] Skipped LiveKit room metadata update for handoff")

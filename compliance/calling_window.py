@@ -177,6 +177,9 @@ def resolve_lead_timezone(lead: Union[dict, Any]) -> Tuple[Optional[str], str, s
     Returns:
         (timezone_str, timezone_source, confidence)
     """
+    # Multi-timezone US states
+    MULTI_TZ_STATES = {"TX", "FL", "TN", "KY", "IN", "MI", "ND", "SD", "NE", "KS", "OR", "ID"}
+
     # Helper to get attributes/keys safely
     def get_val(key: str) -> Optional[Any]:
         if isinstance(lead, dict):
@@ -188,12 +191,18 @@ def resolve_lead_timezone(lead: Union[dict, Any]) -> Tuple[Optional[str], str, s
     if cb_tz:
         return str(cb_tz), "explicit_timezone", "high"
 
-    # 2. State abbreviation lookup -> High confidence
+    # 2. State abbreviation lookup
     state = get_val("lead_state") or get_val("state")
     if state and isinstance(state, str):
         state_key = state.strip().upper()
         if state_key in STATE_TO_TZ:
-            return STATE_TO_TZ[state_key], "lead_state", "high"
+            if get_val("verified_city_state"):
+                confidence = "high"
+            elif state_key in MULTI_TZ_STATES:
+                confidence = "medium"
+            else:
+                confidence = "medium/high"
+            return STATE_TO_TZ[state_key], "lead_state", confidence
 
     # 3. Area code lookup from phone -> Low confidence
     phone = get_val("lead_phone_e164") or get_val("phone_e164") or get_val("phone_number")
@@ -211,7 +220,7 @@ def resolve_lead_timezone(lead: Union[dict, Any]) -> Tuple[Optional[str], str, s
         if area_code and area_code in AREA_CODE_TO_TZ:
             return AREA_CODE_TO_TZ[area_code], "area_code", "low"
 
-    return None, "unknown", "low"
+    return None, "unknown", "unknown/low"
 
 
 def is_calling_window_allowed(

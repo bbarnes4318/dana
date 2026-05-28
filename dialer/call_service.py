@@ -115,6 +115,13 @@ class CallService:
                 "room_name": actual_room,
                 "participant_identity": participant_identity,
             }
+            if "participant_metadata" in fields:
+                metadata_dict = {
+                    "campaign_id": lead.get("campaign_id"),
+                    "lead_id": lead.get("id") or lead.get("lead_id"),
+                    "call_id": call_id
+                }
+                kwargs["participant_metadata"] = json.dumps(metadata_dict)
             if "wait_until_answered" in fields:
                 kwargs["wait_until_answered"] = True
             if "display_name" in fields:

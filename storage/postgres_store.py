@@ -35,7 +35,8 @@ TABLE_COLUMNS: dict[str, set[str]] = {
     "latency_metrics": {"id", "call_id", "metric_name", "metric_value_ms", "created_at"},
     "agent_availability": {"id", "agent_id", "name", "phone_number", "licensed_states", "status", "priority", "max_concurrent_calls", "current_call_count", "last_call_at", "browser_join_enabled", "created_at", "updated_at"},
     "training_notes": {"id", "source", "topic", "sales_lesson", "good_example", "bad_example", "call_stage", "created_at"},
-    "caller_ids": {"caller_id", "campaign_id", "status", "daily_call_count", "answer_rate", "dnc_rate", "complaint_rate", "stir_shaken_status", "last_used_at", "cooldown_until", "total_calls", "total_answers", "total_dncs", "total_complaints", "created_at", "updated_at"}
+    "caller_ids": {"caller_id", "campaign_id", "status", "daily_call_count", "answer_rate", "dnc_rate", "complaint_rate", "stir_shaken_status", "last_used_at", "cooldown_until", "total_calls", "total_answers", "total_dncs", "total_complaints", "created_at", "updated_at"},
+    "webhook_events": {"id", "event_type", "event_id", "destination", "payload", "status", "attempt_count", "next_attempt_at", "last_error", "response_status_code", "response_body_preview", "sent_at", "claimed_by", "claimed_at", "created_at", "updated_at"}
 }
 
 ALLOWLIST_TABLES = set(TABLE_COLUMNS.keys())

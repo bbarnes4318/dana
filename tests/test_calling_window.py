@@ -27,13 +27,22 @@ def test_timezone_resolution_state() -> None:
         "lead_state": "CA",
         "lead_phone_e164": "+13050000000" # Miami area code, but state is CA
     }
-    assert resolve_lead_timezone(lead) == ("America/Los_Angeles", "lead_state", "high")
+    # CA is a single-timezone state -> medium/high
+    assert resolve_lead_timezone(lead) == ("America/Los_Angeles", "lead_state", "medium/high")
     
     # State parameter check (alternative key)
     lead_alt = {
         "state": "tx"
     }
-    assert resolve_lead_timezone(lead_alt) == ("America/Chicago", "lead_state", "high")
+    # TX is a multi-timezone state -> medium
+    assert resolve_lead_timezone(lead_alt) == ("America/Chicago", "lead_state", "medium")
+
+    # Verified city/state -> high
+    lead_verified = {
+        "state": "CA",
+        "verified_city_state": True
+    }
+    assert resolve_lead_timezone(lead_verified) == ("America/Los_Angeles", "lead_state", "high")
 
 
 def test_timezone_resolution_area_code() -> None:
@@ -52,12 +61,12 @@ def test_timezone_resolution_area_code() -> None:
 def test_timezone_resolution_unresolvable() -> None:
     # 4. Returns None if completely missing or unmapped
     lead = {}
-    assert resolve_lead_timezone(lead) == (None, "unknown", "low")
+    assert resolve_lead_timezone(lead) == (None, "unknown", "unknown/low")
     
     lead_invalid_phone = {
         "lead_phone_e164": "999"
     }
-    assert resolve_lead_timezone(lead_invalid_phone) == (None, "unknown", "low")
+    assert resolve_lead_timezone(lead_invalid_phone) == (None, "unknown", "unknown/low")
 
 
 def test_is_calling_window_allowed() -> None:

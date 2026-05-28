@@ -420,3 +420,150 @@ async def test_dana_confirm_place_call_validation(
     # Clean up
     if os.path.exists("telephony/last_outbound_call.json"):
         os.remove("telephony/last_outbound_call.json")
+
+
+@pytest.mark.asyncio
+async def test_real_mode_without_amd_result_does_not_blindly_assume_human_answered(
+    repo, default_campaign, default_lead, default_consent
+):
+    """Test that in real mode, if no simulated outcome is provided and no AMD outcome is written,
+    it does not blindly assume human_answered and eventually times out to no_answer.
+    """
+    await default_campaign(campaign_id="camp-test")
+    await default_lead(lead_id="lead-123", campaign_id="camp-test", state="FL")
+    await default_consent(lead_id="lead-123", campaign_id="camp-test")
+    await repo.save_caller_id(caller_id="+18005550199", campaign_id="camp-test", status="active")
+
+    # Set real place call to yes
+    runner = CampaignRunner(repository=repo)
+    now_utc = datetime(2026, 1, 1, 15, 0, 0, tzinfo=timezone.utc)
+
+    # Mock place_call to simulate a successful real SIP call placement (returning status: "placed")
+    async def mock_place_call(lead, call_id, caller_id):
+        return {
+            "id": call_id,
+            "status": "placed",
+            "sip_participant_id": "sip-part-123",
+            "to": lead.get("phone_e164"),
+            "from": caller_id,
+            "room_name": f"dana-call-{call_id[-8:]}"
+        }
+
+    runner.call_service.place_call = mock_place_call
+
+    # Set environment variables for real placement and quick timeout
+    env_patches = {
+        "DANA_CONFIRM_PLACE_CALL": "yes",
+        "DANA_AMD_TIMEOUT": "0.05"
+    }
+
+    with mock.patch.dict(os.environ, env_patches):
+        status = await runner.run_once(campaign_id="camp-test", now=now_utc)
+        assert status == "retryable_failure_no_answer"
+
+    # Verify lead status is failed and lock is released, rather than completed (human_answered)
+    updated_lead = await repo.get_lead("lead-123")
+    assert updated_lead is not None
+    assert updated_lead["lock_holder_id"] is None
+    assert updated_lead["status"] == "failed"
+
+
+@pytest.mark.asyncio
+async def test_dry_run_mode_defaults_to_simulated_human_answered(
+    repo, default_campaign, default_lead, default_consent
+):
+    """Test that in dry-run mode, if no simulated outcome is passed, it defaults to human_answered."""
+    await default_campaign(campaign_id="camp-test")
+    await default_lead(lead_id="lead-123", campaign_id="camp-test", state="FL")
+    await default_consent(lead_id="lead-123", campaign_id="camp-test")
+    await repo.save_caller_id(caller_id="+18005550199", campaign_id="camp-test", status="active")
+
+    runner = CampaignRunner(repository=repo)
+    now_utc = datetime(2026, 1, 1, 15, 0, 0, tzinfo=timezone.utc)
+
+    # Mock place_call to return dry-run
+    async def mock_place_call(lead, call_id, caller_id):
+        return {
+            "id": call_id,
+            "status": "dry_run",
+            "to": lead.get("phone_e164"),
+            "from": caller_id,
+            "room_name": f"dana-call-{call_id[-8:]}"
+        }
+
+    runner.call_service.place_call = mock_place_call
+
+    # Run in dry-run mode
+    with mock.patch.dict(os.environ, {"DANA_CONFIRM_PLACE_CALL": "no"}):
+        status = await runner.run_once(campaign_id="camp-test", now=now_utc)
+        assert status == "success_human_answered"
+
+    # Verify lead status is completed
+    updated_lead = await repo.get_lead("lead-123")
+    assert updated_lead is not None
+    assert updated_lead["status"] == "completed"
+
+
+@pytest.mark.asyncio
+async def test_human_answered_real_mode_calls_handoff_method(
+    repo, default_campaign, default_lead, default_consent
+):
+    """Test that in real mode, if AMD returns human_answered, it invokes the LiveKit handoff method
+    to update room metadata.
+    """
+    await default_campaign(campaign_id="camp-test")
+    await default_lead(lead_id="lead-123", campaign_id="camp-test", state="FL")
+    await default_consent(lead_id="lead-123", campaign_id="camp-test")
+    await repo.save_caller_id(caller_id="+18005550199", campaign_id="camp-test", status="active")
+
+    import asyncio
+    runner = CampaignRunner(repository=repo)
+    now_utc = datetime(2026, 1, 1, 15, 0, 0, tzinfo=timezone.utc)
+
+    # We mock place_call to simulate a successful real SIP call placement and concurrently schedule
+    # writing the "human_answered" AMD outcome to the database.
+    async def mock_place_call(lead, call_id, caller_id):
+        async def simulate_webhook():
+            await asyncio.sleep(0.01)
+            await repo.save_call(
+                call_id=call_id,
+                amd_result="human_answered",
+                outcome="human_answered"
+            )
+        asyncio.create_task(simulate_webhook())
+        return {
+            "id": call_id,
+            "status": "placed",
+            "sip_participant_id": "sip-part-123",
+            "to": lead.get("phone_e164"),
+            "from": caller_id,
+            "room_name": f"dana-call-{call_id[-8:]}"
+        }
+
+    runner.call_service.place_call = mock_place_call
+
+    # Mock LiveKitAPI to inspect the handoff update room metadata call
+    with mock.patch("livekit.api.LiveKitAPI") as mock_lk_api_class:
+        mock_lk_api = mock_lk_api_class.return_value
+        mock_lk_api.room = mock.AsyncMock()
+        mock_lk_api.aclose = mock.AsyncMock()
+
+        env_patches = {
+            "DANA_CONFIRM_PLACE_CALL": "yes",
+            "DANA_AMD_TIMEOUT": "1.0"
+        }
+
+        with mock.patch.dict(os.environ, env_patches):
+            status = await runner.run_once(campaign_id="camp-test", now=now_utc)
+            assert status == "success_human_answered"
+
+        # Verify update_room_metadata was called
+        mock_lk_api.room.update_room_metadata.assert_called_once()
+        
+        # Verify the metadata argument contains campaign_id, lead_id and call_id
+        called_kwargs = mock_lk_api.room.update_room_metadata.call_args.kwargs
+        metadata_payload = json.loads(called_kwargs["metadata"])
+        assert metadata_payload["campaign_id"] == "camp-test"
+        assert metadata_payload["lead_id"] == "lead-123"
+        assert "call_id" in metadata_payload
+

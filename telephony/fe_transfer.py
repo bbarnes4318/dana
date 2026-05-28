@@ -85,6 +85,34 @@ async def fe_transfer(
     )
     logger.info("Transfer routing decision: mode=%s, success=%s", decision.transfer_mode, decision.success)
 
+    from integrations.crm_webhooks import emit_crm_event
+    from storage.repository import Repository
+    repo = Repository()
+
+    lead_id = lead_profile.get("lead_id") or lead_profile.get("id")
+    campaign_id = lead_profile.get("campaign_id")
+    phone_e164 = lead_profile.get("lead_phone_e164")
+
+    # 1. Emit transfer.started event
+    emit_crm_event(
+        "transfer.started",
+        repository=repo,
+        call_id=call_id,
+        lead_id=lead_id,
+        campaign_id=campaign_id,
+        phone_e164=phone_e164,
+        transfer={
+            "call_id": call_id,
+            "lead_id": lead_id,
+            "campaign_id": campaign_id,
+            "transfer_mode": decision.transfer_mode,
+            "agent_id": decision.agent.agent_id if decision.agent else None,
+            "success": False,
+            "failure_reason": None,
+            "provider_call_id": None
+        }
+    )
+
     if decision.transfer_mode == "warm_bridge" and decision.agent:
         # Build internal agent summary using the structured lead profile
         summary_text = build_handoff_summary(lead_profile)
@@ -99,6 +127,24 @@ async def fe_transfer(
         # If warm bridge execution failed, release agent
         if not res.success:
             await _agent_store.release_agent(decision.agent.agent_id, call_id)
+
+        transfer_meta = {
+            "call_id": call_id,
+            "lead_id": lead_id,
+            "campaign_id": campaign_id,
+            "transfer_mode": "warm_bridge",
+            "agent_id": decision.agent.agent_id,
+            "success": res.success,
+            "failure_reason": None if res.success else res.reason,
+            "provider_call_id": res.provider_call_id
+        }
+
+        # Emit transfer outcomes
+        if res.success:
+            emit_crm_event("transfer.succeeded", repository=repo, call_id=call_id, lead_id=lead_id, campaign_id=campaign_id, phone_e164=phone_e164, transfer=transfer_meta)
+            emit_crm_event("lead.transferred", repository=repo, call_id=call_id, lead_id=lead_id, campaign_id=campaign_id, phone_e164=phone_e164, transfer=transfer_meta)
+        else:
+            emit_crm_event("transfer.failed", repository=repo, call_id=call_id, lead_id=lead_id, campaign_id=campaign_id, phone_e164=phone_e164, transfer=transfer_meta)
 
         return FeTransferResult(
             success=res.success,
@@ -115,6 +161,25 @@ async def fe_transfer(
             room_name=room_name,
             phone_number=decision.phone_number
         )
+
+        transfer_meta = {
+            "call_id": call_id,
+            "lead_id": lead_id,
+            "campaign_id": campaign_id,
+            "transfer_mode": "cold_transfer",
+            "agent_id": None,
+            "success": res.success,
+            "failure_reason": None if res.success else res.reason,
+            "provider_call_id": res.provider_call_id
+        }
+
+        # Emit transfer outcomes
+        if res.success:
+            emit_crm_event("transfer.succeeded", repository=repo, call_id=call_id, lead_id=lead_id, campaign_id=campaign_id, phone_e164=phone_e164, transfer=transfer_meta)
+            emit_crm_event("lead.transferred", repository=repo, call_id=call_id, lead_id=lead_id, campaign_id=campaign_id, phone_e164=phone_e164, transfer=transfer_meta)
+        else:
+            emit_crm_event("transfer.failed", repository=repo, call_id=call_id, lead_id=lead_id, campaign_id=campaign_id, phone_e164=phone_e164, transfer=transfer_meta)
+
         return FeTransferResult(
             success=res.success,
             reason=res.reason,
@@ -125,9 +190,22 @@ async def fe_transfer(
         )
 
     # Fallback callback required
+    fail_reason = decision.reason or "no_agent_available"
+    transfer_meta = {
+        "call_id": call_id,
+        "lead_id": lead_id,
+        "campaign_id": campaign_id,
+        "transfer_mode": "callback_required",
+        "agent_id": None,
+        "success": False,
+        "failure_reason": fail_reason,
+        "provider_call_id": None
+    }
+    emit_crm_event("transfer.failed", repository=repo, call_id=call_id, lead_id=lead_id, campaign_id=campaign_id, phone_e164=phone_e164, transfer=transfer_meta)
+
     return FeTransferResult(
         success=False,
-        reason=decision.reason or "no_agent_available",
+        reason=fail_reason,
         transfer_mode="callback_required",
         agent_id=None,
         call_summary=None,

@@ -8,6 +8,7 @@ methods for each record type.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import uuid
@@ -68,6 +69,7 @@ _DNC_REQUESTS = "dnc_requests"
 _CONSENT_RECORDS = "consent_records"
 _LATENCY_METRICS = "latency_metrics"
 _CAMPAIGNS = "campaigns"
+_WEBHOOK_EVENTS = "webhook_events"
 
 
 class Repository:
@@ -93,6 +95,7 @@ class Repository:
             self._store = PostgresStore()
         else:
             self._store = JsonlStore(data_dir=data_dir)
+        self._claim_lock = asyncio.Lock()
 
     @property
     def store(self) -> BaseStore:
@@ -192,9 +195,33 @@ class Repository:
         Returns:
             The ``id`` of the saved record.
         """
-        model = Call(**kwargs)
+        record_id = kwargs.pop("id", None)
+        call_id = kwargs.get("call_id")
+        
+        # If call_id is provided, try to find the existing call to merge/preserve fields
+        existing_data = {}
+        if call_id:
+            existing = await self.get_call_record(call_id)
+            if existing:
+                existing_data = dict(existing)
+                if not record_id:
+                    record_id = existing.get("id")
+        
+        # Build kwargs with existing data as fallback for fields not explicitly passed
+        full_kwargs = {}
+        for field_name in Call.model_fields.keys():
+            if field_name in kwargs:
+                full_kwargs[field_name] = kwargs[field_name]
+            elif field_name in existing_data:
+                full_kwargs[field_name] = existing_data[field_name]
+                
+        model = Call(**full_kwargs)
         data = model.model_dump(mode="json")
-        data.setdefault("id", str(uuid.uuid4()))
+        if record_id:
+            data["id"] = record_id
+        else:
+            data.setdefault("id", str(uuid.uuid4()))
+            
         return await self._store.save(_CALLS, data)
 
     async def save_transfer(self, **kwargs: Any) -> str:
@@ -326,6 +353,11 @@ class Repository:
     async def get_call(self, call_id: str) -> Optional[dict]:
         """Return the lead snapshot for *call_id*, if it exists."""
         results = await self._store.query(_LEADS, {"call_id": call_id})
+        return results[0] if results else None
+
+    async def get_call_record(self, call_id: str) -> Optional[dict]:
+        """Return the call details matching *call_id* from calls table, if it exists."""
+        results = await self._store.query(_CALLS, {"call_id": call_id})
         return results[0] if results else None
 
     async def list_recent_calls(self, limit: int = 50) -> list[dict]:
@@ -978,3 +1010,146 @@ class Repository:
             dry_run=dry_run,
             started_at=datetime.utcnow()
         )
+
+    # ------------------------------------------------------------------
+    # Webhook Outbox helpers
+    # ------------------------------------------------------------------
+
+    async def save_webhook_event(self, event_dict: Optional[dict] = None, **kwargs: Any) -> str:
+        """Save a webhook event to the outbox (database or JSONL)."""
+        event_data = dict(event_dict) if event_dict is not None else {}
+        event_data.update(kwargs)
+        if "id" not in event_data:
+            event_data["id"] = event_data.get("event_id") or str(uuid.uuid4())
+        
+        # Parse/format datetime objects
+        for field in ("next_attempt_at", "sent_at", "claimed_at", "created_at", "updated_at"):
+            if field in event_data and event_data[field]:
+                val = event_data[field]
+                if isinstance(val, datetime):
+                    event_data[field] = val.isoformat()
+        
+        return await self._store.save(_WEBHOOK_EVENTS, event_data)
+
+    async def get_webhook_event(self, event_id: str) -> Optional[dict]:
+        """Retrieve a webhook event by its event_id or primary key."""
+        res = await self._store.get(_WEBHOOK_EVENTS, event_id)
+        if not res:
+            results = await self._store.query(_WEBHOOK_EVENTS, {"event_id": event_id})
+            if results:
+                res = results[0]
+        return res
+
+    async def list_pending_webhook_events(self) -> list[dict]:
+        """List webhook events in pending status whose next_attempt_at has passed or is unset."""
+        now = datetime.now(timezone.utc)
+        if isinstance(self._store, PostgresStore):
+            await self._store._ensure_pool()
+            query = """
+            SELECT * FROM webhook_events
+            WHERE status = 'pending'
+              AND (next_attempt_at IS NULL OR next_attempt_at <= $1)
+            ORDER BY created_at ASC;
+            """
+            async with self._store._pool.acquire() as conn:
+                rows = await conn.fetch(query, now)
+                return [self._store._row_to_dict("webhook_events", r) for r in rows]
+        else:
+            results = await self._store.query(_WEBHOOK_EVENTS, {"status": "pending"})
+            filtered = []
+            for r in results:
+                next_attempt = r.get("next_attempt_at")
+                if not next_attempt:
+                    filtered.append(r)
+                else:
+                    dt = parse_dt(next_attempt)
+                    if dt and dt <= now:
+                        filtered.append(r)
+            return filtered
+
+    async def mark_webhook_event_sent(self, event_id: str, delivered_at: datetime, response_status_code: int = 200, response_body_preview: Optional[str] = None) -> None:
+        """Mark a webhook event as successfully sent."""
+        event = await self.get_webhook_event(event_id)
+        if event:
+            event["status"] = "sent"
+            event["sent_at"] = delivered_at.isoformat() if hasattr(delivered_at, "isoformat") else delivered_at
+            event["response_status_code"] = response_status_code
+            event["response_body_preview"] = response_body_preview
+            event["updated_at"] = datetime.now(timezone.utc).isoformat()
+            await self.save_webhook_event(**event)
+
+    async def mark_webhook_event_retry(self, event_id: str, attempt_count: int, next_attempt_at: datetime, last_error: str) -> None:
+        """Record a webhook sending failure and schedule a retry by putting it back to pending."""
+        event = await self.get_webhook_event(event_id)
+        if event:
+            event["status"] = "pending"
+            event["attempt_count"] = attempt_count
+            event["next_attempt_at"] = next_attempt_at.isoformat() if hasattr(next_attempt_at, "isoformat") else next_attempt_at
+            event["last_error"] = last_error
+            event["updated_at"] = datetime.now(timezone.utc).isoformat()
+            await self.save_webhook_event(**event)
+
+    async def mark_webhook_event_failed(self, event_id: str, last_error: str, attempt_count: Optional[int] = None) -> None:
+        """Mark a webhook event as permanently failed after max retries are exceeded."""
+        event = await self.get_webhook_event(event_id)
+        if event:
+            event["status"] = "failed"
+            event["last_error"] = last_error
+            if attempt_count is not None:
+                event["attempt_count"] = attempt_count
+            event["updated_at"] = datetime.now(timezone.utc).isoformat()
+            await self.save_webhook_event(**event)
+
+    async def claim_pending_webhook_events(self, limit: int, worker_id: str, now: Optional[datetime] = None) -> list[dict]:
+        """Claim pending webhook events atomically using row-level locking to avoid duplicates."""
+        if now is None:
+            now = datetime.now(timezone.utc)
+        elif now.tzinfo is None:
+            now = now.replace(tzinfo=timezone.utc)
+            
+        if isinstance(self._store, PostgresStore):
+            await self._store._ensure_pool()
+            # Atomic update using row lock FOR UPDATE SKIP LOCKED
+            query = """
+            UPDATE webhook_events
+            SET status = 'claimed',
+                claimed_by = $1,
+                claimed_at = $2,
+                updated_at = $2
+            WHERE id IN (
+                SELECT id FROM webhook_events
+                WHERE status = 'pending'
+                  AND (next_attempt_at IS NULL OR next_attempt_at <= $2)
+                ORDER BY created_at ASC
+                FOR UPDATE SKIP LOCKED
+                LIMIT $3
+            )
+            RETURNING *;
+            """
+            async with self._store._pool.acquire() as conn:
+                rows = await conn.fetch(query, worker_id, now, limit)
+                return [self._store._row_to_dict("webhook_events", r) for r in rows]
+        else:
+            # Local lock for JSONL mode to prevent duplicate concurrent claims
+            async with self._claim_lock:
+                results = await self._store.query(_WEBHOOK_EVENTS, {"status": "pending"})
+                claimed = []
+                for r in results:
+                    if len(claimed) >= limit:
+                        break
+                    next_attempt = r.get("next_attempt_at")
+                    if not next_attempt:
+                        eligible = True
+                    else:
+                        dt = parse_dt(next_attempt)
+                        eligible = dt and dt <= now
+                    
+                    if eligible:
+                        r["status"] = "claimed"
+                        r["claimed_by"] = worker_id
+                        r["claimed_at"] = now.isoformat()
+                        r["updated_at"] = now.isoformat()
+                        await self.save_webhook_event(**r)
+                        claimed.append(r)
+                return claimed
+
