@@ -23,8 +23,6 @@ from livekit.agents import (
     AgentSession,
     room_io,
     TurnHandlingOptions,
-    function_tool,
-    RunContext,
 )
 from livekit.plugins import openai as lk_openai
 from livekit.plugins import silero
@@ -471,6 +469,8 @@ async def entrypoint(ctx: JobContext):
         latency_recorder.mark("greeting_started")
         logger.info(f"Speaking opening line: {shared.config.opening_line}")
         await session.say(shared.config.opening_line)
+        from core.call_state import CallStage
+        agent.adapter.state_machine.call_state.transition_to(CallStage.INTEREST_CHECK)
     elif shared.config.opening_mode == "wait_for_user":
         logger.info("Opening mode: wait_for_user — agent will not speak first")
     else:

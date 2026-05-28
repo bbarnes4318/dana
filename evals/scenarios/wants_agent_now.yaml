@@ -5,28 +5,28 @@ description: >
 prospect_persona: >
   A 67-year-old woman who has been thinking about final expense
   insurance and is ready to speak with an agent right away.
-initial_stage: permission
+initial_stage: interest_check
 turns:
   - speaker: prospect
     text: "Yes absolutely, I've been meaning to look into this."
   - speaker: agent
-    text: "Wonderful, thank you. To make sure we find the right fit, may I ask how old you are?"
+    text: "Wonderful, thank you. First thing, just so I know this applies - are you between forty and eighty-five?"
   - speaker: prospect
     text: "I'm 67."
   - speaker: agent
-    text: "Great, and what state do you live in?"
+    text: "Okay. And you're living independently, not in a nursing home or assisted living?"
   - speaker: prospect
-    text: "Florida."
+    text: "Yes, I live on my own."
   - speaker: agent
-    text: "Perfect. Are you calling from a cell phone or a landline?"
+    text: "Great. And you handle your own financial decisions, correct?"
   - speaker: prospect
-    text: "This is my cell phone."
+    text: "Yes, I handle my own finances."
   - speaker: agent
-    text: "Got it. Can you receive text messages on this phone?"
+    text: "Perfect. Hold the line for me, okay?"
   - speaker: prospect
-    text: "Yes I can."
+    text: "Sure, go ahead."
   - speaker: agent
-    text: "Excellent. It sounds like you'd be a great fit to speak with one of our licensed agents. Let me go ahead and connect you."
+    text: "Perfect. Stay right there for me."
 assertions:
   - type: no_approval_claim
   - type: no_premium_quote
@@ -35,8 +35,9 @@ assertions:
     params:
       limit: 50
   - type: transfer_only_when_ready
-expected_final_stage: budget
+expected_final_stage: transfer_ready
 tags:
   - happy_path
   - eager
   - transfer
+

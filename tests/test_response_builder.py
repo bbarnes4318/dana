@@ -13,7 +13,7 @@ from core.response_builder import ResponseBuilder
 def test_build_instructions_basic() -> None:
     rb = ResponseBuilder()
     call_state = CallState(current_stage=CallStage.OPENING, turn_count=1)
-    lead = LeadProfile(first_name="John")
+    lead = LeadProfile(lead_id="123")
     handler_result = StateResult(response_guidance="Greet the prospect.")
 
     inst = rb.build_instructions(
@@ -27,16 +27,16 @@ def test_build_instructions_basic() -> None:
     assert "CURRENT CONVERSATION STATE" in inst
     assert "OPENING" in inst
     assert "Greet the prospect." in inst
-    assert "Name: John" in inst
+    assert "Lead ID: 123" in inst
 
 
 def test_build_instructions_with_objection_and_rag() -> None:
     rb = ResponseBuilder()
     call_state = CallState(
-        current_stage=CallStage.BUDGET, turn_count=3, objection_count=1
+        current_stage=CallStage.AGE_RANGE, turn_count=3, objection_count=1
     )
-    lead = LeadProfile(first_name="Jane", age=65)
-    handler_result = StateResult(response_guidance="Ask about budget.")
+    lead = LeadProfile(lead_id="123", age_range_confirmed=True)
+    handler_result = StateResult(response_guidance="Ask about age.")
     obg = ObjectionGuidance(
         intent="no_money",
         guidance_text="Explain affordability.",
@@ -58,3 +58,4 @@ def test_build_instructions_with_objection_and_rag() -> None:
     assert "Explain affordability." in inst
     assert "KNOWLEDGE CONTEXT" in inst
     assert "Some policy rules" in inst
+

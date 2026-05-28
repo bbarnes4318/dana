@@ -94,32 +94,24 @@ class AgentRuntime:
         self.events: list[RuntimeEvent] = []
 
         # Lazy-import state handlers to prevent circular dependencies
-        from states.age import AgeState
-        from states.beneficiary import BeneficiaryState
-        from states.budget import BudgetState
-        from states.callback import CallbackState
-        from states.disqualified import DisqualifiedState
-        from states.dnc import DNCState
-        from states.interest import InterestState
-        from states.objection import ObjectionState
         from states.opening import OpeningState
-        from states.permission import PermissionState
-        from states.phone_type import PhoneTypeState
-        from states.state_location import StateLocationState
-        from states.text_capable import TextCapableState
+        from states.interest_check import InterestCheckState
+        from states.age_range import AgeRangeState
+        from states.living_situation import LivingSituationState
+        from states.decision_maker import DecisionMakerState
+        from states.transfer_consent import TransferConsentState
         from states.transfer_ready import TransferReadyState
+        from states.callback import CallbackState
+        from states.dnc import DNCState
+        from states.disqualified import DisqualifiedState
 
         self._state_handlers: dict[CallStage, Any] = {
             CallStage.OPENING: OpeningState(),
-            CallStage.PERMISSION: PermissionState(),
-            CallStage.AGE: AgeState(),
-            CallStage.STATE: StateLocationState(),
-            CallStage.PHONE_TYPE: PhoneTypeState(),
-            CallStage.TEXT_CAPABLE: TextCapableState(),
-            CallStage.BUDGET: BudgetState(),
-            CallStage.BENEFICIARY: BeneficiaryState(),
-            CallStage.INTEREST: InterestState(),
-            CallStage.OBJECTION: ObjectionState(),
+            CallStage.INTEREST_CHECK: InterestCheckState(),
+            CallStage.AGE_RANGE: AgeRangeState(),
+            CallStage.LIVING_SITUATION: LivingSituationState(),
+            CallStage.DECISION_MAKER: DecisionMakerState(),
+            CallStage.TRANSFER_CONSENT: TransferConsentState(),
             CallStage.TRANSFER_READY: TransferReadyState(),
             CallStage.DISQUALIFIED: DisqualifiedState(),
             CallStage.CALLBACK: CallbackState(),
@@ -280,23 +272,7 @@ class AgentRuntime:
                 )
             )
         
-        # Ensure we check age boundaries and disqualify underage/overage leads
-        if call_state.current_stage == CallStage.AGE and lead.age is not None:
-            # Enforce configuration limits
-            age_config = self.prompt_loader.get_config("final_expense_config")
-            min_age = age_config.get("disqualifier_age_min", 45)
-            max_age = age_config.get("disqualifier_age_max", 85)
-            if not (min_age <= lead.age <= max_age):
-                lead.disqualified_reason = f"Age {lead.age} is outside eligible range ({min_age}-{max_age})"
-                from_stage = call_state.current_stage
-                self.state_machine.transition(CallStage.DISQUALIFIED.value)
-                self._publish_event(
-                    StateTransitionEvent(
-                        call_id=lead.call_id,
-                        from_stage=from_stage.value,
-                        to_stage=CallStage.DISQUALIFIED.value,
-                    )
-                )
+
 
         # 7. Query RAG context
         rag_query = user_text

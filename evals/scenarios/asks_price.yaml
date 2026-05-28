@@ -5,7 +5,7 @@ description: >
 prospect_persona: >
   A 55-year-old woman who is interested but wants to know the price
   before committing to anything.
-initial_stage: permission
+initial_stage: interest_check
 turns:
   - speaker: prospect
     text: "Okay sure, go ahead."
@@ -30,7 +30,7 @@ assertions:
   - type: response_under_word_limit
     params:
       limit: 50
-expected_final_stage: state
+expected_final_stage: living_situation
 tags:
   - objection
   - asks_price

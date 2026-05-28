@@ -5,7 +5,7 @@ description: >
 prospect_persona: >
   A 66-year-old woman who considers her age a private matter and
   doesn't want to share it with a stranger on the phone.
-initial_stage: age
+initial_stage: age_range
 turns:
   - speaker: prospect
     text: "I'd rather not say my age. That's personal."
@@ -27,7 +27,7 @@ assertions:
   - type: response_under_word_limit
     params:
       limit: 50
-expected_final_stage: age
+expected_final_stage: age_range
 tags:
   - objection
   - privacy

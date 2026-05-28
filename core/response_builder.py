@@ -51,15 +51,19 @@ class ResponseBuilder:
         parts.append("\n# LEAD DATA COLLECTED")
         profile_dict = lead_profile.to_summary_dict()
         fields_to_list = [
-            ("name", "Name"),
-            ("age", "Age"),
-            ("state", "State"),
-            ("phone_type", "Phone Type"),
-            ("can_receive_text", "Can Receive Text"),
-            ("budget_confirmed", "Budget Confirmed"),
-            ("has_existing_coverage", "Has Existing Coverage"),
-            ("beneficiary_or_family_reason", "Beneficiary/Family Reason"),
-            ("interest_level", "Interest Level"),
+            ("lead_id", "Lead ID"),
+            ("lead_phone_e164", "Lead Phone E164"),
+            ("campaign_id", "Campaign ID"),
+            ("open_to_review", "Open To Review"),
+            ("age_range_confirmed", "Age Range Confirmed"),
+            ("living_independently", "Living Independently"),
+            ("financial_decision_maker", "Financial Decision Maker"),
+            ("transfer_consent_confirmed", "Transfer Consent Confirmed"),
+            ("callback_time_local", "Callback Time Local"),
+            ("callback_timezone", "Callback Timezone"),
+            ("callback_requested", "Callback Requested"),
+            ("do_not_call_requested", "Do Not Call Requested"),
+            ("disqualified_reason", "Disqualified Reason"),
         ]
         for field_name, label in fields_to_list:
             val = profile_dict.get(field_name)

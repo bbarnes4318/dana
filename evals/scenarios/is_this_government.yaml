@@ -5,7 +5,7 @@ description: >
 prospect_persona: >
   A 68-year-old man who received a mailer and thinks this might be
   a government benefits program.
-initial_stage: permission
+initial_stage: interest_check
 turns:
   - speaker: prospect
     text: "Yeah, is this the government calling? Is this from Medicare?"
@@ -25,7 +25,7 @@ assertions:
   - type: no_approval_claim
   - type: no_premium_quote
   - type: one_question_max
-expected_final_stage: age
+expected_final_stage: age_range
 tags:
   - compliance
   - government

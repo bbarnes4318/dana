@@ -32,59 +32,48 @@ class TestDefaultValues:
 class TestIsQualified:
     def test_is_qualified(self) -> None:
         lp = LeadProfile(
-            age=65,
-            state="FL",
-            phone_type="cell",
-            budget_confirmed=True,
-            transfer_ready=True,
+            open_to_review=True,
+            age_range_confirmed=True,
+            living_independently=True,
+            financial_decision_maker=True,
+            transfer_consent_confirmed=True,
         )
         assert lp.is_qualified() is True
 
-    def test_is_qualified_with_high_interest(self) -> None:
-        """High interest can substitute for budget_confirmed."""
+    def test_not_qualified_missing_transfer_consent_confirmed(self) -> None:
         lp = LeadProfile(
-            age=65,
-            state="FL",
-            phone_type="cell",
-            interest_level="high",
-            transfer_ready=True,
-        )
-        assert lp.is_qualified() is True
-
-    def test_not_qualified_without_transfer_ready(self) -> None:
-        lp = LeadProfile(
-            age=65,
-            state="FL",
-            phone_type="cell",
-            budget_confirmed=True,
-            transfer_ready=False,
+            open_to_review=True,
+            age_range_confirmed=True,
+            living_independently=True,
+            financial_decision_maker=True,
+            transfer_consent_confirmed=False,
         )
         assert lp.is_qualified() is False
 
     def test_not_qualified_missing_age(self) -> None:
         lp = LeadProfile(
-            state="FL",
-            phone_type="cell",
-            budget_confirmed=True,
-            transfer_ready=True,
+            open_to_review=True,
+            living_independently=True,
+            financial_decision_maker=True,
+            transfer_consent_confirmed=True,
         )
         assert lp.is_qualified() is False
 
-    def test_not_qualified_missing_state(self) -> None:
+    def test_not_qualified_missing_living_situation(self) -> None:
         lp = LeadProfile(
-            age=65,
-            phone_type="cell",
-            budget_confirmed=True,
-            transfer_ready=True,
+            open_to_review=True,
+            age_range_confirmed=True,
+            financial_decision_maker=True,
+            transfer_consent_confirmed=True,
         )
         assert lp.is_qualified() is False
 
-    def test_not_qualified_missing_phone_type(self) -> None:
+    def test_not_qualified_missing_decision_maker(self) -> None:
         lp = LeadProfile(
-            age=65,
-            state="FL",
-            budget_confirmed=True,
-            transfer_ready=True,
+            open_to_review=True,
+            age_range_confirmed=True,
+            living_independently=True,
+            transfer_consent_confirmed=True,
         )
         assert lp.is_qualified() is False
 
@@ -95,22 +84,20 @@ class TestCompletenessScore:
         assert lp.completeness_score() == 0.0
 
     def test_completeness_score_partial(self) -> None:
-        lp = LeadProfile(age=65, state="FL")
+        lp = LeadProfile(open_to_review=True, age_range_confirmed=True)
         score = lp.completeness_score()
         assert 0.0 < score < 1.0
 
     def test_completeness_score_full(self) -> None:
         lp = LeadProfile(
-            first_name="John",
-            last_name="Doe",
-            age=65,
-            state="FL",
-            phone_type="cell",
-            can_receive_text=True,
-            budget_confirmed=True,
-            has_existing_coverage=False,
-            beneficiary_or_family_reason="wife",
-            interest_level="high",
+            lead_id="123",
+            lead_phone_e164="+15551234567",
+            campaign_id="abc",
+            open_to_review=True,
+            age_range_confirmed=True,
+            living_independently=True,
+            financial_decision_maker=True,
+            transfer_consent_confirmed=True,
         )
         assert lp.completeness_score() == 1.0
 
@@ -118,22 +105,22 @@ class TestCompletenessScore:
 class TestDNCBlocksQualification:
     def test_dnc_blocks_qualification(self) -> None:
         lp = LeadProfile(
-            age=65,
-            state="FL",
-            phone_type="cell",
-            budget_confirmed=True,
-            transfer_ready=True,
+            open_to_review=True,
+            age_range_confirmed=True,
+            living_independently=True,
+            financial_decision_maker=True,
+            transfer_consent_confirmed=True,
             do_not_call_requested=True,
         )
         assert lp.is_qualified() is False
 
     def test_disqualified_reason_blocks_qualification(self) -> None:
         lp = LeadProfile(
-            age=65,
-            state="FL",
-            phone_type="cell",
-            budget_confirmed=True,
-            transfer_ready=True,
+            open_to_review=True,
+            age_range_confirmed=True,
+            living_independently=True,
+            financial_decision_maker=True,
+            transfer_consent_confirmed=True,
             disqualified_reason="Age outside range",
         )
         assert lp.is_qualified() is False
@@ -141,11 +128,12 @@ class TestDNCBlocksQualification:
 
 class TestToSummaryDict:
     def test_to_summary_dict_keys(self) -> None:
-        lp = LeadProfile(first_name="Jane", age=70, state="TX")
+        lp = LeadProfile(first_name="Jane", open_to_review=True, age_range_confirmed=True)
         summary = lp.to_summary_dict()
         assert summary["name"] == "Jane"
-        assert summary["age"] == 70
-        assert summary["state"] == "TX"
+        assert summary["open_to_review"] is True
+        assert summary["age_range_confirmed"] is True
         assert "call_id" in summary
         assert "is_qualified" in summary
         assert "completeness" in summary
+

@@ -24,12 +24,13 @@ from evals.assertions import (
     assert_transfer_only_when_ready,
 )
 from evals.scenario_schema import EvalAssertion, EvalScenario
-from states.age import AgeState
 from states.opening import OpeningState
-from states.permission import PermissionState
-from states.phone_type import PhoneTypeState
-from states.state_location import StateLocationState
-from states.text_capable import TextCapableState
+from states.interest_check import InterestCheckState
+from states.age_range import AgeRangeState
+from states.living_situation import LivingSituationState
+from states.decision_maker import DecisionMakerState
+from states.transfer_consent import TransferConsentState
+from states.transfer_ready import TransferReadyState
 
 logger = logging.getLogger(__name__)
 
@@ -39,11 +40,12 @@ logger = logging.getLogger(__name__)
 
 _STATE_HANDLERS: dict[CallStage, Any] = {
     CallStage.OPENING: OpeningState(),
-    CallStage.PERMISSION: PermissionState(),
-    CallStage.AGE: AgeState(),
-    CallStage.STATE: StateLocationState(),
-    CallStage.PHONE_TYPE: PhoneTypeState(),
-    CallStage.TEXT_CAPABLE: TextCapableState(),
+    CallStage.INTEREST_CHECK: InterestCheckState(),
+    CallStage.AGE_RANGE: AgeRangeState(),
+    CallStage.LIVING_SITUATION: LivingSituationState(),
+    CallStage.DECISION_MAKER: DecisionMakerState(),
+    CallStage.TRANSFER_CONSENT: TransferConsentState(),
+    CallStage.TRANSFER_READY: TransferReadyState(),
 }
 
 

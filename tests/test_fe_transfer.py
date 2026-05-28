@@ -115,6 +115,13 @@ async def test_runtime_transfer_failure_transitions_to_callback(runtime: AgentRu
     runtime.state_machine.call_state.transition_to(CallStage.TRANSFER_READY)
     assert runtime.state_machine.call_state.current_stage == CallStage.TRANSFER_READY
 
+    # Qualify the lead profile
+    runtime.state_machine.lead.open_to_review = True
+    runtime.state_machine.lead.age_range_confirmed = True
+    runtime.state_machine.lead.living_independently = True
+    runtime.state_machine.lead.financial_decision_maker = True
+    runtime.state_machine.lead.transfer_consent_confirmed = True
+
     # Process turn
     result = await runtime.process_turn("I am ready to speak with an agent.")
 
@@ -125,3 +132,4 @@ async def test_runtime_transfer_failure_transitions_to_callback(runtime: AgentRu
     # 2. Agent response should be overridden to offer a callback
     assert "unable to connect" in result.agent_response
     assert "schedule a convenient time" in result.agent_response
+

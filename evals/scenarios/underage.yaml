@@ -5,12 +5,16 @@ description: >
 prospect_persona: >
   A 30-year-old man who received a call by mistake and is too young
   for final expense products.
-initial_stage: age
+initial_stage: age_range
 turns:
   - speaker: prospect
     text: "I'm 30 years old."
   - speaker: agent
-    text: "Thank you for letting me know. Unfortunately our program is designed for folks between 45 and 85, so it wouldn't be a fit for you right now. I appreciate your time and wish you all the best."
+    text: "Just so I make sure I heard you right, you’re not between forty and eighty-five, correct?"
+  - speaker: prospect
+    text: "Yes, that's correct, I'm 30."
+  - speaker: agent
+    text: "Understood. These usually fit people in that range, so I won’t waste your time. Take care."
 assertions:
   - type: no_forbidden_phrase
     expected: null

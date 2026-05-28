@@ -19,17 +19,13 @@ class TestQualificationOrder:
     def test_qualification_order(self) -> None:
         """Walk through the full happy-path qualification order."""
         sm = StateMachine()
-        sm.lead.phone_type = "cell"  # so TEXT_CAPABLE is included
 
         expected_sequence = [
-            CallStage.PERMISSION,
-            CallStage.AGE,
-            CallStage.STATE,
-            CallStage.PHONE_TYPE,
-            CallStage.TEXT_CAPABLE,
-            CallStage.BUDGET,
-            CallStage.BENEFICIARY,
-            CallStage.INTEREST,
+            CallStage.INTEREST_CHECK,
+            CallStage.AGE_RANGE,
+            CallStage.LIVING_SITUATION,
+            CallStage.DECISION_MAKER,
+            CallStage.TRANSFER_CONSENT,
             CallStage.TRANSFER_READY,
         ]
 
@@ -52,39 +48,28 @@ class TestTransitionToDNC:
 class TestCanTransfer:
     def test_can_transfer_when_qualified(self) -> None:
         sm = StateMachine()
-        sm.lead.age = 65
-        sm.lead.state = "FL"
-        sm.lead.phone_type = "cell"
-        sm.lead.budget_confirmed = True
-        sm.lead.transfer_ready = True
+        sm.lead.open_to_review = True
+        sm.lead.age_range_confirmed = True
+        sm.lead.living_independently = True
+        sm.lead.financial_decision_maker = True
+        sm.lead.transfer_consent_confirmed = True
 
         assert sm.can_transfer() is True
 
     def test_cannot_transfer_when_missing_data(self) -> None:
         sm = StateMachine()
-        # Only set age — missing state, phone_type, budget, etc.
-        sm.lead.age = 65
+        # Only set age_range_confirmed — missing others
+        sm.lead.age_range_confirmed = True
         assert sm.can_transfer() is False
 
     def test_cannot_transfer_when_dnc(self) -> None:
         sm = StateMachine()
-        sm.lead.age = 65
-        sm.lead.state = "FL"
-        sm.lead.phone_type = "cell"
-        sm.lead.budget_confirmed = True
-        sm.lead.transfer_ready = True
+        sm.lead.open_to_review = True
+        sm.lead.age_range_confirmed = True
+        sm.lead.living_independently = True
+        sm.lead.financial_decision_maker = True
+        sm.lead.transfer_consent_confirmed = True
         sm.lead.do_not_call_requested = True
 
         assert sm.can_transfer() is False
 
-
-class TestSkipTextCapable:
-    def test_skip_text_capable_for_landline(self) -> None:
-        sm = StateMachine()
-        sm.lead.phone_type = "landline"
-        sm.call_state.transition_to(CallStage.PHONE_TYPE)
-
-        next_stage = sm.get_next_stage()
-        assert next_stage == CallStage.BUDGET, (
-            f"Expected BUDGET (skipping TEXT_CAPABLE) but got {next_stage}"
-        )

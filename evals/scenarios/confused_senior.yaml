@@ -32,7 +32,7 @@ assertions:
   - type: response_under_word_limit
     params:
       limit: 50
-expected_final_stage: permission
+expected_final_stage: interest_check
 tags:
   - senior
   - confused

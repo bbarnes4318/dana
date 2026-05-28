@@ -16,14 +16,11 @@ from core.lead_profile import LeadProfile
 # Qualification order — the "happy path" through the call.
 _QUALIFICATION_ORDER: list[CallStage] = [
     CallStage.OPENING,
-    CallStage.PERMISSION,
-    CallStage.AGE,
-    CallStage.STATE,
-    CallStage.PHONE_TYPE,
-    CallStage.TEXT_CAPABLE,  # only visited if phone_type == "cell"
-    CallStage.BUDGET,
-    CallStage.BENEFICIARY,
-    CallStage.INTEREST,
+    CallStage.INTEREST_CHECK,
+    CallStage.AGE_RANGE,
+    CallStage.LIVING_SITUATION,
+    CallStage.DECISION_MAKER,
+    CallStage.TRANSFER_CONSENT,
     CallStage.TRANSFER_READY,
 ]
 
@@ -74,7 +71,6 @@ class StateMachine:
     def get_next_stage(self) -> CallStage:
         """Return the next stage in the qualification order.
 
-        Skips ``TEXT_CAPABLE`` when the phone type is not ``"cell"``.
         If the current stage is not in the qualification order (e.g.
         OBJECTION, DNC), returns the current stage unchanged.
         """
@@ -89,16 +85,7 @@ class StateMachine:
         if next_idx >= len(_QUALIFICATION_ORDER):
             return CallStage.TRANSFER_READY
 
-        candidate = _QUALIFICATION_ORDER[next_idx]
-
-        # Skip TEXT_CAPABLE for landline users
-        if candidate == CallStage.TEXT_CAPABLE and self.lead.phone_type != "cell":
-            next_idx += 1
-            if next_idx >= len(_QUALIFICATION_ORDER):
-                return CallStage.TRANSFER_READY
-            candidate = _QUALIFICATION_ORDER[next_idx]
-
-        return candidate
+        return _QUALIFICATION_ORDER[next_idx]
 
     def can_transfer(self) -> bool:
         """Return ``True`` if the lead currently meets transfer criteria.

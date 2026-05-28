@@ -5,7 +5,7 @@ description: >
 prospect_persona: >
   A 62-year-old man on a fixed income who is worried about the cost
   of any insurance product.
-initial_stage: permission
+initial_stage: interest_check
 turns:
   - speaker: prospect
     text: "Sure, I can talk."
@@ -31,7 +31,7 @@ assertions:
   - type: response_under_word_limit
     params:
       limit: 50
-expected_final_stage: state
+expected_final_stage: living_situation
 tags:
   - objection
   - no_money

@@ -5,7 +5,7 @@ description: >
 prospect_persona: >
   A 70-year-old man who already has a life insurance policy and does
   not want to be talked into replacing it.
-initial_stage: permission
+initial_stage: interest_check
 turns:
   - speaker: prospect
     text: "Yeah sure, go ahead."
@@ -29,7 +29,7 @@ assertions:
   - type: no_approval_claim
   - type: no_premium_quote
   - type: one_question_max
-expected_final_stage: state
+expected_final_stage: living_situation
 tags:
   - objection
   - already_covered

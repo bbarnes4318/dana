@@ -66,19 +66,16 @@ def test_callback_requested_triggers_callback() -> None:
 
 
 def test_no_actions_during_qualification() -> None:
-    """Mid-qualification stages (e.g. AGE, BUDGET) should yield no actions."""
+    """Mid-qualification stages (e.g. AGE_RANGE, DECISION_MAKER) should yield no actions."""
     policy = ActionPolicy()
 
     for stage in (
         CallStage.OPENING,
-        CallStage.PERMISSION,
-        CallStage.AGE,
-        CallStage.STATE,
-        CallStage.PHONE_TYPE,
-        CallStage.TEXT_CAPABLE,
-        CallStage.BUDGET,
-        CallStage.BENEFICIARY,
-        CallStage.INTEREST,
+        CallStage.INTEREST_CHECK,
+        CallStage.AGE_RANGE,
+        CallStage.LIVING_SITUATION,
+        CallStage.DECISION_MAKER,
+        CallStage.TRANSFER_CONSENT,
     ):
         state = _make_state(stage)
         actions = policy.get_recommended_actions(state, _EMPTY_PROFILE)
@@ -91,7 +88,7 @@ def test_no_actions_during_qualification() -> None:
 def test_escalation_on_many_objections() -> None:
     """Three or more objections should trigger an escalation."""
     policy = ActionPolicy()
-    state = _make_state(CallStage.OBJECTION, objection_count=3)
+    state = _make_state(CallStage.OPENING, objection_count=3)
 
     assert policy.should_escalate(state, _EMPTY_PROFILE) is True
 
@@ -103,6 +100,6 @@ def test_escalation_on_many_objections() -> None:
 def test_no_escalation_below_threshold() -> None:
     """Fewer than three objections should not trigger escalation."""
     policy = ActionPolicy()
-    state = _make_state(CallStage.OBJECTION, objection_count=2)
+    state = _make_state(CallStage.OPENING, objection_count=2)
 
     assert policy.should_escalate(state, _EMPTY_PROFILE) is False
