@@ -26,7 +26,9 @@ from speech.context_registry import (
 )
 from speech.phone_audio_preprocessor import PhoneAudioPreprocessor
 from speech.endpoint_tuner import get_endpoint_delays, safe_update_endpointing
-from speech.hybrid_stt_router import HybridSTTRouter, get_speech_health_report
+from speech.hybrid_stt_router import HybridSTTRouter, get_speech_health_report, _local_failures
+from livekit.agents import utils
+from livekit.agents.stt import SpeechEvent, SpeechEventType, SpeechData
 
 
 @pytest.fixture
@@ -213,16 +215,27 @@ def test_hybrid_stt_router_overload_routing(clean_registry: None) -> None:
 
     # 1. Under normal load -> local
     import speech.hybrid_stt_router as router_module
-    router_module._active_local_tasks = 1
+    from speech.local_stt_load import (
+        increment_active_local_stt_tasks,
+        decrement_active_local_stt_tasks,
+        get_active_local_stt_tasks,
+    )
+    
+    # Reset first
+    while get_active_local_stt_tasks() > 0:
+        decrement_active_local_stt_tasks()
+
+    increment_active_local_stt_tasks()  # 1 active task
     assert router.select_provider("test-call-1") == "local"
 
     # 2. Under overload load (active tasks >= max limit) -> deepgram
-    router_module._active_local_tasks = 2
+    increment_active_local_stt_tasks()  # 2 active tasks
     assert router.select_provider("test-call-1") == "deepgram"
     assert "concurrency_overload" in router_module._last_decision_reason["test-call-1"]
 
     # Reset tasks
-    router_module._active_local_tasks = 0
+    decrement_active_local_stt_tasks()
+    decrement_active_local_stt_tasks()
 
     # 3. Poor line quality -> deepgram
     update_line_quality("test-call-1", 0.45)
@@ -314,3 +327,206 @@ def test_health_report(clean_registry: None) -> None:
     assert "active_local_stt_tasks" in report
     assert "preprocessing_enabled" in report
     assert "endpoint_mode" in report
+
+
+def test_hybrid_stt_no_midstream_provider_swap() -> None:
+    """Verify that pushing a frame that fails does not swap provider to Deepgram mid-stream."""
+    config = VoiceConfig(stt_routing_mode="hybrid", cloud_stt_on_failure=True)
+    local_stt = LocallyHostedSTT(STTConfig())
+    router = HybridSTTRouter(config, local_stt)
+    
+    # Mock Deepgram availability
+    router._deepgram_stt = "mock-deepgram-stt"
+    
+    stream = router.stream()
+    # Mock local stream to fail on push_frame
+    class FailingStream:
+        async def push_frame(self, frame):
+            raise RuntimeError("Local push failed")
+        async def aclose(self, wait=True):
+            pass
+            
+    stream.active_stream = FailingStream()
+    
+    # Push frame should fail, but should not hot-swap to deepgram stream or push to deepgram inside the call
+    frame = rtc.AudioFrame(data=b"\x00" * 320, sample_rate=16000, num_channels=1, samples_per_channel=160)
+    with pytest.raises(RuntimeError, match="Local push failed"):
+        asyncio.run(stream.push_frame(frame))
+        
+    assert stream.provider == "local"  # Did not swap provider mid-stream!
+    assert _local_failures.get(stream.call_id, 0) == 1
+    assert stream._closed is True
+
+
+def test_local_task_counter_transcription_jobs() -> None:
+    """Verify local task counter behaves correctly during transcription jobs and pushes."""
+    from speech.local_stt_load import get_active_local_stt_tasks, increment_active_local_stt_tasks, decrement_active_local_stt_tasks
+    
+    # Reset count
+    while get_active_local_stt_tasks() > 0:
+        decrement_active_local_stt_tasks()
+        
+    config = VoiceConfig(stt_routing_mode="hybrid", local_stt_max_concurrent_tasks=2)
+    local_stt = LocallyHostedSTT(STTConfig())
+    router = HybridSTTRouter(config, local_stt)
+    router._deepgram_stt = "mock-deepgram-stt"
+    
+    stream = router.stream()
+    # Mock push_frame to succeed
+    class FakeStream:
+        async def push_frame(self, frame):
+            pass
+            
+    stream.active_stream = FakeStream()
+    
+    # 1. Pushing frames should NOT increase active transcription count
+    frame = rtc.AudioFrame(data=b"\x00" * 320, sample_rate=16000, num_channels=1, samples_per_channel=160)
+    asyncio.run(stream.push_frame(frame))
+    assert get_active_local_stt_tasks() == 0
+    
+    # 2. Recognize_impl using local STT should wrap task counter
+    # Mock local recognize_impl
+    class FakeLocalSTT:
+        async def _recognize_impl(self, buffer, language=None):
+            assert get_active_local_stt_tasks() == 1
+            return SpeechEvent(type=SpeechEventType.FINAL_TRANSCRIPT, alternatives=[SpeechData(text="test", language="en")])
+            
+    router.local_stt = FakeLocalSTT()
+    asyncio.run(router._recognize_impl(utils.AudioBuffer([])))
+    assert get_active_local_stt_tasks() == 0
+
+
+def test_stt_cloud_fails_if_not_configured() -> None:
+    """Verify that cloud mode fails clearly if Deepgram is not configured."""
+    config = VoiceConfig(stt_routing_mode="cloud")
+    local_stt = LocallyHostedSTT(STTConfig())
+    
+    # Remove credentials and plugin
+    orig_key = os.environ.pop("DEEPGRAM_API_KEY", None)
+    try:
+        # Initializing stream should fail since provider is cloud and not configured
+        with pytest.raises(RuntimeError, match="provider not configured"):
+            router = HybridSTTRouter(config, local_stt)
+            router.stream()
+    finally:
+        if orig_key:
+            os.environ["DEEPGRAM_API_KEY"] = orig_key
+
+
+def test_warm_bridge_no_room_disconnect() -> None:
+    """Verify that warm bridge success does not call room.disconnect(), but terminal outcomes do."""
+    from main import DanaAgent
+    from unittest.mock import MagicMock, AsyncMock
+    
+    agent = DanaAgent(shared=MagicMock(), latency_recorder=MagicMock())
+    agent.room = MagicMock()
+    agent.room.is_connected.return_value = True
+    agent.room.disconnect = AsyncMock()
+    agent.session = AsyncMock()
+    
+    # 1. Successful warm bridge
+    agent.warm_bridge_active = False
+    agent.should_disconnect = False
+    
+    # Mock result and events
+    from core.runtime_events import ToolTriggeredEvent
+    event = ToolTriggeredEvent(
+        call_id="test-call-id",
+        tool_name="feTransfer",
+        success=True,
+        result_message="warm bridge success"
+    )
+            
+    class FakeResult:
+        def __init__(self):
+            self.should_end_call = True
+            self.agent_response = "Hold on."
+            self.stage = "TRANSFER_READY"
+            
+    agent.adapter = MagicMock()
+    agent.adapter.runtime.events = [event]
+    agent.adapter.process_user_turn = AsyncMock()
+    agent.adapter.process_user_turn.return_value = FakeResult()
+    agent.adapter.convert_response_to_stream = MagicMock()
+    async def fake_stream(response):
+        yield response
+    agent.adapter.convert_response_to_stream.return_value = fake_stream("Hold on.")
+    
+    # Run the stream collection to trigger the disconnect evaluation block
+    async def run_llm_node():
+        async for chunk in agent.llm_node(MagicMock(), [], MagicMock()):
+            pass
+            
+    asyncio.run(run_llm_node())
+    
+    # Warm bridge should set flags but NOT trigger room disconnect immediately
+    assert agent.should_disconnect is False
+    assert agent.warm_bridge_active is True
+    agent.room.disconnect.assert_not_called()
+    
+    # 2. Terminal DNC outcome
+    agent.warm_bridge_active = False
+    agent.should_disconnect = False
+    
+    # Result DNC
+    class DNCResult:
+        def __init__(self):
+            self.should_end_call = True
+            self.agent_response = "Goodbye."
+            self.stage = "DNC"
+            
+    agent.adapter.runtime.events = []
+    
+    # Mock chat_fn or process_user_turn
+    agent.adapter.process_user_turn = AsyncMock()
+    agent.adapter.process_user_turn.return_value = DNCResult()
+    agent.adapter.convert_response_to_stream.return_value = fake_stream("Goodbye.")
+    
+    asyncio.run(run_llm_node())
+    
+    # DNC should set should_disconnect = True
+    assert agent.should_disconnect is True
+    assert agent.warm_bridge_active is False
+
+
+def test_runtime_finalization_audits() -> None:
+    """Verify that overridden callback offer responses are audited and fallbacks are applied on failure."""
+    from core.agent_runtime import AgentRuntime
+    from unittest.mock import MagicMock
+    
+    # Create runtime instance
+    runtime = AgentRuntime(
+        prompt_loader=MagicMock(),
+        state_machine=MagicMock(),
+        objection_classifier=MagicMock(),
+        objection_policy=MagicMock(),
+        context_builder=MagicMock(),
+        action_policy=MagicMock(),
+        tool_registry=MagicMock(),
+        compliance_filter=MagicMock(),
+        output_validator=MagicMock(),
+        call_stop_policy=MagicMock(),
+        pii_redactor=MagicMock(),
+        repository=MagicMock(),
+    )
+    
+    # Mock compliance filter, output validator, and spoken output auditor
+    runtime.compliance_filter = MagicMock()
+    runtime.output_validator = MagicMock()
+    runtime.spoken_output_auditor = MagicMock()
+    
+    # 1. Compliant text should pass finalization audit
+    runtime.compliance_filter.check.return_value.is_safe = True
+    runtime.output_validator.validate.return_value.is_valid = True
+    runtime.spoken_output_auditor.audit.return_value = []
+    
+    text = "Looks like I couldn't get them on the line. Let's schedule a callback instead."
+    finalized, compliant = runtime._finalize_spoken_response(text, "callback")
+    assert finalized == text
+    assert compliant is True
+    
+    # 2. Non-compliant text (e.g. contains markdown or corporate phrases) should trigger stage fallback
+    runtime.compliance_filter.check.return_value.is_safe = False
+    finalized, compliant = runtime._finalize_spoken_response(text, "callback")
+    assert finalized == "No problem. Would later today or tomorrow be better?"
+    assert compliant is False

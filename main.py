@@ -190,6 +190,10 @@ class DanaAgent(Agent):
         tools: list[llm.Tool],
         model_settings: any,
     ) -> AsyncIterable[llm.ChatChunk]:
+        if self.warm_bridge_active:
+            logger.info("warm_bridge_active_dana_suppressed: Suppressing Dana responses after warm bridge success.")
+            return
+
         self._latency_recorder.mark("llm_request_start")
         
         # Get the latest user message
@@ -282,9 +286,12 @@ class DanaAgent(Agent):
                 
                 async def warm_bridge_leave():
                     await asyncio.sleep(15.0)
-                    logger.info("Warm bridge completed: Dana leaving room.")
-                    if self.room and self.room.is_connected():
-                        await self.room.disconnect()
+                    logger.info("warm_bridge_active_dana_suppressed: Dana leaving agent session only.")
+                    if getattr(self, "session", None):
+                        try:
+                            await self.session.aclose()
+                        except Exception as e:
+                            logger.error(f"Error closing agent session during warm bridge: {e}")
                 asyncio.create_task(warm_bridge_leave())
             else:
                 # DNC, disqualified, wrong number, callback scheduled, or cold transfer -> disconnect after TTS finishes speaking

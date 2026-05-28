@@ -27,24 +27,15 @@ from speech.context_registry import (
 
 logger = logging.getLogger(__name__)
 
-# Global concurrency tracker for local STT tasks
-_active_local_tasks: int = 0
+from speech.local_stt_load import (
+    get_active_local_stt_tasks,
+    AsyncTrackLocalSTTTask,
+)
+
 # Track local failures per call_id
 _local_failures: Dict[str, int] = {}
 # Track last decision reason per call_id
 _last_decision_reason: Dict[str, str] = {}
-
-
-class TrackLocalSTTTask:
-    """Context manager to track active local Whisper tasks safely in the asyncio loop."""
-
-    async def __aenter__(self) -> None:
-        global _active_local_tasks
-        _active_local_tasks += 1
-
-    async def __aexit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
-        global _active_local_tasks
-        _active_local_tasks = max(0, _active_local_tasks - 1)
 
 
 def get_speech_health_report(call_id: Optional[str] = None) -> Dict[str, Any]:
@@ -67,7 +58,7 @@ def get_speech_health_report(call_id: Optional[str] = None) -> Dict[str, Any]:
         "stt_routing_mode": cfg.stt_routing_mode,
         "selected_provider": _last_decision_reason.get(active_cid, "local").split(":")[0],
         "fallback_reason": _last_decision_reason.get(active_cid, "none"),
-        "active_local_stt_tasks": _active_local_tasks,
+        "active_local_stt_tasks": get_active_local_stt_tasks(),
         "cloud_available": dg_configured,
         "preprocessing_enabled": cfg.enable_audio_preprocessing,
         "endpoint_mode": cfg.endpoint_mode,
@@ -157,7 +148,7 @@ class HybridSTTRouter(stt.STT):
                 return "deepgram"
 
         # 4. Check for GPU/CPU task concurrency overload
-        if _active_local_tasks >= self.config.local_stt_max_concurrent_tasks:
+        if get_active_local_stt_tasks() >= self.config.local_stt_max_concurrent_tasks:
             _last_decision_reason[active_cid] = "deepgram:concurrency_overload"
             return "deepgram"
 
@@ -180,7 +171,7 @@ class HybridSTTRouter(stt.STT):
             f"[STT ROUTER] call_id={active_cid} campaign_id={active_camp} "
             f"provider_selected={provider} reason={reason} "
             f"line_quality_score={get_current_line_quality():.2f} "
-            f"active_local_tasks={_active_local_tasks} "
+            f"active_local_tasks={get_active_local_stt_tasks()} "
             f"fallback_enabled={self.config.cloud_stt_on_failure} timestamp={time.time()}"
         )
 
@@ -220,7 +211,7 @@ class HybridSTTRouter(stt.STT):
                     _local_failures[call_id] = _local_failures.get(call_id, 0) + 1
 
         # Use Local STT with concurrency tracking
-        async with TrackLocalSTTTask():
+        async with AsyncTrackLocalSTTTask():
             return await self.local_stt._recognize_impl(buffer, language=language)
 
     def stream(self) -> HybridSTTStream:
@@ -281,34 +272,26 @@ class HybridSTTStream(stt.SpeechStream):
                 logger.error(f"Streaming preprocessor failed: {e}")
 
         try:
-            # We track concurrency dynamically if local is active
-            if self.provider == "local":
-                async with TrackLocalSTTTask():
-                    await self.active_stream.push_frame(frame)
-            else:
-                await self.active_stream.push_frame(frame)
+            await self.active_stream.push_frame(frame)
         except Exception as e:
             logger.error(f"STT stream push frame failed on ({self.provider}): {e}")
             
-            # Switch to fallback only at turn boundaries if local fails
-            if self.provider == "local" and self.router.config.cloud_stt_on_failure:
+            # Switch to fallback only at stream/session boundary or clean utterance boundary.
+            # Do NOT hot-swap providers mid-utterance.
+            if self.provider == "local":
                 _local_failures[self.call_id] = _local_failures.get(self.call_id, 0) + 1
-                dg = self.router.deepgram_stt
-                if dg:
-                    logger.info("Local STT failed during push. Swapped to Deepgram fallback.")
-                    self.provider = "deepgram"
-                    self.router.log_decision(
-                        "deepgram",
-                        reason="local_failure_fallback",
-                        call_id=self.call_id,
-                        campaign_id=self.campaign_id,
-                    )
-                    await self.active_stream.aclose()
-                    self.active_stream = dg.stream()
-                    await self.active_stream.push_frame(frame)
+                self.router.log_decision(
+                    "local",
+                    reason=f"local_stream_push_failed: {e}",
+                    call_id=self.call_id,
+                    campaign_id=self.campaign_id,
+                )
+            self._closed = True
+            await self.active_stream.aclose(wait=False)
+            raise e
 
     async def _run(self) -> AsyncIterator[SpeechEvent]:
-        """Iterates and yields transcript speech events safely, supporting delegate hot-swapping."""
+        """Iterates and yields transcript speech events safely."""
         queue: asyncio.Queue[Optional[SpeechEvent]] = asyncio.Queue()
         forward_task = None
         current_delegate = None
@@ -350,3 +333,4 @@ class HybridSTTStream(stt.SpeechStream):
         # Clear preprocessor cache for the call
         if self._preprocessor:
             self._preprocessor.cleanup_call(self.call_id)
+

@@ -391,45 +391,9 @@ class AgentRuntime:
         # E. Prosody Controller (TTS formatting)
         agent_response = self.prosody_controller.format_for_tts(agent_response)
 
-        # F. Second Validation Check (ComplianceFilter and OutputValidator again)
-        compliance_res_2 = self.compliance_filter.check(agent_response)
-        output_val_res_2 = self.output_validator.validate(agent_response, call_state.current_stage.value)
-
-        def get_stage_fallback(stage: str) -> str:
-            stage_lower = stage.lower()
-            if stage_lower in ("dnc", "disqualified"):
-                return "Understood. I’ll make a note of that. Take care."
-            elif stage_lower == "callback":
-                return "No problem. Would later today or tomorrow be better?"
-            elif stage_lower in ("transfer_consent", "transfer_ready"):
-                return "Perfect. Stay right there for me."
-            else:
-                return "Okay."
-
-        # If modified response fails compliance/output validation, or is empty, use stage fallback
-        if not agent_response.strip() or not compliance_res_2.is_safe or not output_val_res_2.is_valid:
-            agent_response = get_stage_fallback(call_state.current_stage.value)
-            compliance_ok = False
-            issues_2 = []
-            if not compliance_res_2.is_safe:
-                issues_2.extend(compliance_res_2.violations)
-            if not output_val_res_2.is_valid:
-                issues_2.extend(output_val_res_2.issues)
-            if issues_2:
-                self._publish_event(
-                    ValidationFailedEvent(
-                        call_id=lead.call_id,
-                        response=agent_response,
-                        validator_type="compliance" if not compliance_res_2.is_safe else "formatting",
-                        issues=issues_2,
-                    )
-                )
-
-        # G. Spoken Output Auditor
-        violations = self.spoken_output_auditor.audit(agent_response, call_state.current_stage.value)
-        if violations:
-            logger.warning("Spoken output auditor found violations in final response: %s. Using stage-specific fallback.", violations)
-            agent_response = get_stage_fallback(call_state.current_stage.value)
+        # F. Finalize the normal agent response through compliance, output validator, and spoken output auditor
+        agent_response, compliance_ok_2 = self._finalize_spoken_response(agent_response, call_state.current_stage.value)
+        compliance_ok = compliance_ok and compliance_ok_2
 
         # 12. Determine and fire recommended actions/tools
         tool_results = []
@@ -511,6 +475,9 @@ class AgentRuntime:
                 except Exception as exc:
                     logger.error("Error executing tool %s: %s", action.tool_name, exc)
                     tool_results.append(str(exc))
+        # 12b. Finalize response again in case of tool overrides
+        agent_response, compliance_ok_tool = self._finalize_spoken_response(agent_response, call_state.current_stage.value)
+        compliance_ok = compliance_ok and compliance_ok_tool
 
         # 13. Publish ResponseGeneratedEvent & Save agent turn and snapshot
         self._publish_event(
@@ -611,3 +578,57 @@ class AgentRuntime:
             )
         except Exception as exc:
             logger.error("Failed to save lead snapshot to repository: %s", exc)
+
+    def _finalize_spoken_response(self, text: str, stage: str) -> tuple[str, bool]:
+        """Runs compliance, formatting, and final spoken audits on the response.
+        
+        Returns:
+            A tuple of (finalized_text, is_compliant).
+        """
+        fallback = self._get_stage_fallback(stage)
+        if not text.strip():
+            return fallback, False
+
+        # 1. Compliance and Output Validation
+        compliance_res = self.compliance_filter.check(text)
+        output_val_res = self.output_validator.validate(text, stage)
+        
+        if not compliance_res.is_safe or not output_val_res.is_valid:
+            issues = compliance_res.violations + output_val_res.issues
+            self._publish_event(
+                ValidationFailedEvent(
+                    call_id=self.state_machine.lead.call_id,
+                    response=text,
+                    validator_type="compliance" if not compliance_res.is_safe else "formatting",
+                    issues=issues,
+                )
+            )
+            return fallback, False
+
+        # 2. Spoken Output Auditor
+        violations = self.spoken_output_auditor.audit(text, stage)
+        if violations:
+            logger.warning("Spoken output auditor found violations in final response: %s. Using stage-specific fallback.", violations)
+            self._publish_event(
+                ValidationFailedEvent(
+                    call_id=self.state_machine.lead.call_id,
+                    response=text,
+                    validator_type="compliance",
+                    issues=violations,
+                )
+            )
+            return fallback, False
+
+        return text, True
+
+    @staticmethod
+    def _get_stage_fallback(stage: str) -> str:
+        stage_lower = stage.lower().replace("_", " ")
+        if stage_lower in ("dnc", "disqualified", "end", "wrong number"):
+            return "Understood. I’ll make a note of that. Take care."
+        elif stage_lower == "callback":
+            return "No problem. Would later today or tomorrow be better?"
+        elif stage_lower in ("transfer_consent", "transfer_ready"):
+            return "Perfect. Stay right there for me."
+        else:
+            return "Okay."

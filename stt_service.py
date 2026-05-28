@@ -244,7 +244,9 @@ class LocalSTTStream(stt.SpeechStream):
                     )
                     
                     # Transcribe
-                    text = await self._stt._transcribe(audio)
+                    from speech.local_stt_load import TrackLocalSTTTask
+                    with TrackLocalSTTTask():
+                        text = await self._stt._transcribe(audio)
                     if text:
                         yield SpeechEvent(
                             type=SpeechEventType.FINAL_TRANSCRIPT,
