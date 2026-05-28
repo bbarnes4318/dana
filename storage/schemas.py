@@ -88,6 +88,9 @@ class Call(BaseModel):
     compliance_flags: Optional[dict[str, Any]] = None
     latency_summary: Optional[dict[str, Any]] = None
     qa_score: Optional[float] = None
+    amd_result: Optional[str] = None
+    retry_after: Optional[datetime] = None
+    dry_run: Optional[bool] = False
     created_at: datetime = Field(default_factory=_utcnow)
 
 

@@ -20,13 +20,13 @@ logger = logging.getLogger(__name__)
 
 async def run_migrations(pool_or_conn: Any) -> None:
     """Run database migrations in a transaction, tracking applied versions."""
-    # Find 001_initial.sql relative to migrations folder
-    migration_file = Path("migrations/001_initial.sql")
-    if not migration_file.exists():
-        migration_file = Path(__file__).parent.parent / "migrations" / "001_initial.sql"
+    # Find migrations folder relative to workdir or module
+    migrations_dir = Path("migrations")
+    if not migrations_dir.exists():
+        migrations_dir = Path(__file__).parent.parent / "migrations"
         
-    if not migration_file.exists():
-        raise FileNotFoundError(f"Migration file 001_initial.sql not found at {migration_file.absolute()}")
+    if not migrations_dir.exists():
+        raise FileNotFoundError(f"Migrations directory not found at {migrations_dir.absolute()}")
 
     logger.info("Initializing schema_migrations table...")
     # First, make sure schema_migrations exists
@@ -37,47 +37,45 @@ async def run_migrations(pool_or_conn: Any) -> None:
     );
     """
     
-    with open(migration_file, "r", encoding="utf-8") as f:
-        migration_sql = f.read()
+    # Get all .sql files, sorted alphabetically
+    sql_files = sorted(migrations_dir.glob("*.sql"))
+    if not sql_files:
+        logger.warning("No SQL migration files found in %s", migrations_dir.absolute())
+        return
 
     # Determine connection type
     is_pool = hasattr(pool_or_conn, "acquire")
     
+    async def apply_migration(conn: Any, file_path: Path) -> None:
+        version = file_path.stem
+        row = await conn.fetchrow(
+            "SELECT version FROM schema_migrations WHERE version = $1;", 
+            version
+        )
+        if not row:
+            logger.info("Applying migration %s...", version)
+            with open(file_path, "r", encoding="utf-8") as f:
+                migration_sql = f.read()
+            async with conn.transaction():
+                await conn.execute(migration_sql)
+                await conn.execute(
+                    "INSERT INTO schema_migrations (version) VALUES ($1);", 
+                    version
+                )
+            logger.info("Migration %s applied successfully.", version)
+        else:
+            logger.info("Migration %s is already applied.", version)
+
     if is_pool:
         async with pool_or_conn.acquire() as conn:
             await conn.execute(create_tracking_table_sql)
-            row = await conn.fetchrow(
-                "SELECT version FROM schema_migrations WHERE version = $1;", 
-                "001_initial"
-            )
-            if not row:
-                logger.info("Applying 001_initial migration...")
-                async with conn.transaction():
-                    await conn.execute(migration_sql)
-                    await conn.execute(
-                        "INSERT INTO schema_migrations (version) VALUES ($1);", 
-                        "001_initial"
-                    )
-                logger.info("001_initial migration applied successfully.")
-            else:
-                logger.info("001_initial migration is already applied.")
+            for sql_file in sql_files:
+                await apply_migration(conn, sql_file)
     else:
         await pool_or_conn.execute(create_tracking_table_sql)
-        row = await pool_or_conn.fetchrow(
-            "SELECT version FROM schema_migrations WHERE version = $1;", 
-            "001_initial"
-        )
-        if not row:
-            logger.info("Applying 001_initial migration...")
-            async with pool_or_conn.transaction():
-                await pool_or_conn.execute(migration_sql)
-                await pool_or_conn.execute(
-                    "INSERT INTO schema_migrations (version) VALUES ($1);", 
-                    "001_initial"
-                )
-            logger.info("001_initial migration applied successfully.")
-        else:
-            logger.info("001_initial migration is already applied.")
+        for sql_file in sql_files:
+            await apply_migration(pool_or_conn, sql_file)
+
 
 
 async def main() -> int:

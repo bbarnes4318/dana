@@ -52,18 +52,37 @@ class JsonlStore(BaseStore):
     # ------------------------------------------------------------------
 
     async def save(self, collection: str, data: dict) -> str:
-        """Append *data* as a single JSON line and return its ``id``."""
+        """Save a record. If it has an ID and already exists, update/overwrite it; otherwise append."""
         record = dict(data)  # shallow copy — don't mutate caller's dict
         if "id" not in record:
             record["id"] = str(uuid.uuid4())
         record_id: str = record["id"]
 
-        line = json.dumps(record, default=str) + "\n"
-
         async with self._lock_for(collection):
             path = self._path_for(collection)
-            with path.open("a", encoding="utf-8") as fh:
-                fh.write(line)
+            records = []
+            updated = False
+            if path.exists():
+                with path.open("r", encoding="utf-8") as fh:
+                    for line in fh:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            r = json.loads(line)
+                            if r.get("id") == record_id:
+                                records.append(record)
+                                updated = True
+                            else:
+                                records.append(r)
+                        except json.JSONDecodeError:
+                            pass
+            if not updated:
+                records.append(record)
+
+            with path.open("w", encoding="utf-8") as fh:
+                for r in records:
+                    fh.write(json.dumps(r, default=str) + "\n")
 
         return record_id
 

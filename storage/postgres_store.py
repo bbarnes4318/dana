@@ -18,12 +18,12 @@ from storage.base import BaseStore
 
 logger = logging.getLogger(__name__)
 
-# Explicit known column schemas for all 15 tables to prevent injection and structure queries
+# Explicit known column schemas for all 16 tables to prevent injection and structure queries
 TABLE_COLUMNS: dict[str, set[str]] = {
     "schema_migrations": {"version", "applied_at"},
     "campaigns": {"id", "campaign_id", "name", "status", "config", "created_at", "updated_at"},
-    "leads": {"id", "lead_id", "phone_e164", "campaign_id", "consent_artifact_id", "source_vendor", "created_at", "updated_at", "status", "payload"},
-    "calls": {"id", "call_id", "lead_id", "campaign_id", "phone_e164", "caller_id", "started_at", "answered_at", "ended_at", "duration_seconds", "outcome", "recording_url", "transcript", "qualification", "compliance_flags", "latency_summary", "qa_score", "created_at", "updated_at"},
+    "leads": {"id", "lead_id", "phone_e164", "campaign_id", "consent_artifact_id", "source_vendor", "created_at", "updated_at", "status", "payload", "attempts", "last_attempt_at", "retry_after", "lock_holder_id", "locked_at", "callback_time", "priority"},
+    "calls": {"id", "call_id", "lead_id", "campaign_id", "phone_e164", "caller_id", "started_at", "answered_at", "ended_at", "duration_seconds", "outcome", "recording_url", "transcript", "qualification", "compliance_flags", "latency_summary", "qa_score", "created_at", "updated_at", "amd_result", "retry_after", "dry_run"},
     "call_turns": {"id", "call_id", "turn_number", "speaker", "text", "stage", "created_at"},
     "call_events": {"id", "call_id", "event_type", "payload", "created_at"},
     "tool_events": {"id", "call_id", "tool_name", "params", "result", "success", "created_at"},
@@ -34,11 +34,11 @@ TABLE_COLUMNS: dict[str, set[str]] = {
     "qa_reports": {"id", "call_id", "overall_score", "grade", "scores", "issues", "recommendations", "created_at"},
     "latency_metrics": {"id", "call_id", "metric_name", "metric_value_ms", "created_at"},
     "agent_availability": {"id", "agent_id", "name", "phone_number", "licensed_states", "status", "priority", "max_concurrent_calls", "current_call_count", "last_call_at", "browser_join_enabled", "created_at", "updated_at"},
-    "training_notes": {"id", "source", "topic", "sales_lesson", "good_example", "bad_example", "call_stage", "created_at"}
+    "training_notes": {"id", "source", "topic", "sales_lesson", "good_example", "bad_example", "call_stage", "created_at"},
+    "caller_ids": {"caller_id", "campaign_id", "status", "daily_call_count", "answer_rate", "dnc_rate", "complaint_rate", "stir_shaken_status", "last_used_at", "cooldown_until", "total_calls", "total_answers", "total_dncs", "total_complaints", "created_at", "updated_at"}
 }
 
 ALLOWLIST_TABLES = set(TABLE_COLUMNS.keys())
-
 # Allowlisted JSONB query paths for secure non-column queries
 ALLOWED_JSONB_QUERY_PATHS: dict[tuple[str, str], str] = {
     ("leads", "call_id"): "payload->>'call_id' = ${idx}"
@@ -193,6 +193,8 @@ class PostgresStore(BaseStore):
                 or k.endswith("_timestamp") 
                 or k == "timestamp" 
                 or k == "requested_at"
+                or k == "cooldown_until"
+                or k == "retry_after"
             ):
                 try:
                     mapped[k] = datetime.fromisoformat(v.replace("Z", "+00:00"))
@@ -215,15 +217,14 @@ class PostgresStore(BaseStore):
                         pass
 
         # For leads or consent_records, return the original stored payload
-        if table in ("leads", "consent_records") and "payload" in row_dict:
-            payload = row_dict["payload"]
-            if isinstance(payload, str):
-                try:
-                    payload = json.loads(payload)
-                except json.JSONDecodeError:
-                    pass
+        if table in ("leads", "consent_records"):
+            payload = row_dict.get("payload")
             if isinstance(payload, dict):
                 payload["id"] = row_dict.get("id")
+                # Merge flat columns into payload so direct SQL updates are reflected
+                for col in TABLE_COLUMNS[table]:
+                    if col in row_dict and col != "payload":
+                        payload[col] = row_dict[col]
                 return payload
 
         return row_dict

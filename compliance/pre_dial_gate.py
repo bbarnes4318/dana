@@ -50,7 +50,7 @@ class PreDialGate:
             return getattr(lead, key, None)
 
         lead_id = get_lead_val("lead_id")
-        phone_e164 = get_lead_val("lead_phone_e164") or get_lead_val("phone_type") or get_lead_val("phone_number")
+        phone_e164 = get_lead_val("lead_phone_e164") or get_lead_val("phone_e164") or get_lead_val("phone_number")
         campaign_id = get_lead_val("campaign_id") or campaign.get("campaign_id")
 
         # 1. Check phone number existence
@@ -83,7 +83,7 @@ class PreDialGate:
             blocked_by.append("exceeded_max_attempts")
 
         # 6. Check timezone and calling window
-        tz_str = resolve_lead_timezone(lead)
+        tz_str, tz_source, tz_confidence = resolve_lead_timezone(lead)
         if not tz_str:
             blocked_by.append("missing_timezone_no_fallback")
         else:

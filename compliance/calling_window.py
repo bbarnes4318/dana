@@ -167,12 +167,15 @@ AREA_CODE_TO_TZ: Dict[str, str] = {
 }
 
 
-def resolve_lead_timezone(lead: Union[dict, Any]) -> Optional[str]:
+def resolve_lead_timezone(lead: Union[dict, Any]) -> Tuple[Optional[str], str, str]:
     """Determine the timezone of the lead.
     
     1. Checks callback_timezone field.
     2. Maps lead_state or state abbreviation.
     3. Infers from lead_phone_e164 area code.
+    
+    Returns:
+        (timezone_str, timezone_source, confidence)
     """
     # Helper to get attributes/keys safely
     def get_val(key: str) -> Optional[Any]:
@@ -180,20 +183,20 @@ def resolve_lead_timezone(lead: Union[dict, Any]) -> Optional[str]:
             return lead.get(key)
         return getattr(lead, key, None)
 
-    # 1. Callback timezone
+    # 1. Callback timezone -> High confidence
     cb_tz = get_val("callback_timezone")
     if cb_tz:
-        return str(cb_tz)
+        return str(cb_tz), "explicit_timezone", "high"
 
-    # 2. State abbreviation lookup
+    # 2. State abbreviation lookup -> High confidence
     state = get_val("lead_state") or get_val("state")
     if state and isinstance(state, str):
         state_key = state.strip().upper()
         if state_key in STATE_TO_TZ:
-            return STATE_TO_TZ[state_key]
+            return STATE_TO_TZ[state_key], "lead_state", "high"
 
-    # 3. Area code lookup from phone
-    phone = get_val("lead_phone_e164") or get_val("phone_type") or get_val("phone_number")
+    # 3. Area code lookup from phone -> Low confidence
+    phone = get_val("lead_phone_e164") or get_val("phone_e164") or get_val("phone_number")
     if phone and isinstance(phone, str):
         # Extract digits
         clean = "".join(c for c in phone if c.isdigit())
@@ -206,9 +209,9 @@ def resolve_lead_timezone(lead: Union[dict, Any]) -> Optional[str]:
             area_code = None
 
         if area_code and area_code in AREA_CODE_TO_TZ:
-            return AREA_CODE_TO_TZ[area_code]
+            return AREA_CODE_TO_TZ[area_code], "area_code", "low"
 
-    return None
+    return None, "unknown", "low"
 
 
 def is_calling_window_allowed(

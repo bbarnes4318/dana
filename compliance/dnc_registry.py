@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 
 class InternalDNCRegistry:
@@ -71,3 +71,54 @@ class InMemoryDNCRegistry(InternalDNCRegistry):
                 "reason": reason,
                 "call_id": call_id
             })
+
+
+class DatabaseDNCRegistry(InternalDNCRegistry):
+    """Database-backed implementation of InternalDNCRegistry."""
+
+    def __init__(self, repository: Any) -> None:
+        self.repository = repository
+
+    async def contains(self, phone_e164: str, campaign_id: Optional[str] = None) -> bool:
+        from storage.postgres_store import PostgresStore
+        store = self.repository._store
+        if isinstance(store, PostgresStore):
+            await store._ensure_pool()
+            query = """
+                SELECT EXISTS (
+                    SELECT 1 FROM dnc_requests
+                    WHERE phone_e164 = $1
+                      AND (campaign_id IS NULL OR campaign_id = $2 OR campaign_id = '')
+                );
+            """
+            async with store._pool.acquire() as conn:
+                return await conn.fetchval(query, phone_e164, campaign_id)
+        else:
+            # JSONL mode
+            records = await store.query("dnc_requests", {})
+            for r in records:
+                if r.get("phone_e164") == phone_e164:
+                    entry_campaign = r.get("campaign_id")
+                    if entry_campaign is None or entry_campaign == "":
+                        return True
+                    if campaign_id is not None and entry_campaign == campaign_id:
+                        return True
+            return False
+
+    async def add(
+        self,
+        phone_e164: str,
+        reason: str,
+        campaign_id: Optional[str] = None,
+        call_id: Optional[str] = None
+    ) -> None:
+        import uuid
+        from datetime import datetime, timezone
+        await self.repository.save_dnc_request(
+            id=str(uuid.uuid4()),
+            phone_e164=phone_e164,
+            reason=reason,
+            campaign_id=campaign_id,
+            call_id=call_id,
+            requested_at=datetime.now(timezone.utc)
+        )

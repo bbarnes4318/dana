@@ -58,3 +58,8 @@ desktop.ini
 
 # --------------- Docker ---------------
 # Don't ignore docker-compose.yaml or Dockerfile — those are tracked.
+
+# --------------- Local Data & Databases ---------------
+data/
+*.jsonl
+
