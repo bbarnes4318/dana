@@ -170,3 +170,211 @@ async def test_get_call_not_found(repo: Repository):
     """get_call returns None for a non-existent call_id."""
     result = await repo.get_call("nonexistent-call")
     assert result is None
+
+
+@pytest.mark.asyncio
+async def test_save_and_query_call(repo: Repository):
+    """save_call and get_recent_calls/get_call work as expected."""
+    call_id = await repo.save_call(
+        call_id="call-x-123",
+        lead_id="lead-123",
+        campaign_id="camp-123",
+        phone_e164="+13055550199",
+        caller_id="+13055550100",
+        outcome="completed",
+        duration_seconds=45.5,
+        qa_score=0.92
+    )
+    assert isinstance(call_id, str)
+
+    recent = await repo.get_recent_calls(limit=10)
+    assert len(recent) == 1
+    assert recent[0]["call_id"] == "call-x-123"
+    assert recent[0]["outcome"] == "completed"
+    assert recent[0]["qa_score"] == 0.92
+
+
+@pytest.mark.asyncio
+async def test_save_transfer(repo: Repository):
+    """save_transfer validates and persists a transfer record."""
+    rid = await repo.save_transfer(
+        call_id="call-x-123",
+        lead_id="lead-123",
+        transfer_mode="warm_bridge",
+        agent_id="agent-9",
+        target_phone="+13055550111",
+        success=True,
+        summary={"notes": "Successful handoff"}
+    )
+    assert isinstance(rid, str)
+
+    transfers = await repo.store.query("transfers", {"call_id": "call-x-123"})
+    assert len(transfers) == 1
+    assert transfers[0]["agent_id"] == "agent-9"
+    assert transfers[0]["success"] is True
+
+
+@pytest.mark.asyncio
+async def test_save_callback(repo: Repository):
+    """save_callback validates and persists a callback scheduling."""
+    rid = await repo.save_callback(
+        call_id="call-x-123",
+        lead_id="lead-123",
+        phone_e164="+13055550199",
+        callback_time_local="2026-05-30T10:00:00",
+        callback_timezone="America/New_York",
+        status="pending",
+        notes="Customer wants to discuss rates"
+    )
+    assert isinstance(rid, str)
+
+    callbacks = await repo.store.query("callbacks", {"phone_e164": "+13055550199"})
+    assert len(callbacks) == 1
+    assert callbacks[0]["callback_timezone"] == "America/New_York"
+    assert callbacks[0]["status"] == "pending"
+
+
+@pytest.mark.asyncio
+async def test_save_dnc_request(repo: Repository):
+    """save_dnc_request validates and persists a DNC request."""
+    rid = await repo.save_dnc_request(
+        call_id="call-x-123",
+        lead_id="lead-123",
+        phone_e164="+13055550199",
+        campaign_id="camp-123",
+        reason="Requested during interest check"
+    )
+    assert isinstance(rid, str)
+
+    dnc = await repo.store.query("dnc_requests", {"phone_e164": "+13055550199"})
+    assert len(dnc) == 1
+    assert dnc[0]["reason"] == "Requested during interest check"
+
+
+@pytest.mark.asyncio
+async def test_save_consent_record(repo: Repository):
+    """save_consent_record validates and persists a TCPA consent record."""
+    from datetime import datetime, timezone
+    rid = await repo.save_consent_record(
+        consent_artifact_id="art-999",
+        lead_id="lead-123",
+        phone_e164="+13055550199",
+        source_vendor="leads_r_us",
+        consent_text="I agree to receive automated marketing calls...",
+        consent_timestamp=datetime.now(timezone.utc),
+        landing_page_url="https://leadsrus.com/consent"
+    )
+    assert isinstance(rid, str)
+
+    records = await repo.store.query("consent_records", {"phone_e164": "+13055550199"})
+    assert len(records) == 1
+    assert records[0]["consent_artifact_id"] == "art-999"
+    assert records[0]["source_vendor"] == "leads_r_us"
+
+
+@pytest.mark.asyncio
+async def test_save_latency_metric(repo: Repository):
+    """save_latency_metric validates and persists a latency reading."""
+    rid = await repo.save_latency_metric(
+        call_id="call-x-123",
+        metric_name="tts_generation_ms",
+        metric_value_ms=180.5
+    )
+    assert isinstance(rid, str)
+
+    metrics = await repo.store.query("latency_metrics", {"call_id": "call-x-123"})
+    assert len(metrics) == 1
+    assert metrics[0]["metric_name"] == "tts_generation_ms"
+    assert float(metrics[0]["metric_value_ms"]) == 180.5
+
+
+@pytest.mark.asyncio
+async def test_save_campaign(repo: Repository):
+    """save_campaign validates and persists campaign configs."""
+    rid = await repo.save_campaign(
+        campaign_id="camp-abc-123",
+        name="Outbound Lead Gen",
+        status="active",
+        config={"max_attempts": 5}
+    )
+    assert isinstance(rid, str)
+
+    camps = await repo.store.query("campaigns", {"campaign_id": "camp-abc-123"})
+    assert len(camps) == 1
+    assert camps[0]["name"] == "Outbound Lead Gen"
+    assert camps[0]["config"]["max_attempts"] == 5
+
+
+@pytest.mark.asyncio
+async def test_get_lead_by_phone(repo: Repository):
+    """get_lead_by_phone successfully finds lead by phone number."""
+    await repo.save_lead_snapshot(
+        call_id="call-lead-1",
+        lead_profile={
+            "lead_id": "prospect-77",
+            "lead_phone_e164": "+13055559999",
+            "campaign_id": "camp-123"
+        },
+        stage="opening"
+    )
+
+    lead = await repo.get_lead_by_phone("+13055559999")
+    assert lead is not None
+    assert lead["lead_profile"]["lead_id"] == "prospect-77"
+
+
+@pytest.mark.asyncio
+async def test_get_campaign_metrics(repo: Repository):
+    """get_campaign_metrics calculates aggregates correctly."""
+    # Save a few calls for campaign-metrics-test
+    await repo.save_call(
+        call_id="call-metric-1",
+        campaign_id="camp-metrics-test",
+        outcome="completed",
+        started_at="2026-05-28T10:00:00Z",
+        answered_at="2026-05-28T10:00:05Z",
+        ended_at="2026-05-28T10:01:05Z",
+        duration_seconds=60.0,
+        qa_score=0.90
+    )
+    await repo.save_call(
+        call_id="call-metric-2",
+        campaign_id="camp-metrics-test",
+        outcome="no-answer",
+        started_at="2026-05-28T10:05:00Z",
+        duration_seconds=None,
+        qa_score=None
+    )
+    await repo.save_call(
+        call_id="call-metric-3",
+        campaign_id="camp-metrics-test",
+        outcome="completed",
+        started_at="2026-05-28T10:10:00Z",
+        answered_at="2026-05-28T10:10:03Z",
+        ended_at="2026-05-28T10:10:43Z",
+        duration_seconds=40.0,
+        qa_score=0.80
+    )
+
+    metrics = await repo.get_campaign_metrics("camp-metrics-test")
+    assert metrics["campaign_id"] == "camp-metrics-test"
+    assert metrics["total_calls"] == 3
+    assert metrics["answered_calls"] == 2
+    assert metrics["completed_calls"] == 2
+    assert metrics["total_duration_seconds"] == 100.0
+    assert metrics["average_duration_seconds"] == 50.0
+    assert metrics["average_qa_score"] == pytest.approx(0.85)
+    assert metrics["outcomes"]["completed"] == 2
+    assert metrics["outcomes"]["no-answer"] == 1
+
+
+@pytest.mark.asyncio
+async def test_repository_health_check_and_close(repo: Repository):
+    """health_check and close run cleanly."""
+    hc = await repo.health_check()
+    assert isinstance(hc, dict)
+    assert hc["connected"] is True
+
+    # Close should not raise
+    await repo.close()
+

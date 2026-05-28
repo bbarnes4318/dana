@@ -67,3 +67,103 @@ class TrainingNote(BaseModel):
     bad_example: Optional[str] = None
     call_stage: Optional[str] = None
     timestamp: datetime = Field(default_factory=_utcnow)
+
+
+class Call(BaseModel):
+    """Details about a call."""
+
+    call_id: str
+    lead_id: Optional[str] = None
+    campaign_id: Optional[str] = None
+    phone_e164: Optional[str] = None
+    caller_id: Optional[str] = None
+    started_at: Optional[datetime] = None
+    answered_at: Optional[datetime] = None
+    ended_at: Optional[datetime] = None
+    duration_seconds: Optional[float] = None
+    outcome: Optional[str] = None
+    recording_url: Optional[str] = None
+    transcript: Optional[list[dict[str, Any]]] = None
+    qualification: Optional[dict[str, Any]] = None
+    compliance_flags: Optional[dict[str, Any]] = None
+    latency_summary: Optional[dict[str, Any]] = None
+    qa_score: Optional[float] = None
+    created_at: datetime = Field(default_factory=_utcnow)
+
+
+class Transfer(BaseModel):
+    """Details about a call transfer."""
+
+    call_id: str
+    lead_id: Optional[str] = None
+    transfer_mode: str
+    agent_id: Optional[str] = None
+    target_phone: Optional[str] = None
+    success: bool
+    failure_reason: Optional[str] = None
+    provider_call_id: Optional[str] = None
+    summary: Optional[dict[str, Any]] = None
+    created_at: datetime = Field(default_factory=_utcnow)
+
+
+class Callback(BaseModel):
+    """Details about a scheduled callback."""
+
+    call_id: Optional[str] = None
+    lead_id: Optional[str] = None
+    phone_e164: str
+    callback_time_local: str
+    callback_timezone: str
+    status: str
+    notes: Optional[str] = None
+    created_at: datetime = Field(default_factory=_utcnow)
+
+
+class DncRequest(BaseModel):
+    """A Do Not Call (DNC) request."""
+
+    call_id: Optional[str] = None
+    lead_id: Optional[str] = None
+    phone_e164: str
+    campaign_id: Optional[str] = None
+    reason: Optional[str] = None
+    requested_at: datetime = Field(default_factory=_utcnow)
+
+
+class ConsentRecord(BaseModel):
+    """A record of marketing/TCPA consent."""
+
+    consent_artifact_id: str
+    lead_id: Optional[str] = None
+    phone_e164: str
+    source_vendor: str
+    consent_text: str
+    consent_timestamp: datetime
+    landing_page_url: Optional[str] = None
+    ip_address: Optional[str] = None
+    user_agent: Optional[str] = None
+    tcpa_consent_version: Optional[str] = None
+    campaign_id: Optional[str] = None
+    payload: Optional[dict[str, Any]] = None
+    created_at: datetime = Field(default_factory=_utcnow)
+
+
+class LatencyMetric(BaseModel):
+    """Record of a latency metric during a call."""
+
+    call_id: str
+    metric_name: str
+    metric_value_ms: float
+    created_at: datetime = Field(default_factory=_utcnow)
+
+
+class Campaign(BaseModel):
+    """Campaign metadata and configuration."""
+
+    campaign_id: str
+    name: str
+    status: str
+    config: Optional[dict[str, Any]] = None
+    created_at: datetime = Field(default_factory=_utcnow)
+    updated_at: datetime = Field(default_factory=_utcnow)
+

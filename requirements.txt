@@ -26,6 +26,7 @@ librosa>=0.10.2
 silero-vad>=5.1
 
 # Async Support
+asyncpg>=0.29.0
 aiohttp>=3.9.0
 httpx>=0.27.0
 
