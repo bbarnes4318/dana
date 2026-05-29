@@ -419,6 +419,11 @@ class CampaignRunner:
                 llm_tokens_estimated=False
             )
             await save_outcome_for_call(self.repository, call_id, campaign_id, outcome, cost=0.0)
+            try:
+                from routing.model_router import ModelRouter
+                ModelRouter.cleanup_call_routing(call_id)
+            except Exception as re:
+                logger.error("Failed to cleanup routing state in dialer: %s", re)
         except Exception as me:
             logger.error("Failed to save non-human answered metrics: %s", me)
 

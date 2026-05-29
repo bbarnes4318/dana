@@ -108,6 +108,7 @@ class SharedComponents:
         self.tts = None
         self.llm = None
         self.vad = None
+        self.router = None
         # AgentRuntime shared components
         self.prompt_loader = None
         self.objection_classifier = None
@@ -121,26 +122,84 @@ class SharedComponents:
         self.repository = None
 
     async def initialize(self):
+        from routing.model_router import ModelRouter
+        self.router = ModelRouter(self.config)
+
         # 1. Initialize STT
         self.stt = create_stt(self.config)
         if hasattr(self.stt, "initialize"):
             await self.stt.initialize()
             
-        # 2. Initialize TTS
+        # 2. Initialize local TTS
         from tts_service import LocallyHostedKokoro, TTSConfig
         tts_config = TTSConfig(
             voice=self.config.tts_voice,
             speed=self.config.tts_speed,
         )
-        self.tts = LocallyHostedKokoro(tts_config)
-        await self.tts.initialize()
+        local_tts = LocallyHostedKokoro(tts_config)
+        await local_tts.initialize()
         
-        # 3. Initialize LLM (vLLM OpenAI compatible)
-        self.llm = lk_openai.LLM(
+        # Initialize cloud TTS lazily
+        cloud_tts = None
+        cloud_tts_required = self.config.tts_routing_mode == "cloud"
+        cloud_tts_allowed = self.config.tts_routing_mode != "local" or self.config.allow_cloud_tts_fallback
+        
+        has_cloud_tts_creds = False
+        voice_lower = self.config.tts_voice.lower()
+        if "openai" in voice_lower:
+            has_cloud_tts_creds = bool(os.getenv("OPENAI_API_KEY"))
+        else:
+            has_cloud_tts_creds = bool(os.getenv("ELEVENLABS_API_KEY"))
+            
+        if cloud_tts_required and not has_cloud_tts_creds:
+            raise RuntimeError("Cloud TTS mode requested but credentials (OPENAI_API_KEY/ELEVENLABS_API_KEY) are missing.")
+            
+        if cloud_tts_allowed and has_cloud_tts_creds:
+            try:
+                if "openai" in voice_lower:
+                    from livekit.plugins.openai import TTS as OpenAI_TTS
+                    cloud_tts = OpenAI_TTS(voice="alloy")
+                else:
+                    from livekit.plugins import elevenlabs
+                    cloud_tts = elevenlabs.TTS()
+            except Exception as e:
+                logger.error(f"Failed to initialize cloud TTS provider: {e}")
+                if cloud_tts_required:
+                    raise RuntimeError(f"Cloud TTS requested but failed to load: {e}")
+
+        # 3. Initialize local LLM
+        local_llm = lk_openai.LLM(
             model=self.config.llm_model,
             base_url=self.config.vllm_base_url,
             api_key="not-needed",
         )
+        
+        # Initialize cloud LLM lazily
+        cloud_llm = None
+        cloud_llm_required = self.config.llm_routing_mode == "cloud"
+        cloud_llm_allowed = self.config.llm_routing_mode != "local" or self.config.allow_cloud_llm_fallback
+        
+        has_cloud_llm_creds = bool(os.getenv("OPENAI_API_KEY"))
+        if cloud_llm_required and not has_cloud_llm_creds:
+            raise RuntimeError("Cloud LLM mode requested but OPENAI_API_KEY is missing.")
+            
+        if cloud_llm_allowed and has_cloud_llm_creds:
+            try:
+                cloud_llm = lk_openai.LLM(
+                    model="gpt-4o-mini",
+                    api_key=os.getenv("OPENAI_API_KEY")
+                )
+            except Exception as e:
+                logger.error(f"Failed to initialize cloud LLM provider: {e}")
+                if cloud_llm_required:
+                    raise RuntimeError(f"Cloud LLM requested but failed to load: {e}")
+
+        # Wrap with Routed LLM and TTS
+        from routing.routed_llm import RoutedLLM
+        from routing.routed_tts import RoutedTTS
+        
+        self.llm = RoutedLLM(local_llm, cloud_llm, self.router)
+        self.tts = RoutedTTS(local_tts, cloud_tts, self.router)
         
         # 4. Initialize VAD (Silero VAD)
         loop = asyncio.get_event_loop()
@@ -770,6 +829,13 @@ async def entrypoint(ctx: JobContext):
                 llm_tokens_estimated=True
             )
             await save_outcome_for_call(shared.repository, call_id, campaign_id, outcome, cost=0.0)
+            
+            # Cleanup call routing context/health state
+            try:
+                from routing.model_router import ModelRouter
+                ModelRouter.cleanup_call_routing(call_id)
+            except Exception as re:
+                logger.error(f"Failed to cleanup routing state: {re}")
         except Exception as ce:
             logger.error(f"Failed to update call record or save metrics: {ce}")
 

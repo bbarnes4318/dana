@@ -640,10 +640,10 @@ class AgentRuntime:
             return "Understood. I’ll make a note of that. Take care."
         elif stage_lower == "callback":
             return "No problem. Would later today or tomorrow be better?"
-        elif stage_lower in ("transfer_consent", "transfer_ready"):
+        elif stage_lower in ("transfer consent", "transfer ready"):
             return "Perfect. Stay right there for me."
         else:
-            return "Okay."
+            return "Sorry, I missed that last part. Could you say that again?"
 
     async def _check_and_emit_lead_transitions(self) -> None:
         """Evaluate lead profile changes and emit deduplicated transition events to CRM."""

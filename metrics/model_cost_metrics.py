@@ -117,6 +117,29 @@ async def calculate_and_save_costs(
     llm_tokens_estimated: bool = True
 ) -> Decimal:
     """Calculate and save cost records for a call, returning the total cost in Decimal."""
+    # Resolve actual dynamic providers/models from ModelRouter
+    routed_stt = None
+    routed_llm = None
+    routed_tts = None
+    stt_reason = "normal"
+    llm_reason = "normal"
+    tts_reason = "normal"
+    try:
+        from routing.model_router import ModelRouter
+        routed_stt, stt_reason = ModelRouter.get_last_decision(call_id, "stt")
+        if routed_stt and routed_stt != "unknown":
+            stt_provider = routed_stt
+            
+        routed_llm, llm_reason = ModelRouter.get_last_decision(call_id, "llm")
+        if routed_llm == "openai":
+            llm_model = "gpt-4o-mini"
+            
+        routed_tts, tts_reason = ModelRouter.get_last_decision(call_id, "tts")
+        if routed_tts and routed_tts != "unknown":
+            tts_provider = routed_tts
+    except Exception as re:
+        pass
+
     currency = os.getenv("DANA_COST_CURRENCY", "USD")
     total_cost = Decimal("0.0")
 
@@ -147,6 +170,8 @@ async def calculate_and_save_costs(
 
     # 2. STT component
     stt_rate_per_sec, stt_source = get_stt_rate_and_source(stt_provider)
+    if stt_provider == "deepgram" and stt_reason not in ("normal", "local_forced"):
+        stt_source = f"{stt_source} (fallback: {stt_reason})"
     stt_qty = Decimal(str(stt_seconds))
     stt_cost = Decimal("0.0")
     if not dry_run and stt_seconds > 0:
@@ -171,6 +196,8 @@ async def calculate_and_save_costs(
 
     # 3. LLM component (split input/output costs)
     llm_prompt_rate, llm_compl_rate, llm_source = get_llm_rates_and_source(llm_model)
+    if routed_llm == "openai" and llm_reason not in ("normal", "local_forced"):
+        llm_source = f"{llm_source} (fallback: {llm_reason})"
     
     prompt_cost = Decimal("0.0")
     if not dry_run and prompt_tokens > 0:
@@ -216,6 +243,8 @@ async def calculate_and_save_costs(
 
     # 4. TTS component
     tts_rate_per_char, tts_source = get_tts_rate_and_source(tts_provider)
+    if routed_tts != "local" and tts_reason not in ("normal", "local_forced"):
+        tts_source = f"{tts_source} (fallback: {tts_reason})"
     tts_qty = Decimal(str(tts_characters))
     tts_cost = Decimal("0.0")
     if not dry_run and tts_characters > 0:

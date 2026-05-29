@@ -3,7 +3,15 @@ from unittest.mock import MagicMock
 
 # Dummy base classes to allow clean subclassing in tests
 class DummyTTS:
+    sample_rate = 24000
+
     def __init__(self, *args, **kwargs):
+        pass
+
+    def stream(self, *args, **kwargs):
+        pass
+
+    def synthesize(self, *args, **kwargs):
         pass
 
 class DummySynthesizeStream:
@@ -23,6 +31,12 @@ class DummySynthesizeStream:
     async def aclose(self) -> None:
         pass
 
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self):
+        raise StopAsyncIteration
+
 class DummyChunkedStream:
     def __init__(self, *args, **kwargs):
         pass
@@ -35,9 +49,58 @@ class DummySTTStream:
     def __init__(self, *args, **kwargs):
         pass
 
+class DummyLLM:
+    def __init__(self, *args, **kwargs):
+        pass
+
+    def chat(self, *args, **kwargs):
+        pass
+
+class DummyLLMStream:
+    def __init__(self, *args, **kwargs):
+        pass
+
+    async def aclose(self) -> None:
+        pass
+
+    def __aiter__(self):
+        if hasattr(self, "_run"):
+            self._iter = self._run().__aiter__()
+            return self
+        return self
+
+    async def __anext__(self):
+        if hasattr(self, "_iter"):
+            return await self._iter.__anext__()
+        raise StopAsyncIteration
+
+class DummyAudioFrame:
+    def __init__(self, data=b"", sample_rate=24000, num_channels=1, samples_per_channel=160):
+        self.data = data
+        self.sample_rate = sample_rate
+        self.num_channels = num_channels
+        self.samples_per_channel = samples_per_channel
+
 # Create mock module containers as MagicMocks
 rtc_mock = MagicMock()
+rtc_mock.AudioFrame = DummyAudioFrame
 sys.modules['livekit.rtc'] = rtc_mock
+
+class DummyAudioEmitter:
+    def __init__(self, *args, **kwargs):
+        pass
+
+    def initialize(self, *args, **kwargs):
+        pass
+
+    def push(self, *args, **kwargs):
+        pass
+
+    def start_segment(self, *args, **kwargs):
+        pass
+
+    def end_segment(self, *args, **kwargs):
+        pass
 
 # Create agents.tts module
 class MockAgentsTTS:
@@ -47,6 +110,7 @@ class MockAgentsTTS:
         self.ChunkedStream = DummyChunkedStream
         self.TTSCapabilities = MagicMock
         self.APIConnectOptions = MagicMock
+        self.AudioEmitter = DummyAudioEmitter
 
     def __getattr__(self, name):
         if name == "TTSStream":
@@ -55,6 +119,19 @@ class MockAgentsTTS:
 
 agents_tts = MockAgentsTTS()
 sys.modules['livekit.agents.tts'] = agents_tts
+
+# Create agents.llm module
+class MockAgentsLLM:
+    def __init__(self):
+        self.LLM = DummyLLM
+        self.LLMStream = DummyLLMStream
+        self.ChatContext = MagicMock
+
+    def __getattr__(self, name):
+        return MagicMock()
+
+agents_llm = MockAgentsLLM()
+sys.modules['livekit.agents.llm'] = agents_llm
 
 # Create agents.stt module
 agents_stt = MagicMock()
@@ -119,6 +196,7 @@ class MockCreateSIPParticipantRequest:
 # Create top-level livekit.agents
 livekit_agents = MagicMock()
 livekit_agents.tts = agents_tts
+livekit_agents.llm = agents_llm
 livekit_agents.stt = agents_stt
 livekit_agents.voice = agents_voice
 livekit_agents.utils = agents_utils

@@ -117,50 +117,31 @@ class HybridSTTRouter(stt.STT):
         active_cid = call_id or get_current_call_id() or "unknown"
         active_camp = campaign_id or get_current_campaign_id()
         
-        mode = self.config.stt_routing_mode.lower()
-        if mode == "local":
-            _last_decision_reason[active_cid] = "local:forced"
-            return "local"
-
-        if mode == "cloud":
-            if not self.deepgram_stt:
-                _last_decision_reason[active_cid] = "cloud_unavailable:missing_credentials"
-                return "cloud_unavailable"
-            _last_decision_reason[active_cid] = "deepgram:forced"
-            return "deepgram"
-
-        # Hybrid routing mode
-        # 1. Fall back to local if Deepgram credentials/package are missing
-        if not self.deepgram_stt:
-            _last_decision_reason[active_cid] = "local:deepgram_not_configured"
-            return "local"
-
-        # 2. Check if local has failed previously in the call
-        if self.config.cloud_stt_on_failure and _local_failures.get(active_cid, 0) > 0:
-            _last_decision_reason[active_cid] = "deepgram:local_stt_failure"
-            return "deepgram"
-
-        # 3. Check for premium campaign config
-        if active_camp and self.config.premium_stt_campaigns:
-            premium_list = [c.strip() for c in self.config.premium_stt_campaigns.split(",") if c.strip()]
-            if active_camp in premium_list:
-                _last_decision_reason[active_cid] = "deepgram:premium_campaign"
-                return "deepgram"
-
-        # 4. Check for GPU/CPU task concurrency overload
-        if get_active_local_stt_tasks() >= self.config.local_stt_max_concurrent_tasks:
-            _last_decision_reason[active_cid] = "deepgram:concurrency_overload"
-            return "deepgram"
-
-        # 5. Check for poor line quality (sustained clipping/noise)
-        if self.config.allow_cloud_stt_for_poor_line:
-            line_quality = get_current_line_quality()
-            if line_quality < 0.6:
-                _last_decision_reason[active_cid] = "deepgram:poor_line_quality"
-                return "deepgram"
-
-        _last_decision_reason[active_cid] = "local:normal"
-        return "local"
+        from routing.model_router import ModelRouter
+        router = ModelRouter(self.config)
+        provider = router.select_provider("stt", active_cid, active_camp)
+        
+        # Keep _last_decision_reason updated for test compatibility
+        _, reason = router.get_last_decision(active_cid, "stt")
+        _last_decision_reason[active_cid] = reason
+        
+        # Synchronize local failures count to health tracker if there are any
+        if _local_failures.get(active_cid, 0) > 0:
+            from routing.provider_health import record_failure
+            # Ensure the tracker matches
+            from routing.provider_health import get_error_count
+            curr_health_errors = get_error_count(active_cid, "stt", "local")
+            if curr_health_errors < _local_failures[active_cid]:
+                for _ in range(_local_failures[active_cid] - curr_health_errors):
+                    record_failure(active_cid, "stt", "local")
+        else:
+            # If health tracker has errors, sync back to local failures for test compatibility
+            from routing.provider_health import get_error_count
+            health_errors = get_error_count(active_cid, "stt", "local")
+            if health_errors > 0:
+                _local_failures[active_cid] = health_errors
+        
+        return provider
 
     def log_decision(self, provider: str, reason: str, call_id: Optional[str] = None, campaign_id: Optional[str] = None) -> None:
         """Log provider decisions with metadata only, completely omitting transcript/audio content."""

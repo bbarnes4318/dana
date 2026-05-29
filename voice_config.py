@@ -116,5 +116,20 @@ class VoiceConfig:
     turn_max_delay: float = field(default_factory=lambda: env_float("DANA_TURN_MAX_DELAY", 0.55))
     preemptive_generation: bool = field(default_factory=lambda: env_bool("DANA_PREEMPTIVE_GENERATION", True))
 
+    # ---- Model Routing & Failover ----
+    model_routing_mode: str = field(default_factory=lambda: env_str("DANA_MODEL_ROUTING_MODE", "local"))
+    llm_routing_mode: str = field(default_factory=lambda: env_str("DANA_LLM_ROUTING_MODE", "local"))
+    tts_routing_mode: str = field(default_factory=lambda: env_str("DANA_TTS_ROUTING_MODE", "local"))
+    allow_cloud_llm_fallback: bool = field(default_factory=lambda: env_bool("DANA_ALLOW_CLOUD_LLM_FALLBACK", False))
+    allow_cloud_tts_fallback: bool = field(default_factory=lambda: env_bool("DANA_ALLOW_CLOUD_TTS_FALLBACK", False))
+    model_router_error_window_seconds: int = field(default_factory=lambda: env_int("DANA_MODEL_ROUTER_ERROR_WINDOW_SECONDS", 300))
+    model_router_max_errors: int = field(default_factory=lambda: env_int("DANA_MODEL_ROUTER_MAX_ERRORS", 3))
+    model_router_cooldown_seconds: int = field(default_factory=lambda: env_int("DANA_MODEL_ROUTER_COOLDOWN_SECONDS", 120))
+    llm_local_max_retries: int = field(default_factory=lambda: env_int("DANA_LLM_LOCAL_MAX_RETRIES", 1))
+    tts_local_max_retries: int = field(default_factory=lambda: env_int("DANA_TTS_LOCAL_MAX_RETRIES", 1))
+    max_local_concurrent_calls: int = field(default_factory=lambda: env_int("DANA_MAX_LOCAL_CONCURRENT_CALLS", 10))
+    gpu_overload_threshold: float = field(default_factory=lambda: env_float("DANA_GPU_OVERLOAD_THRESHOLD", 0.85))
+    premium_campaigns: str = field(default_factory=lambda: env_str("DANA_PREMIUM_CAMPAIGNS", ""))
+
     # ---- Logging ----
     log_level: str = field(default_factory=lambda: env_str("LOG_LEVEL", "INFO"))
