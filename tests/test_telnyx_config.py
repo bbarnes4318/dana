@@ -97,6 +97,11 @@ def test_telephony_config_repr_redaction(monkeypatch):
 
 
 def test_telephony_config_modular_validation(monkeypatch):
+    monkeypatch.delenv("LIVEKIT_URL", raising=False)
+    monkeypatch.delenv("LIVEKIT_API_KEY", raising=False)
+    monkeypatch.delenv("LIVEKIT_API_SECRET", raising=False)
+    monkeypatch.delenv("TELNYX_API_KEY", raising=False)
+
     # Case 1: Empty config does not pass validation
     config = TelephonyConfig()
     with pytest.raises(ValueError, match="TELNYX_API_KEY is required"):

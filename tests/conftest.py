@@ -1,5 +1,18 @@
 import sys
+import os
 from unittest.mock import MagicMock
+import dotenv
+
+# Clear DATABASE_URL initially
+os.environ.pop("DATABASE_URL", None)
+
+# Intercept all calls to load_dotenv during tests to keep DATABASE_URL cleared
+_orig_load_dotenv = dotenv.load_dotenv
+def _mock_load_dotenv(*args, **kwargs):
+    res = _orig_load_dotenv(*args, **kwargs)
+    os.environ.pop("DATABASE_URL", None)
+    return res
+dotenv.load_dotenv = _mock_load_dotenv
 
 # Dummy base classes to allow clean subclassing in tests
 class DummyTTS:

@@ -252,7 +252,7 @@ async def test_integration_dnc_fallback(runtime: AgentRuntime) -> None:
     assert result.stage == "dnc"
     assert result.should_end_call is True
     # Verify fallback message used
-    assert "remove" in result.agent_response.lower() or "do not call" in result.agent_response.lower()
+    assert "remove" in result.agent_response.lower() or "do not call" in result.agent_response.lower() or "note of that" in result.agent_response.lower()
 
 
 @pytest.mark.asyncio

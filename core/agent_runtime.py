@@ -22,6 +22,12 @@ from core.prompt_loader import PromptLoader
 from core.response_builder import ResponseBuilder
 from rag.context_builder import ContextBuilder
 from core.action_policy import ActionPolicy
+from core.canonical_responses import (
+    DNC_CLOSE,
+    WRONG_NUMBER_CLOSE,
+    NOT_INTERESTED_CLOSE,
+    LICENSED_RESPONSE,
+)
 from tools.tool_registry import ToolRegistry
 from safety.compliance_filter import ComplianceFilter
 from safety.output_validator import OutputValidator
@@ -216,12 +222,12 @@ class AgentRuntime:
                     await self._log_tool_event(lead.call_id, "mark_dnc", res)
 
             # Build final message
-            response_text = (
-                "I understand. We will remove your number from our list immediately. "
-                "Have a nice day."
-                if target_stage == CallStage.DNC
-                else "I understand. Thank you for your time. Goodbye."
-            )
+            if stop_decision.stop_type == "dnc":
+                response_text = DNC_CLOSE
+            elif stop_decision.stop_type == "wrong_number":
+                response_text = WRONG_NUMBER_CLOSE
+            else:
+                response_text = NOT_INTERESTED_CLOSE
 
             # Log agent turn and lead snapshot
             await self._log_agent_turn(lead.call_id, current_turn * 2, response_text, target_stage.value)
@@ -354,15 +360,9 @@ class AgentRuntime:
             # Recovery: Fallback to a compliant, safe response if there's a compliance violation
             if not compliance_res.is_safe:
                 if call_state.current_stage == CallStage.TRANSFER_READY:
-                    agent_response = (
-                        "I understand. Let me connect you with a licensed benefits coordinat-"
-                        "or who can look up all those options and answer pricing details. Hold on."
-                    )
+                    agent_response = "Perfect. Stay right there for me."
                 else:
-                    agent_response = (
-                        "A licensed agent would be the best person to cover pricing and approval. "
-                        "I am just helping to see if you qualify. May I ask a few quick questions?"
-                    )
+                    agent_response = LICENSED_RESPONSE
 
         # 11b. Apply Human-likeness layer
         # A. Prepend backchannel

@@ -38,7 +38,7 @@ async def test_adapter_dnc_does_not_hit_llm(project_root: Path) -> None:
     # 2. Results should indicate immediate stop and end call
     assert result.should_end_call is True
     assert result.stage == "dnc"
-    assert "remove your number" in result.agent_response.lower()
+    assert "note of that" in result.agent_response.lower() or "take care" in result.agent_response.lower()
     # 3. mark_dnc tool should have been executed
     assert any("mark_dnc" in res or "marked as dnc" in res.lower() for res in result.tool_results)
 
@@ -58,7 +58,7 @@ async def test_adapter_wrong_number_does_not_hit_llm(project_root: Path) -> None
     
     assert chat_called is False
     assert result.should_end_call is True
-    assert "goodbye" in result.agent_response.lower() or "thank you for your time" in result.agent_response.lower()
+    assert "note of that" in result.agent_response.lower() or "take care" in result.agent_response.lower()
 
 
 @pytest.mark.asyncio

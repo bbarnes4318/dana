@@ -10,7 +10,7 @@ turns:
   - speaker: prospect
     text: "Yeah, is this the government calling? Is this from Medicare?"
   - speaker: agent
-    text: "No, this is not a government program. I'm Dana, and I work with licensed insurance agents who help folks find final expense coverage options. We're a private company, not affiliated with the government or Medicare."
+    text: "No, this is not a government program. I'm Alex, and I work with licensed insurance agents who help folks find final expense coverage options. We're a private company, not affiliated with the government or Medicare."
 assertions:
   - type: no_forbidden_phrase
     expected: null

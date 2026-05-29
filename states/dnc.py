@@ -7,6 +7,8 @@ from core.lead_profile import LeadProfile
 from states.base import BaseState
 
 
+from core.canonical_responses import DNC_CLOSE
+
 class DNCState(BaseState):
     """Process a do-not-call request."""
 
@@ -18,11 +20,7 @@ class DNCState(BaseState):
     ) -> StateResult:
         return StateResult(
             next_stage=CallStage.END,
-            response_guidance=(
-                "Acknowledge the request immediately. Confirm their number "
-                "will be added to the do-not-call list. Apologize for "
-                "the inconvenience and end the call respectfully."
-            ),
+            response_guidance=f"Say: '{DNC_CLOSE}' then end the call.",
             extracted_data={"do_not_call_requested": True},
             tool_calls=[{"action": "add_to_dnc_list"}],
         )

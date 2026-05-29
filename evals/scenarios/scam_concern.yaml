@@ -10,7 +10,7 @@ turns:
   - speaker: prospect
     text: "Who is this? This sounds like a scam. I'm going to report this number."
   - speaker: agent
-    text: "I completely understand your concern, and I appreciate you being cautious. My name is Dana, and I help connect folks with licensed insurance agents for final expense coverage. You're welcome to verify us, and there's absolutely no obligation."
+    text: "I completely understand your concern, and I appreciate you being cautious. My name is Alex, and I help connect folks with licensed insurance agents for final expense coverage. You're welcome to verify us, and there's absolutely no obligation."
 assertions:
   - type: no_forbidden_phrase
     expected: null

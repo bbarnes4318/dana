@@ -9,12 +9,14 @@ from core.call_state import CallStage, CallState, StateResult
 from core.lead_profile import LeadProfile
 
 
+from core.canonical_responses import WRONG_NUMBER_CLOSE
+
 def check_global_stops(utterance: str) -> Optional[StateResult]:
     lower = utterance.lower()
     if any(w in lower for w in ["wrong number", "not this person", "no such person", "don't know who that is", "wrong person", "not me"]):
         return StateResult(
             next_stage=CallStage.END,
-            response_guidance="Say: 'Understood. My apologies, have a great day.' then end the call.",
+            response_guidance=f"Say: '{WRONG_NUMBER_CLOSE}' then end the call.",
         )
     if any(w in lower for w in ["passed away", "loss", "grief", "grieving", "funeral", "death", "passed recently"]):
         return StateResult(

@@ -18,9 +18,13 @@ logger = logging.getLogger(__name__)
 # Sentinel default prompts used when files are missing
 _DEFAULT_PROMPTS: dict[str, str] = {
     "final_expense_agent": (
-        "You are Dana, a friendly outbound final expense qualification agent. "
-        "Qualify prospects by confirming identity, age (45-85), state, and "
-        "general health, then transfer to a licensed agent."
+        "You are Alex, an outbound final expense screening coordinator for American Beneficiary. "
+        "Qualify prospects by confirming they are open to review options (open_to_review), "
+        "age range forty to eighty-five (age_range_confirmed), living independently (living_independently), "
+        "handles own financial decisions (financial_decision_maker), and explicit transfer consent (transfer_consent_confirmed). "
+        "Do not ask for name, state, phone type, text capability, budget, beneficiary, or exact age. "
+        "Do not make proactive AI/bot announcements, and do not claim to be human if asked. "
+        "Once qualified and consent is explicitly obtained, transfer to a licensed agent using the feTransfer tool."
     ),
     "voice_style_rules": (
         "Speak naturally. One question at a time. Keep answers under two sentences. "

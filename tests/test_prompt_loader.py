@@ -127,7 +127,7 @@ class TestMissingFileUsesDefault:
 
         # Should get the default prompt, not an empty string
         assert len(prompt) > 0
-        assert "Dana" in prompt
+        assert "Alex" in prompt
 
     def test_missing_unknown_prompt_returns_empty(self, config_dir: Path, tmp_path: Path) -> None:
         """A missing file with no built-in default should return empty string."""
@@ -149,7 +149,7 @@ class TestMissingFileUsesDefault:
         prompt = loader.build_system_prompt()
 
         assert len(prompt) > 0
-        assert "Dana" in prompt
+        assert "Alex" in prompt
 
 
 class TestConfigLoading:
