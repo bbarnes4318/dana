@@ -1,7 +1,7 @@
 import asyncio
 import logging
 import os
-from typing import Set, Awaitable, Optional
+from typing import Set, Awaitable, Optional, Callable
 
 logger = logging.getLogger(__name__)
 
@@ -22,28 +22,29 @@ class WebhookDispatcher:
     def get_active_tasks_count(self) -> int:
         return len(self._active_tasks)
 
-    def submit_task(self, coro: Awaitable[None]) -> Optional[asyncio.Task]:
-        """Submits a webhook sending coroutine to run in the background."""
+    def submit_task(self, coro_factory: Callable[[], Awaitable[None]]) -> Optional[asyncio.Task]:
+        """Submits a webhook sending coroutine factory to run in the background."""
         if self._shutting_down:
             logger.warning("Dispatcher is shutting down. Rejecting new task submission.")
             return None
 
         if len(self._active_tasks) >= self._max_queue_size:
-            logger.error(
-                "Webhook background queue limit reached (%d tasks). Rejecting new task.",
+            logger.warning(
+                "Webhook background queue limit reached (%d tasks). queue_full_delivery_deferred.",
                 self._max_queue_size
             )
             return None
 
         # Create task
-        task = asyncio.create_task(self._run_supervised(coro))
+        task = asyncio.create_task(self._run_supervised(coro_factory))
         self._active_tasks.add(task)
         task.add_done_callback(self._active_tasks.discard)
         return task
 
-    async def _run_supervised(self, coro: Awaitable[None]) -> None:
+    async def _run_supervised(self, coro_factory: Callable[[], Awaitable[None]]) -> None:
         async with self._semaphore:
             try:
+                coro = coro_factory()
                 await coro
             except asyncio.CancelledError:
                 logger.info("Webhook background task cancelled.")

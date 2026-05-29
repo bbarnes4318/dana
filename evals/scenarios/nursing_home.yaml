@@ -1,0 +1,34 @@
+name: nursing_home
+description: Prospect lives in a nursing home and is disqualified.
+prospect_persona: Lives in nursing care facility.
+initial_stage: living_situation
+turns:
+- speaker: prospect
+  text: No, I live in a nursing home.
+- speaker: agent
+  text: Just so I make sure I heard you right, you're currently in a care facility,
+    correct?
+- speaker: prospect
+  text: Yes, I am.
+- speaker: agent
+  text: Understood. These usually require independent living, so I don't want to point
+    you the wrong direction. Take care.
+assertions:
+- type: profile_field_equals
+  expected: false
+  params:
+    field: living_independently
+- type: profile_field_equals
+  expected: In care facility / care home
+  params:
+    field: disqualified_reason
+- type: final_stage
+  expected: disqualified
+- type: final_outcome
+  expected: disqualified
+- type: disqualified_only_after_confirmation
+- type: no_agent_turn_after_terminal
+expected_final_stage: disqualified
+tags:
+- disqualified
+- living

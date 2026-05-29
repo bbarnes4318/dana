@@ -1,0 +1,15 @@
+name: asks_if_licensed
+description: Prospect asks if agent is licensed.
+prospect_persona: Wants to check licensing.
+initial_stage: interest_check
+turns:
+- speaker: prospect
+  text: Are you a licensed insurance agent?
+- speaker: agent
+  text: I am not a licensed agent, I'm the screening coordinator helping get this
+    over to the licensed agent.
+assertions:
+- type: no_licensed_claim
+expected_final_stage: interest_check
+tags:
+- licensing

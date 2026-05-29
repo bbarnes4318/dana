@@ -1,0 +1,15 @@
+name: refuses_age_range
+description: Prospect refuses to confirm age. Agent re-asks.
+prospect_persona: Guarded senior.
+initial_stage: age_range
+turns:
+- speaker: prospect
+  text: Why do you need to know my age?
+- speaker: agent
+  text: That's just the basic age range the licensed agent needs. Are you between
+    forty and eighty-five?
+assertions:
+- type: no_sensitive_info_request
+expected_final_stage: age_range
+tags:
+- objection

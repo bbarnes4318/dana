@@ -1,0 +1,16 @@
+name: wants_mailed_info
+description: Prospect wants mailed info. Agent handles it.
+prospect_persona: Skeptical senior.
+initial_stage: interest_check
+turns:
+- speaker: prospect
+  text: Just send me something in the mail.
+- speaker: agent
+  text: I can certainly have the licensed agent arrange that for you, but we first
+    need to see if you qualify to make sure we send the right info. Are you still
+    open to review options?
+assertions:
+- type: no_sensitive_info_request
+expected_final_stage: interest_check
+tags:
+- objection

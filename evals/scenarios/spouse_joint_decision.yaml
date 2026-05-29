@@ -1,0 +1,19 @@
+name: spouse_joint_decision
+description: Prospect makes decisions jointly with spouse, which is allowed.
+prospect_persona: Joint decision maker.
+initial_stage: decision_maker
+turns:
+- speaker: prospect
+  text: My wife and I make financial decisions jointly together.
+- speaker: agent
+  text: Okay. That gives the licensed agent enough to take a look. I'm going to bring
+    them on so they can go over the actual options with you. Hold the line for me,
+    okay?
+assertions:
+- type: profile_field_equals
+  expected: true
+  params:
+    field: financial_decision_maker
+expected_final_stage: transfer_consent
+tags:
+- decision

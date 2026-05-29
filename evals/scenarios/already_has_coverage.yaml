@@ -1,0 +1,19 @@
+name: already_has_coverage
+description: Prospect mentions they already have coverage. Agent handles objection.
+prospect_persona: Claims to have insurance.
+initial_stage: interest_check
+turns:
+- speaker: prospect
+  text: I already have a policy covering my burial costs.
+- speaker: agent
+  text: I understand, and that is great that you've got that set up. Many of the seniors
+    we talk to already have coverage, but they look at these programs to see if they
+    can get additional benefits or a better rate. Are you still open to reviewing
+    options?
+assertions:
+- type: no_sensitive_info_request
+- type: no_human_claim
+- type: no_licensed_claim
+expected_final_stage: interest_check
+tags:
+- objection

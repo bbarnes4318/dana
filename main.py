@@ -532,9 +532,9 @@ async def entrypoint(ctx: JobContext):
     )
     
     # Emit call.session_started event
-    from integrations.crm_webhooks import emit_crm_event
+    from integrations.crm_webhooks import emit_crm_event_async
     lead_prof = agent.adapter.state_machine.lead.to_summary_dict() if agent.adapter else None
-    emit_crm_event(
+    await emit_crm_event_async(
         "call.session_started",
         repository=shared.repository,
         call_id=call_id,
@@ -571,8 +571,8 @@ async def entrypoint(ctx: JobContext):
         lead_id = lead_prof.get("lead_id") or lead_prof.get("id")
 
         # Emit call.session_completed event
-        from integrations.crm_webhooks import emit_crm_event
-        emit_crm_event(
+        from integrations.crm_webhooks import emit_crm_event_async
+        await emit_crm_event_async(
             "call.session_completed",
             repository=shared.repository,
             call_id=call_id,
@@ -649,7 +649,7 @@ async def entrypoint(ctx: JobContext):
 
             # If score is too low or grade is F, emit qa.failed
             if scorecard.overall_score < 7.0 or scorecard.grade == "F":
-                emit_crm_event(
+                await emit_crm_event_async(
                     "qa.failed",
                     repository=shared.repository,
                     call_id=call_id,
@@ -668,7 +668,7 @@ async def entrypoint(ctx: JobContext):
             logger.error(f"Failed to execute QA scoring or emit qa.failed: {e}")
 
         # Emit call.completed exactly once at the very end of the call cycle
-        emit_crm_event(
+        await emit_crm_event_async(
             "call.completed",
             repository=shared.repository,
             call_id=call_id,
@@ -680,11 +680,29 @@ async def entrypoint(ctx: JobContext):
         )
 
 
-async def graceful_shutdown(timeout: float = 10.0) -> None:
-    """Graceful shutdown hook for Integrations and webhook dispatcher."""
-    logger.info("Graceful shutdown initiated. Draining webhook dispatcher outbox...")
-    from integrations.webhook_dispatcher import get_dispatcher
-    await get_dispatcher().shutdown(timeout=timeout)
+def graceful_startup_integrations(repository: Repository, poll_interval: float = 10.0) -> None:
+    """Graceful startup hook to start integrations outbox worker.
+    
+    TODO: Call this upon daemon startup / LiveKit entrypoint initialization
+    to ensure the restart-safe outbox worker is running.
+    """
+    logger.info("Graceful startup initiated. Starting background outbox drain worker...")
+    from integrations.crm_webhooks import start_webhook_outbox_worker
+    start_webhook_outbox_worker(repository, poll_interval=poll_interval)
+
+
+async def graceful_shutdown(repository: Optional[Repository] = None, timeout: float = 10.0) -> None:
+    """Graceful shutdown hook for Integrations and webhook dispatcher.
+    
+    TODO: Wire this into the process signal handlers or LiveKit worker shutdown callbacks
+    to ensure webhooks are cleanly flushed and drained on daemon exit.
+    """
+    logger.info("Graceful shutdown initiated. Stopping outbox worker and draining webhook dispatcher...")
+    from integrations.crm_webhooks import stop_webhook_outbox_worker, flush_pending_webhooks
+    stop_webhook_outbox_worker()
+    await flush_pending_webhooks(timeout=timeout)
+    if repository is not None:
+        await repository.close()
 
 
 

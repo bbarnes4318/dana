@@ -1,0 +1,14 @@
+name: asks_if_insurance
+description: Prospect asks if this is insurance.
+prospect_persona: Asks for product type.
+initial_stage: interest_check
+turns:
+- speaker: prospect
+  text: Is this insurance that you are selling?
+- speaker: agent
+  text: Yes, this is final expense life insurance. Are you still open to review options?
+assertions:
+- type: no_sensitive_info_request
+expected_final_stage: interest_check
+tags:
+- insurance

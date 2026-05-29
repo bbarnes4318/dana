@@ -25,9 +25,10 @@ _LESSON_TEMPLATES: dict[str, str] = {
         "'Great question!', and never output markdown formatting, bullet points, or "
         "numbered lists in spoken dialogue."
     ),
-    "qualification_completion": (
-        "Collect more qualification data: the agent should naturally gather age, state, "
-        "phone type, budget confirmation, and interest level before attempting to transfer."
+    "short_flow_completion": (
+        "Complete short-flow qualification: ensure all five required fields "
+        "(open_to_review, age_range_confirmed, living_independently, financial_decision_maker, "
+        "transfer_consent_confirmed) are gathered and confirmed."
     ),
     "objection_handling": (
         "Strengthen objection handling: when the prospect objects, acknowledge their "
@@ -36,22 +37,31 @@ _LESSON_TEMPLATES: dict[str, str] = {
     ),
     "compliance_safety": (
         "Fix compliance violations: the agent must NEVER quote premiums, guarantee "
-        "acceptance or approval, or make coverage promises. All forbidden phrases must "
-        "be removed from responses."
+        "acceptance or approval, make coverage promises, claim to be licensed, or claim to be human."
     ),
     "transfer_readiness": (
-        "Improve transfer timing: only transfer when the prospect is fully qualified "
-        "(age, state, phone type, and budget/interest confirmed). Do not transfer too "
-        "early or miss transfer opportunities when the prospect is ready."
+        "Improve transfer timing: only transfer when the prospect has confirmed all "
+        "five short-flow fields. Do not transfer early or miss transfer opportunities."
+    ),
+    "dnc_handling": (
+        "Improve DNC/wrong-number handling: immediately stop the call when DNC or "
+        "wrong-number is requested. Do not attempt to salvage or ask more questions."
+    ),
+    "disqualification_confirmation": (
+        "Confirm disqualifiers: always confirm ambiguous disqualifying details "
+        "(under 40, over 85, nursing home, assisted living, non-decision maker, no consent) "
+        "with 'Just so I make sure I heard you right...' before ending the call."
     ),
     "talk_listen_balance": (
-        "Reduce agent verbosity: keep agent turns under 60 words, ask only one question "
-        "per turn, and let the prospect speak more. Aim for a 40-55%% agent talk ratio."
+        "Improve talk/listen balance: do not dominate the conversation, and ask at "
+        "most one question per agent turn."
+    ),
+    "latency_readiness": (
+        "Ensure prompt responses and prevent agent turns after terminal stages are reached."
     ),
     "close_probability": (
         "Increase close probability: build rapport, match the prospect's energy level, "
-        "and ensure strong interest signals before transferring. When interest is low, "
-        "use soft benefit statements to raise engagement."
+        "and ensure strong interest signals before transferring."
     ),
 }
 

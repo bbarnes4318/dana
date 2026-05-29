@@ -1,0 +1,22 @@
+name: busy_callback
+description: Prospect is busy and asks for callback.
+prospect_persona: Busy prospect.
+initial_stage: interest_check
+turns:
+- speaker: prospect
+  text: I am too busy right now. Call me back tomorrow.
+- speaker: agent
+  text: Acknowledge the callback request and offer a callback time.
+assertions:
+- type: profile_field_equals
+  expected: true
+  params:
+    field: callback_requested
+- type: final_stage
+  expected: callback
+- type: final_outcome
+  expected: callback
+- type: callback_captured
+expected_final_stage: callback
+tags:
+- callback

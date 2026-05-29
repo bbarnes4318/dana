@@ -1,0 +1,15 @@
+name: transfer_failed_callback
+description: Transfer to agent fails and callback is offered.
+prospect_persona: Agreed to transfer, but agent busy.
+initial_stage: transfer_ready
+turns:
+- speaker: prospect
+  text: Hello? Is someone there?
+- speaker: agent
+  text: I'm sorry, it looks like all our agents are currently busy. Let me call you
+    back later today or tomorrow to connect you.
+assertions:
+- type: transfer_failure_callback_offer
+expected_final_stage: end
+tags:
+- transfer_failed

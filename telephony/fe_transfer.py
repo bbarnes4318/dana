@@ -85,7 +85,7 @@ async def fe_transfer(
     )
     logger.info("Transfer routing decision: mode=%s, success=%s", decision.transfer_mode, decision.success)
 
-    from integrations.crm_webhooks import emit_crm_event
+    from integrations.crm_webhooks import emit_crm_event_async
     from storage.repository import Repository
     repo = Repository()
 
@@ -94,7 +94,7 @@ async def fe_transfer(
     phone_e164 = lead_profile.get("lead_phone_e164")
 
     # 1. Emit transfer.started event
-    emit_crm_event(
+    await emit_crm_event_async(
         "transfer.started",
         repository=repo,
         call_id=call_id,
@@ -141,10 +141,10 @@ async def fe_transfer(
 
         # Emit transfer outcomes
         if res.success:
-            emit_crm_event("transfer.succeeded", repository=repo, call_id=call_id, lead_id=lead_id, campaign_id=campaign_id, phone_e164=phone_e164, transfer=transfer_meta)
-            emit_crm_event("lead.transferred", repository=repo, call_id=call_id, lead_id=lead_id, campaign_id=campaign_id, phone_e164=phone_e164, transfer=transfer_meta)
+            await emit_crm_event_async("transfer.succeeded", repository=repo, call_id=call_id, lead_id=lead_id, campaign_id=campaign_id, phone_e164=phone_e164, transfer=transfer_meta)
+            await emit_crm_event_async("lead.transferred", repository=repo, call_id=call_id, lead_id=lead_id, campaign_id=campaign_id, phone_e164=phone_e164, transfer=transfer_meta)
         else:
-            emit_crm_event("transfer.failed", repository=repo, call_id=call_id, lead_id=lead_id, campaign_id=campaign_id, phone_e164=phone_e164, transfer=transfer_meta)
+            await emit_crm_event_async("transfer.failed", repository=repo, call_id=call_id, lead_id=lead_id, campaign_id=campaign_id, phone_e164=phone_e164, transfer=transfer_meta)
 
         return FeTransferResult(
             success=res.success,
@@ -175,10 +175,10 @@ async def fe_transfer(
 
         # Emit transfer outcomes
         if res.success:
-            emit_crm_event("transfer.succeeded", repository=repo, call_id=call_id, lead_id=lead_id, campaign_id=campaign_id, phone_e164=phone_e164, transfer=transfer_meta)
-            emit_crm_event("lead.transferred", repository=repo, call_id=call_id, lead_id=lead_id, campaign_id=campaign_id, phone_e164=phone_e164, transfer=transfer_meta)
+            await emit_crm_event_async("transfer.succeeded", repository=repo, call_id=call_id, lead_id=lead_id, campaign_id=campaign_id, phone_e164=phone_e164, transfer=transfer_meta)
+            await emit_crm_event_async("lead.transferred", repository=repo, call_id=call_id, lead_id=lead_id, campaign_id=campaign_id, phone_e164=phone_e164, transfer=transfer_meta)
         else:
-            emit_crm_event("transfer.failed", repository=repo, call_id=call_id, lead_id=lead_id, campaign_id=campaign_id, phone_e164=phone_e164, transfer=transfer_meta)
+            await emit_crm_event_async("transfer.failed", repository=repo, call_id=call_id, lead_id=lead_id, campaign_id=campaign_id, phone_e164=phone_e164, transfer=transfer_meta)
 
         return FeTransferResult(
             success=res.success,
@@ -201,7 +201,7 @@ async def fe_transfer(
         "failure_reason": fail_reason,
         "provider_call_id": None
     }
-    emit_crm_event("transfer.failed", repository=repo, call_id=call_id, lead_id=lead_id, campaign_id=campaign_id, phone_e164=phone_e164, transfer=transfer_meta)
+    await emit_crm_event_async("transfer.failed", repository=repo, call_id=call_id, lead_id=lead_id, campaign_id=campaign_id, phone_e164=phone_e164, transfer=transfer_meta)
 
     return FeTransferResult(
         success=False,

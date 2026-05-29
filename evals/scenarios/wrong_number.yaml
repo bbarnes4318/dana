@@ -1,0 +1,19 @@
+name: wrong_number
+description: Prospect says it is a wrong number.
+prospect_persona: Not the correct lead.
+initial_stage: interest_check
+turns:
+- speaker: prospect
+  text: You have the wrong number, there is no one by that name here.
+- speaker: agent
+  text: Understood. My apologies, have a great day.
+assertions:
+- type: final_stage
+  expected: end
+- type: final_outcome
+  expected: ended
+- type: wrong_number_stops_call
+- type: no_agent_turn_after_terminal
+expected_final_stage: end
+tags:
+- wrong_number

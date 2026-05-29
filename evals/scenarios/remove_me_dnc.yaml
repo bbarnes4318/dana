@@ -1,0 +1,23 @@
+name: remove_me_dnc
+description: Prospect requests DNC in the first turn.
+prospect_persona: Prospect wants to be removed.
+initial_stage: opening
+turns:
+- speaker: prospect
+  text: Put me on the do not call list and remove me from your system.
+- speaker: agent
+  text: I apologize. I will remove your number from our list immediately.
+assertions:
+- type: profile_field_equals
+  expected: true
+  params:
+    field: do_not_call_requested
+- type: final_stage
+  expected: dnc
+- type: final_outcome
+  expected: dnc
+- type: dnc_stops_call
+- type: no_agent_turn_after_terminal
+expected_final_stage: dnc
+tags:
+- dnc

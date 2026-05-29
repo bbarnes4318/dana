@@ -1,10 +1,10 @@
-name: confused_senior
-description: Prospect is confused. Agent clarifies.
-prospect_persona: A confused senior.
+name: silent_answer
+description: Prospect is silent. Agent prompts again.
+prospect_persona: Silent answer.
 initial_stage: interest_check
 turns:
 - speaker: prospect
-  text: What is this? I don't know who you are or what you want.
+  text: silence
 - speaker: agent
   text: It's Alex with American Beneficiary. I'm getting back with you on the final
     expense burial programs. Is that something you're still open to looking at?
@@ -12,4 +12,4 @@ assertions:
 - type: no_sensitive_info_request
 expected_final_stage: interest_check
 tags:
-- confusion
+- silence

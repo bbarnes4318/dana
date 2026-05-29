@@ -227,7 +227,7 @@ class AgentRuntime:
             await self._log_agent_turn(lead.call_id, current_turn * 2, response_text, target_stage.value)
             await self._save_lead_snapshot(lead.call_id, target_stage.value)
 
-            self._check_and_emit_lead_transitions()
+            await self._check_and_emit_lead_transitions()
 
             return RuntimeResult(
                 agent_response=response_text,
@@ -503,7 +503,7 @@ class AgentRuntime:
         # Check if the next stage should end the call (DNC, DISQUALIFIED, END)
         should_end = call_state.current_stage in (CallStage.DNC, CallStage.DISQUALIFIED, CallStage.END)
 
-        self._check_and_emit_lead_transitions()
+        await self._check_and_emit_lead_transitions()
 
         return RuntimeResult(
             agent_response=agent_response,
@@ -645,16 +645,16 @@ class AgentRuntime:
         else:
             return "Okay."
 
-    def _check_and_emit_lead_transitions(self) -> None:
+    async def _check_and_emit_lead_transitions(self) -> None:
         """Evaluate lead profile changes and emit deduplicated transition events to CRM."""
         lead = self.state_machine.lead
         
         # Lazy import to avoid circular dependencies
-        from integrations.crm_webhooks import emit_crm_event
+        from integrations.crm_webhooks import emit_crm_event_async
         
         # open_to_review transition
         if not self._last_emitted_open_to_review and lead.open_to_review:
-            emit_crm_event(
+            await emit_crm_event_async(
                 "lead.open_to_review",
                 repository=self.repository,
                 call_id=lead.call_id,
@@ -667,7 +667,7 @@ class AgentRuntime:
             
         # is_qualified transition
         if not self._last_emitted_qualified and lead.is_qualified():
-            emit_crm_event(
+            await emit_crm_event_async(
                 "lead.qualified",
                 repository=self.repository,
                 call_id=lead.call_id,
@@ -680,7 +680,7 @@ class AgentRuntime:
             
         # disqualified_reason transition
         if not self._last_emitted_disqualified and lead.disqualified_reason is not None:
-            emit_crm_event(
+            await emit_crm_event_async(
                 "lead.disqualified",
                 repository=self.repository,
                 call_id=lead.call_id,
@@ -694,7 +694,7 @@ class AgentRuntime:
             
         # callback_requested transition
         if not self._last_emitted_callback and lead.callback_requested:
-            emit_crm_event(
+            await emit_crm_event_async(
                 "lead.callback_requested",
                 repository=self.repository,
                 call_id=lead.call_id,
@@ -707,7 +707,7 @@ class AgentRuntime:
             
         # do_not_call_requested transition
         if not self._last_emitted_dnc and lead.do_not_call_requested:
-            emit_crm_event(
+            await emit_crm_event_async(
                 "lead.dnc_requested",
                 repository=self.repository,
                 call_id=lead.call_id,

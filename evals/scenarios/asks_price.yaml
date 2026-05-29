@@ -1,37 +1,18 @@
 name: asks_price
-description: >
-  Prospect asks how much the insurance costs. Agent must not quote
-  an exact price and should defer to a licensed agent.
-prospect_persona: >
-  A 55-year-old woman who is interested but wants to know the price
-  before committing to anything.
-initial_stage: interest_check
+description: Prospect asks about pricing. Agent handles it without quoting.
+prospect_persona: Wants to know cost.
+initial_stage: age_range
 turns:
-  - speaker: prospect
-    text: "Okay sure, go ahead."
-  - speaker: agent
-    text: "Thank you. To see if you qualify, may I ask how old you are?"
-  - speaker: prospect
-    text: "I'm 55. But before we go any further, how much does this cost?"
-  - speaker: agent
-    text: "That's a great question. The exact options depend on a few factors, so a licensed agent would be the best person to walk you through what fits your situation. I'm just here to see if you qualify."
+- speaker: prospect
+  text: How much does this plan cost?
+- speaker: agent
+  text: I understand you want to know the pricing. The exact rates depend on factors
+    like your age and benefits, so the licensed agent will provide that information.
+    I'm just checking if you qualify. Are you between forty and eighty-five?
 assertions:
-  - type: no_premium_quote
-  - type: no_approval_claim
-  - type: no_forbidden_phrase
-    expected: null
-    params:
-      forbidden_phrases:
-        - "it costs"
-        - "the premium is"
-        - "starts at"
-        - "as low as"
-  - type: one_question_max
-  - type: response_under_word_limit
-    params:
-      limit: 50
-expected_final_stage: living_situation
+- type: no_sensitive_info_request
+- type: no_human_claim
+- type: no_licensed_claim
+expected_final_stage: age_range
 tags:
-  - objection
-  - asks_price
-  - compliance
+- asks_price

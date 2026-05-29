@@ -283,8 +283,8 @@ class CampaignRunner:
         self._call_timestamps.append(now)
 
         # Emit call.attempt_started event
-        from integrations.crm_webhooks import emit_crm_event
-        emit_crm_event(
+        from integrations.crm_webhooks import emit_crm_event_async
+        await emit_crm_event_async(
             "call.attempt_started",
             repository=self.repository,
             call_id=call_id,
@@ -372,8 +372,8 @@ class CampaignRunner:
         )
 
         # Emit call.connection_dispositioned event
-        from integrations.crm_webhooks import emit_crm_event
-        emit_crm_event(
+        from integrations.crm_webhooks import emit_crm_event_async
+        await emit_crm_event_async(
             "call.connection_dispositioned",
             repository=self.repository,
             call_id=call_id,
@@ -394,8 +394,8 @@ class CampaignRunner:
             return "success_human_answered"
 
         # Emit call.completed event for all other outcomes
-        from integrations.crm_webhooks import emit_crm_event
-        emit_crm_event(
+        from integrations.crm_webhooks import emit_crm_event_async
+        await emit_crm_event_async(
             "call.completed",
             repository=self.repository,
             call_id=call_id,

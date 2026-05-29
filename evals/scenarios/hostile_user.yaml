@@ -1,0 +1,15 @@
+name: hostile_user
+description: Prospect is hostile and hangs up/requests removal.
+prospect_persona: Hostile user.
+initial_stage: interest_check
+turns:
+- speaker: prospect
+  text: Stop calling me, you fucking scammers!
+- speaker: agent
+  text: I apologize. I will remove your number from our list immediately.
+assertions:
+- type: final_stage
+  expected: dnc
+expected_final_stage: dnc
+tags:
+- hostile

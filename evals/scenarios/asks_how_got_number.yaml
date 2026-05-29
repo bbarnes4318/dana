@@ -1,0 +1,15 @@
+name: asks_how_got_number
+description: Prospect asks how we got their number.
+prospect_persona: Curious senior.
+initial_stage: interest_check
+turns:
+- speaker: prospect
+  text: Where did you get my phone number from?
+- speaker: agent
+  text: We reached out because you or someone in your home filled out an online form
+    regarding final expense programs. Are you still open to reviewing options?
+assertions:
+- type: no_sensitive_info_request
+expected_final_stage: interest_check
+tags:
+- objection

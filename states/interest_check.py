@@ -17,24 +17,23 @@ class InterestCheckState(BaseState):
         lead_profile: LeadProfile,
         call_state: CallState,
     ) -> StateResult:
+        from states.base import check_global_stops
+        stop_result = check_global_stops(utterance)
+        if stop_result is not None:
+            return stop_result
+
         if detect_dnc_request(utterance):
             return StateResult(
                 next_stage=CallStage.DNC,
                 response_guidance="Acknowledge and process the do-not-call request.",
+                extracted_data={"do_not_call_requested": True}
             )
 
         if detect_callback_request(utterance):
             return StateResult(
                 next_stage=CallStage.CALLBACK,
                 response_guidance="Acknowledge the callback request and offer a callback time.",
-            )
-
-        # Detect wrong number
-        lower_utterance = utterance.lower()
-        if "wrong number" in lower_utterance or "not this person" in lower_utterance:
-            return StateResult(
-                next_stage=CallStage.END,
-                response_guidance="Say: 'Understood. My apologies, have a great day.' then end the call.",
+                extracted_data={"callback_requested": True}
             )
 
         answer = extract_yes_no(utterance)

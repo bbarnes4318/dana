@@ -1,39 +1,29 @@
 name: not_interested
-description: >
-  Prospect immediately says they are not interested.
-  Assert the agent offers one rebuttal max, does not sell aggressively,
-  and transitions correctly.
-prospect_persona: >
-  A 65-year-old woman who is politely but firmly not interested in
-  hearing about final expense insurance.
+description: Prospect is not interested in the opening check.
+prospect_persona: Prospect rejects the review immediately.
 initial_stage: opening
 turns:
-  - speaker: prospect
-    text: "Hello?"
-  - speaker: agent
-    text: "Hi, this is Dana calling about some information on final expense coverage. Do you have a quick moment?"
-  - speaker: prospect
-    text: "No, I'm not interested."
-  - speaker: agent
-    text: "I understand completely. Thank you for your time and have a great day."
+- speaker: prospect
+  text: Hello?
+- speaker: agent
+  text: Hey this is Alex from American Beneficiary. Checking if you are open to review
+    final expense program options?
+- speaker: prospect
+  text: No, I'm not interested in that.
+- speaker: agent
+  text: Understood. I won't keep you. Take care.
 assertions:
-  - type: no_forbidden_phrase
-    expected: null
-    params:
-      forbidden_phrases:
-        - "you need this"
-        - "you're making a mistake"
-        - "you can't afford not to"
-        - "everyone needs"
-        - "before it's too late"
-  - type: no_approval_claim
-  - type: no_premium_quote
-  - type: one_question_max
-  - type: response_under_word_limit
-    params:
-      limit: 50
+- type: profile_field_equals
+  expected: false
+  params:
+    field: open_to_review
+- type: final_stage
+  expected: end
+- type: final_outcome
+  expected: ended
+- type: no_agent_turn_after_terminal
+- type: no_sensitive_info_request
 expected_final_stage: end
 tags:
-  - objection
-  - not_interested
-  - compliance
+- not_interested
+- end

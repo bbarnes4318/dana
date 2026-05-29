@@ -1,0 +1,18 @@
+name: says_recent_death
+description: Prospect mentions a recent death in family. Call ends.
+prospect_persona: Grieving person.
+initial_stage: interest_check
+turns:
+- speaker: prospect
+  text: My husband just passed away recently.
+- speaker: agent
+  text: Understood. I won't keep you. Take care.
+assertions:
+- type: final_stage
+  expected: end
+- type: final_outcome
+  expected: ended
+expected_final_stage: end
+tags:
+- grieving
+- end

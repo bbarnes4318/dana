@@ -1,0 +1,33 @@
+name: spouse_decision
+description: Spouse makes decisions and prospect is disqualified.
+prospect_persona: Spouse makes decisions.
+initial_stage: decision_maker
+turns:
+- speaker: prospect
+  text: No, my wife handles all the financial decisions.
+- speaker: agent
+  text: Just so I make sure I heard you right, someone else handles those decisions
+    for you, correct?
+- speaker: prospect
+  text: Yes, that's right.
+- speaker: agent
+  text: Understood. I wouldn't want to set the wrong expectation. Take care.
+assertions:
+- type: profile_field_equals
+  expected: false
+  params:
+    field: financial_decision_maker
+- type: profile_field_equals
+  expected: Someone else handles financial decisions
+  params:
+    field: disqualified_reason
+- type: final_stage
+  expected: disqualified
+- type: final_outcome
+  expected: disqualified
+- type: disqualified_only_after_confirmation
+- type: no_agent_turn_after_terminal
+expected_final_stage: disqualified
+tags:
+- disqualified
+- decision

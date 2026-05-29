@@ -4,7 +4,7 @@ import asyncio
 import hmac
 import hashlib
 import pytest
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from storage.repository import Repository
@@ -202,13 +202,25 @@ def test_signature_validation():
 # 5. CRM Webhooks & Outbox Sender Pipeline Tests
 # =====================================================================
 
+@pytest.fixture
+def repo(tmp_path):
+    return Repository(data_dir=tmp_path)
+
+
+@pytest.fixture(autouse=True)
+def reset_global_dispatcher():
+    import integrations.webhook_dispatcher
+    integrations.webhook_dispatcher._dispatcher = None
+    yield
+    integrations.webhook_dispatcher._dispatcher = None
+
+
 @pytest.mark.asyncio
-async def test_emit_crm_event_disabled_state(monkeypatch):
+async def test_emit_crm_event_disabled_state(repo, monkeypatch):
     monkeypatch.setenv("DANA_CRM_WEBHOOK_ENABLED", "false")
     monkeypatch.setenv("DANA_CRM_WEBHOOK_URL", "http://my-crm.com/webhook")
     monkeypatch.setenv("DANA_CRM_WEBHOOK_SECRET", "secret")
 
-    repo = Repository()
     task = emit_crm_event(
         event_type="call.completed",
         repository=repo,
@@ -231,11 +243,10 @@ async def test_emit_crm_event_disabled_state(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_emit_crm_event_config_error(monkeypatch):
+async def test_emit_crm_event_config_error(repo, monkeypatch):
     monkeypatch.setenv("DANA_CRM_WEBHOOK_ENABLED", "true")
     monkeypatch.delenv("DANA_CRM_WEBHOOK_SECRET", raising=False)  # Missing secret
 
-    repo = Repository()
     task = emit_crm_event(
         event_type="call.completed",
         repository=repo,
@@ -253,14 +264,13 @@ async def test_emit_crm_event_config_error(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_successful_webhook_sends_and_updates_outbox(monkeypatch):
+async def test_successful_webhook_sends_and_updates_outbox(repo, monkeypatch):
     monkeypatch.setenv("DANA_CRM_WEBHOOK_ENABLED", "true")
     monkeypatch.setenv("DANA_CRM_WEBHOOK_URL", "http://fake-crm.com/webhook")
     monkeypatch.setenv("DANA_CRM_WEBHOOK_SECRET", "my_secret")
     monkeypatch.setenv("DANA_CRM_WEBHOOK_TIMEOUT_SECONDS", "1")
     monkeypatch.setenv("DANA_CRM_WEBHOOK_FIXED_JITTER", "yes")
 
-    repo = Repository()
     call_id = "call-1"
 
     # Mock HTTP client response
@@ -280,8 +290,10 @@ async def test_successful_webhook_sends_and_updates_outbox(monkeypatch):
         )
         assert task is not None
 
-        # Run task to completion
-        await task
+        # Run task to completion (await wrapper task to get dispatcher task, then await dispatcher task)
+        disp_task = await task
+        if disp_task:
+            await disp_task
 
         # Check outbox status
         event = await repo.get_webhook_event(f"call.attempt_started:{call_id}")
@@ -293,7 +305,7 @@ async def test_successful_webhook_sends_and_updates_outbox(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_webhook_failure_retries_and_fails(monkeypatch):
+async def test_webhook_failure_retries_and_fails(repo, monkeypatch):
     monkeypatch.setenv("DANA_CRM_WEBHOOK_ENABLED", "true")
     monkeypatch.setenv("DANA_CRM_WEBHOOK_URL", "http://fake-crm.com/webhook")
     monkeypatch.setenv("DANA_CRM_WEBHOOK_SECRET", "my_secret")
@@ -301,7 +313,6 @@ async def test_webhook_failure_retries_and_fails(monkeypatch):
     monkeypatch.setenv("DANA_CRM_WEBHOOK_MAX_RETRIES", "2")
     monkeypatch.setenv("DANA_CRM_WEBHOOK_FIXED_JITTER", "yes")
 
-    repo = Repository()
     call_id = "call-retry-fail"
 
     mock_response = MagicMock()
@@ -317,7 +328,10 @@ async def test_webhook_failure_retries_and_fails(monkeypatch):
             call_id=call_id
         )
         assert task is not None
-        await task
+        
+        disp_task = await task
+        if disp_task:
+            await disp_task
 
         # The event should have completed both attempts and marked failed
         event = await repo.get_webhook_event(f"transfer.failed:{call_id}")
@@ -328,14 +342,13 @@ async def test_webhook_failure_retries_and_fails(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_dispatcher_concurrency_and_flush(monkeypatch):
+async def test_dispatcher_concurrency_and_flush(repo, monkeypatch):
     monkeypatch.setenv("DANA_CRM_WEBHOOK_ENABLED", "true")
     monkeypatch.setenv("DANA_CRM_WEBHOOK_URL", "http://fake-crm.com/webhook")
     monkeypatch.setenv("DANA_CRM_WEBHOOK_SECRET", "my_secret")
     monkeypatch.setenv("DANA_CRM_WEBHOOK_MAX_CONCURRENCY", "2")
     monkeypatch.setenv("DANA_CRM_WEBHOOK_FIXED_JITTER", "yes")
 
-    repo = Repository()
     dispatcher = get_dispatcher()
 
     mock_response = MagicMock()
@@ -354,7 +367,10 @@ async def test_dispatcher_concurrency_and_flush(monkeypatch):
         t2 = emit_crm_event("call.session_started", repository=repo, call_id="con-2")
         t3 = emit_crm_event("call.session_started", repository=repo, call_id="con-3")
 
-        # Wait/flush
+        # Wait for wrapper tasks to finish enqueuing
+        await asyncio.gather(t1, t2, t3)
+
+        # Wait/flush dispatcher tasks
         await dispatcher.flush_pending_webhooks(timeout=2.0)
 
         # Check status of all events
@@ -368,15 +384,13 @@ async def test_dispatcher_concurrency_and_flush(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_webhook_failure_does_not_block_main_thread(monkeypatch):
+async def test_webhook_failure_does_not_block_main_thread(repo, monkeypatch):
     monkeypatch.setenv("DANA_CRM_WEBHOOK_ENABLED", "true")
     monkeypatch.setenv("DANA_CRM_WEBHOOK_URL", "http://fake-crm.com/webhook")
     monkeypatch.setenv("DANA_CRM_WEBHOOK_SECRET", "my_secret")
     monkeypatch.setenv("DANA_CRM_WEBHOOK_MAX_RETRIES", "1")
     monkeypatch.setenv("DANA_CRM_WEBHOOK_FIXED_JITTER", "yes")
 
-    repo = Repository()
-    
     # We patch client to raise an immediate network exception
     with patch("httpx.AsyncClient.post", side_effect=ConnectionError("CRM is completely offline")):
         start_time = asyncio.get_event_loop().time()
@@ -394,7 +408,9 @@ async def test_webhook_failure_does_not_block_main_thread(monkeypatch):
         assert (end_time - start_time) < 0.05
 
         # Execute task to make sure it handles exception internally
-        await task
+        disp_task = await task
+        if disp_task:
+            await disp_task
         
         event = await repo.get_webhook_event("call.completed:call-no-crash")
         assert event is not None
@@ -426,15 +442,13 @@ def test_handoff_summary_not_included_in_public_or_livekit_metadata():
 
 
 @pytest.mark.asyncio
-async def test_webhook_failures_never_break_call_path(monkeypatch, caplog):
+async def test_webhook_failures_never_break_call_path(repo, monkeypatch, caplog):
     monkeypatch.setenv("DANA_CRM_WEBHOOK_ENABLED", "true")
     monkeypatch.setenv("DANA_CRM_WEBHOOK_URL", "http://fake-crm.com/webhook")
     monkeypatch.setenv("DANA_CRM_WEBHOOK_SECRET", "my_secret")
     monkeypatch.setenv("DANA_CRM_WEBHOOK_MAX_RETRIES", "1")
     monkeypatch.setenv("DANA_CRM_WEBHOOK_FIXED_JITTER", "yes")
 
-    repo = Repository()
-    
     with patch("httpx.AsyncClient.post", side_effect=ConnectionError("CRM is down")):
         # 1. Verify emit_crm_event returns without raising to the caller
         task = emit_crm_event(
@@ -453,9 +467,13 @@ async def test_webhook_failures_never_break_call_path(monkeypatch, caplog):
             )
             assert t is not None
             # Awaiting the background task directly to ensure it runs to completion
-            await t
+            disp = await t
+            if disp:
+                await disp
 
-        await task
+        disp_task = await task
+        if disp_task:
+            await disp_task
         
         # 3. Verify event is marked retry/failed appropriately
         event = await repo.get_webhook_event("qa.failed:call-fail-flow")
@@ -465,3 +483,364 @@ async def test_webhook_failures_never_break_call_path(monkeypatch, caplog):
         
         # 4. Verify exception gets logged
         assert any("exception" in record.message or "failure" in record.message or "CRM is down" in record.message for record in caplog.records)
+
+
+# =====================================================================
+# Reliability Assertion Tests
+# =====================================================================
+
+@pytest.mark.asyncio
+async def test_async_emit_persists_before_return(repo, monkeypatch):
+    monkeypatch.setenv("DANA_CRM_WEBHOOK_ENABLED", "true")
+    monkeypatch.setenv("DANA_CRM_WEBHOOK_URL", "http://fake-crm.com/webhook")
+    monkeypatch.setenv("DANA_CRM_WEBHOOK_SECRET", "my_secret")
+    
+    from integrations.crm_webhooks import emit_crm_event_async
+    
+    task = await emit_crm_event_async(
+        event_type="call.started",
+        repository=repo,
+        call_id="call-async-persist",
+        phone_e164="+15551234567"
+    )
+    
+    # Assert event exists in database immediately after return
+    event = await repo.get_webhook_event("call.started:call-async-persist")
+    assert event is not None
+    assert event["status"] == "pending"
+    if task:
+        await task
+
+
+@pytest.mark.asyncio
+async def test_disabled_event_persists_before_return(repo, monkeypatch):
+    monkeypatch.setenv("DANA_CRM_WEBHOOK_ENABLED", "false")
+    
+    from integrations.crm_webhooks import emit_crm_event_async
+    
+    task = await emit_crm_event_async(
+        event_type="call.started",
+        repository=repo,
+        call_id="call-disabled-persist",
+    )
+    assert task is None
+    
+    event = await repo.get_webhook_event("call.started:call-disabled-persist")
+    assert event is not None
+    assert event["status"] == "disabled"
+
+
+@pytest.mark.asyncio
+async def test_configuration_error_persists_before_return(repo, monkeypatch):
+    monkeypatch.setenv("DANA_CRM_WEBHOOK_ENABLED", "true")
+    monkeypatch.setenv("DANA_CRM_WEBHOOK_URL", "http://fake-crm.com/webhook")
+    monkeypatch.delenv("DANA_CRM_WEBHOOK_SECRET", raising=False)  # Missing secret
+    
+    from integrations.crm_webhooks import emit_crm_event_async
+    
+    task = await emit_crm_event_async(
+        event_type="call.started",
+        repository=repo,
+        call_id="call-config-error",
+    )
+    assert task is None
+    
+    event = await repo.get_webhook_event("call.started:call-config-error")
+    assert event is not None
+    assert event["status"] == "configuration_error"
+    assert "Missing CRM webhook signing secret" in event["last_error"]
+
+
+def test_sync_emit_best_effort_documented():
+    from integrations.crm_webhooks import emit_crm_event
+    doc = emit_crm_event.__doc__
+    assert doc is not None
+    assert "best-effort" in doc.lower()
+    assert "does not guarantee" in doc.lower()
+    assert "should not be used" in doc.lower()
+    assert "new production async paths" in doc.lower()
+
+
+@pytest.mark.asyncio
+async def test_queue_full_leaves_pending(repo, monkeypatch):
+    monkeypatch.setenv("DANA_CRM_WEBHOOK_ENABLED", "true")
+    monkeypatch.setenv("DANA_CRM_WEBHOOK_URL", "http://fake-crm.com/webhook")
+    monkeypatch.setenv("DANA_CRM_WEBHOOK_SECRET", "my_secret")
+    monkeypatch.setenv("DANA_CRM_WEBHOOK_MAX_CONCURRENCY", "1")
+    
+    from integrations.webhook_dispatcher import get_dispatcher
+    dispatcher = get_dispatcher()
+    dispatcher._max_queue_size = 0
+    
+    from integrations.crm_webhooks import emit_crm_event_async
+    
+    task = await emit_crm_event_async(
+        event_type="call.started",
+        repository=repo,
+        call_id="call-queue-full",
+    )
+    assert task is None # rejected
+    
+    # But it must be persisted as pending!
+    event = await repo.get_webhook_event("call.started:call-queue-full")
+    assert event is not None
+    assert event["status"] == "pending"
+
+
+@pytest.mark.asyncio
+async def test_queue_full_no_warning(repo, monkeypatch):
+    monkeypatch.setenv("DANA_CRM_WEBHOOK_ENABLED", "true")
+    monkeypatch.setenv("DANA_CRM_WEBHOOK_URL", "http://fake-crm.com/webhook")
+    monkeypatch.setenv("DANA_CRM_WEBHOOK_SECRET", "my_secret")
+    
+    from integrations.webhook_dispatcher import get_dispatcher
+    dispatcher = get_dispatcher()
+    dispatcher._max_queue_size = 0
+    
+    factory_called = False
+    async def dummy_coro():
+        nonlocal factory_called
+        factory_called = True
+        
+    task = dispatcher.submit_task(lambda: dummy_coro())
+    assert task is None
+    assert not factory_called
+
+
+@pytest.mark.asyncio
+async def test_drain_pending_webhook_events(repo, monkeypatch):
+    monkeypatch.setenv("DANA_CRM_WEBHOOK_ENABLED", "true")
+    monkeypatch.setenv("DANA_CRM_WEBHOOK_URL", "http://fake-crm.com/webhook")
+    monkeypatch.setenv("DANA_CRM_WEBHOOK_SECRET", "my_secret")
+    monkeypatch.setenv("DANA_CRM_WEBHOOK_MAX_RETRIES", "3")
+    
+    event_id = "call.completed:drain-test"
+    payload = {"event_id": event_id, "event_type": "call.completed", "timestamp": "2026-05-28T12:00:00Z", "idempotency_key": event_id}
+    await repo.save_webhook_event(
+        event_id=event_id,
+        event_type="call.completed",
+        destination="http://fake-crm.com/webhook",
+        payload=payload,
+        status="pending",
+        attempt_count=0
+    )
+    
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.text = "OK"
+    
+    from integrations.crm_webhooks import drain_pending_webhook_events
+    
+    with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+        mock_post.return_value = mock_response
+        
+        claimed = await drain_pending_webhook_events(repo, "worker-1", limit=10)
+        assert len(claimed) == 1
+        assert claimed[0]["event_id"] == event_id
+        
+        event = await repo.get_webhook_event(event_id)
+        assert event["status"] == "sent"
+        assert event["response_status_code"] == 200
+
+
+@pytest.mark.asyncio
+async def test_two_workers_do_not_duplicate(repo, monkeypatch):
+    event_id = "call.completed:concurrency-test"
+    payload = {"event_id": event_id, "event_type": "call.completed", "timestamp": "2026-05-28T12:00:00Z", "idempotency_key": event_id}
+    await repo.save_webhook_event(
+        event_id=event_id,
+        event_type="call.completed",
+        destination="http://fake-crm.com/webhook",
+        payload=payload,
+        status="pending",
+        attempt_count=0
+    )
+    
+    claimed_1 = await repo.claim_pending_webhook_events(limit=5, worker_id="worker-1")
+    claimed_2 = await repo.claim_pending_webhook_events(limit=5, worker_id="worker-2")
+    
+    assert len(claimed_1) == 1
+    assert claimed_1[0]["event_id"] == event_id
+    assert len(claimed_2) == 0
+
+
+@pytest.mark.asyncio
+async def test_stale_claimed_events_reclaimed(repo, monkeypatch):
+    monkeypatch.setenv("DANA_CRM_WEBHOOK_CLAIM_TIMEOUT_SECONDS", "10")
+    
+    event_id = "call.completed:stale-test"
+    payload = {"event_id": event_id, "event_type": "call.completed", "timestamp": "2026-05-28T12:00:00Z", "idempotency_key": event_id}
+    
+    now = datetime.now(timezone.utc)
+    claimed_at = now - timedelta(seconds=20)
+    
+    await repo.save_webhook_event(
+        event_id=event_id,
+        event_type="call.completed",
+        destination="http://fake-crm.com/webhook",
+        payload=payload,
+        status="claimed",
+        claimed_by="dead-worker",
+        claimed_at=claimed_at,
+        created_at=claimed_at,
+        updated_at=claimed_at
+    )
+    
+    claimed = await repo.claim_pending_webhook_events(limit=5, worker_id="worker-2", now=now)
+    assert len(claimed) == 1
+    assert claimed[0]["event_id"] == event_id
+    assert claimed[0]["claimed_by"] == "worker-2"
+
+
+@pytest.mark.asyncio
+async def test_failed_sends_increment_attempt_count(repo, monkeypatch):
+    monkeypatch.setenv("DANA_CRM_WEBHOOK_ENABLED", "true")
+    monkeypatch.setenv("DANA_CRM_WEBHOOK_URL", "http://fake-crm.com/webhook")
+    monkeypatch.setenv("DANA_CRM_WEBHOOK_SECRET", "my_secret")
+    monkeypatch.setenv("DANA_CRM_WEBHOOK_MAX_RETRIES", "5")
+    
+    event_id = "call.completed:retry-increment"
+    payload = {"event_id": event_id, "event_type": "call.completed", "timestamp": "2026-05-28T12:00:00Z", "idempotency_key": event_id}
+    
+    await repo.save_webhook_event(
+        event_id=event_id,
+        event_type="call.completed",
+        destination="http://fake-crm.com/webhook",
+        payload=payload,
+        status="pending",
+        attempt_count=2
+    )
+    
+    mock_response = MagicMock()
+    mock_response.status_code = 500
+    mock_response.text = "Internal error"
+    
+    from integrations.crm_webhooks import drain_pending_webhook_events
+    
+    with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+        mock_post.return_value = mock_response
+        
+        claimed = await drain_pending_webhook_events(repo, "worker-1", limit=10)
+        assert len(claimed) == 1
+        
+        event = await repo.get_webhook_event(event_id)
+        assert event["status"] == "pending"
+        assert event["attempt_count"] == 3
+
+
+@pytest.mark.asyncio
+async def test_max_retries_marks_failed(repo, monkeypatch):
+    monkeypatch.setenv("DANA_CRM_WEBHOOK_ENABLED", "true")
+    monkeypatch.setenv("DANA_CRM_WEBHOOK_URL", "http://fake-crm.com/webhook")
+    monkeypatch.setenv("DANA_CRM_WEBHOOK_SECRET", "my_secret")
+    monkeypatch.setenv("DANA_CRM_WEBHOOK_MAX_RETRIES", "3")
+    
+    event_id = "call.completed:max-retries"
+    payload = {"event_id": event_id, "event_type": "call.completed", "timestamp": "2026-05-28T12:00:00Z", "idempotency_key": event_id}
+    
+    await repo.save_webhook_event(
+        event_id=event_id,
+        event_type="call.completed",
+        destination="http://fake-crm.com/webhook",
+        payload=payload,
+        status="pending",
+        attempt_count=2
+    )
+    
+    mock_response = MagicMock()
+    mock_response.status_code = 500
+    mock_response.text = "Fatal"
+    
+    from integrations.crm_webhooks import drain_pending_webhook_events
+    
+    with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+        mock_post.return_value = mock_response
+        
+        claimed = await drain_pending_webhook_events(repo, "worker-1", limit=10)
+        assert len(claimed) == 1
+        
+        event = await repo.get_webhook_event(event_id)
+        assert event["status"] == "failed"
+        assert event["attempt_count"] == 3
+
+
+@pytest.mark.asyncio
+async def test_disabled_or_other_events_not_claimed(repo, monkeypatch):
+    await repo.save_webhook_event(event_id="e-disabled", event_type="c", status="disabled")
+    await repo.save_webhook_event(event_id="e-config", event_type="c", status="configuration_error")
+    await repo.save_webhook_event(event_id="e-sent", event_type="c", status="sent")
+    await repo.save_webhook_event(event_id="e-failed", event_type="c", status="failed")
+    
+    claimed = await repo.claim_pending_webhook_events(limit=10, worker_id="worker-1")
+    assert len(claimed) == 0
+
+
+@pytest.mark.asyncio
+async def test_drain_worker_signs_exact_payload_bytes(repo, monkeypatch):
+    monkeypatch.setenv("DANA_CRM_WEBHOOK_ENABLED", "true")
+    monkeypatch.setenv("DANA_CRM_WEBHOOK_URL", "http://fake-crm.com/webhook")
+    monkeypatch.setenv("DANA_CRM_WEBHOOK_SECRET", "my_secret")
+    
+    event_id = "call.completed:signing-test"
+    payload = {"event_id": event_id, "event_type": "call.completed", "timestamp": "2026-05-28T12:00:00Z", "idempotency_key": event_id}
+    
+    await repo.save_webhook_event(
+        event_id=event_id,
+        event_type="call.completed",
+        destination="http://fake-crm.com/webhook",
+        payload=payload,
+        status="pending"
+    )
+    
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.text = "OK"
+    
+    from integrations.crm_webhooks import drain_pending_webhook_events, verify_signature
+    
+    with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+        mock_post.return_value = mock_response
+        
+        await drain_pending_webhook_events(repo, "worker-1", limit=1)
+        
+        call_args = mock_post.call_args
+        assert call_args is not None
+        headers = call_args[1]["headers"]
+        body_bytes = call_args[1]["content"]
+        signature_header = headers["X-Dana-Signature"]
+        
+        assert verify_signature(body_bytes, "my_secret", signature_header) is True
+
+
+@pytest.mark.asyncio
+async def test_stop_webhook_outbox_worker_cancels_cleanly(repo, monkeypatch):
+    import integrations.crm_webhooks
+    
+    integrations.crm_webhooks.start_webhook_outbox_worker(repo, poll_interval=0.1, worker_id="worker-lifecycle")
+    assert integrations.crm_webhooks._outbox_worker_task is not None
+    assert not integrations.crm_webhooks._outbox_worker_task.done()
+    
+    integrations.crm_webhooks.stop_webhook_outbox_worker()
+    assert integrations.crm_webhooks._outbox_worker_task is None
+
+
+@pytest.mark.asyncio
+async def test_webhook_failure_never_breaks_call_path(repo, monkeypatch):
+    monkeypatch.setenv("DANA_CRM_WEBHOOK_ENABLED", "true")
+    monkeypatch.setenv("DANA_CRM_WEBHOOK_URL", "http://fake-crm.com/webhook")
+    monkeypatch.setenv("DANA_CRM_WEBHOOK_SECRET", "my_secret")
+    
+    from integrations.crm_webhooks import emit_crm_event_async
+    
+    with patch("httpx.AsyncClient.post", side_effect=Exception("Severe network partition")):
+        task = await emit_crm_event_async(
+            event_type="call.completed",
+            repository=repo,
+            call_id="call-fail-safe"
+        )
+        assert task is not None
+        await task
+        
+        event = await repo.get_webhook_event("call.completed:call-fail-safe")
+        assert event is not None
+        assert event["status"] == "failed"

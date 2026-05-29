@@ -1,0 +1,18 @@
+name: grieving
+description: Prospect is grieving. Call ends politely.
+prospect_persona: Grieving prospect.
+initial_stage: interest_check
+turns:
+- speaker: prospect
+  text: I'm going through a loss right now and cannot talk.
+- speaker: agent
+  text: Understood. I won't keep you. Take care.
+assertions:
+- type: final_stage
+  expected: end
+- type: final_outcome
+  expected: ended
+expected_final_stage: end
+tags:
+- grieving
+- end

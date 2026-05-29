@@ -33,6 +33,27 @@ class EvalAssertion(BaseModel):
         "dnc_honored",
         "callback_captured",
         "transfer_only_when_ready",
+        # New assertion types
+        "required_profile_field",
+        "profile_field_equals",
+        "final_outcome",
+        "final_stage",
+        "no_sensitive_info_request",
+        "no_human_claim",
+        "no_licensed_claim",
+        "required_identity_response",
+        "no_transfer_before_ready",
+        "transfer_failure_callback_offer",
+        "disqualified_only_after_confirmation",
+        "dnc_stops_call",
+        "wrong_number_stops_call",
+        "no_agent_turn_after_terminal",
+        "no_markdown",
+        "max_one_question",
+        "max_agent_words",
+        "required_phrase",
+        "forbidden_phrase",
+        "voicemail_does_not_start_agent",
     ]
     expected: Any = None
     params: dict[str, Any] = Field(default_factory=dict)

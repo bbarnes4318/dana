@@ -34,7 +34,7 @@ class QARubric:
     """
 
     # ------------------------------------------------------------------
-    # Criterion definitions
+    # Criterion definitions (Exactly 11 categories)
     # ------------------------------------------------------------------
 
     OPENING_STRENGTH = ScoringCriterion(
@@ -59,14 +59,14 @@ class QARubric:
         ),
     )
 
-    QUALIFICATION_COMPLETION = ScoringCriterion(
-        name="qualification_completion",
+    SHORT_FLOW_COMPLETION = ScoringCriterion(
+        name="short_flow_completion",
         weight=2.0,
-        description="How many required qualification fields were collected from the prospect.",
+        description="How many required short-flow qualification fields were confirmed (open_to_review, age_range_confirmed, living_independently, financial_decision_maker, transfer_consent_confirmed).",
         scoring_guide=(
-            "0: No fields collected. "
-            "5: Half of required fields collected. "
-            "10: All required fields collected."
+            "0: None of the fields confirmed. "
+            "5: Partial confirmation of fields. "
+            "10: All 5 short-flow qualification fields confirmed."
         ),
     )
 
@@ -95,22 +95,50 @@ class QARubric:
     TRANSFER_READINESS = ScoringCriterion(
         name="transfer_readiness",
         weight=1.5,
-        description="Transferred the call at the appropriate time — not too early or too late.",
+        description="Transferred the call at the appropriate time — only when all confirmations are obtained.",
         scoring_guide=(
-            "0: Transferred with no qualification or refused when ready. "
-            "5: Transferred slightly early or waited one stage too long. "
-            "10: Transferred at exactly the right qualification point."
+            "0: Transferred prematurely or missed transfer opportunity. "
+            "10: Transferred exactly when all short-flow conditions were ready."
+        ),
+    )
+
+    DNC_HANDLING = ScoringCriterion(
+        name="dnc_handling",
+        weight=2.0,
+        description="Empathy and immediate termination on DNC or wrong-number request.",
+        scoring_guide=(
+            "0: Kept selling or ignored DNC/wrong number request. "
+            "10: Immediately stopped the call and marked status appropriately."
+        ),
+    )
+
+    DISQUALIFICATION_CONFIRMATION = ScoringCriterion(
+        name="disqualification_confirmation",
+        weight=1.5,
+        description="Confirmation of disqualifying facts before ending the call.",
+        scoring_guide=(
+            "0: Ended call instantly without double-checking the disqualifier. "
+            "10: Double-checked disqualifier with the prospect before politely ending."
         ),
     )
 
     TALK_LISTEN_BALANCE = ScoringCriterion(
         name="talk_listen_balance",
         weight=1.0,
-        description="Agent did not dominate the conversation; balanced talk-listen ratio.",
+        description="Agent did not dominate conversation and asked at most one question per turn.",
         scoring_guide=(
-            "0: Agent spoke >80%% of total words. "
-            "5: Agent spoke ~65%% of total words. "
-            "10: Agent spoke 40-55%% of total words."
+            "0: Dominated call or asked multiple questions in one turn. "
+            "10: Balanced talk/listen ratio and clean question pacing."
+        ),
+    )
+
+    LATENCY_READINESS = ScoringCriterion(
+        name="latency_readiness",
+        weight=1.0,
+        description="Prompt response times and no trailing agent turns after terminal stages.",
+        scoring_guide=(
+            "0: Had agent turns after a terminal stage or significant delay. "
+            "10: Prompt response and zero activity after call ended."
         ),
     )
 
@@ -126,17 +154,20 @@ class QARubric:
     )
 
     # ------------------------------------------------------------------
-    # All criteria in evaluation order
+    # All criteria in evaluation order (Exactly 11 categories)
     # ------------------------------------------------------------------
 
     ALL_CRITERIA: list[ScoringCriterion] = [
         OPENING_STRENGTH,
         HUMAN_REALISM,
-        QUALIFICATION_COMPLETION,
+        SHORT_FLOW_COMPLETION,
         OBJECTION_HANDLING,
         COMPLIANCE_SAFETY,
         TRANSFER_READINESS,
+        DNC_HANDLING,
+        DISQUALIFICATION_CONFIRMATION,
         TALK_LISTEN_BALANCE,
+        LATENCY_READINESS,
         CLOSE_PROBABILITY,
     ]
 

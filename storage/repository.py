@@ -13,7 +13,7 @@ import json
 import os
 import uuid
 from pathlib import Path
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Any, Optional
 
 def parse_dt(val: Any) -> Optional[datetime]:
@@ -1106,6 +1106,9 @@ class Repository:
             now = datetime.now(timezone.utc)
         elif now.tzinfo is None:
             now = now.replace(tzinfo=timezone.utc)
+
+        claim_timeout = float(os.getenv("DANA_CRM_WEBHOOK_CLAIM_TIMEOUT_SECONDS", "300"))
+        stale_cutoff = now - timedelta(seconds=claim_timeout)
             
         if isinstance(self._store, PostgresStore):
             await self._store._ensure_pool()
@@ -1118,32 +1121,48 @@ class Repository:
                 updated_at = $2
             WHERE id IN (
                 SELECT id FROM webhook_events
-                WHERE status = 'pending'
-                  AND (next_attempt_at IS NULL OR next_attempt_at <= $2)
+                WHERE (status = 'pending' AND (next_attempt_at IS NULL OR next_attempt_at <= $2))
+                   OR (status = 'claimed' AND claimed_at < $3)
                 ORDER BY created_at ASC
                 FOR UPDATE SKIP LOCKED
-                LIMIT $3
+                LIMIT $4
             )
             RETURNING *;
             """
             async with self._store._pool.acquire() as conn:
-                rows = await conn.fetch(query, worker_id, now, limit)
+                rows = await conn.fetch(query, worker_id, now, stale_cutoff, limit)
                 return [self._store._row_to_dict("webhook_events", r) for r in rows]
         else:
             # Local lock for JSONL mode to prevent duplicate concurrent claims
             async with self._claim_lock:
-                results = await self._store.query(_WEBHOOK_EVENTS, {"status": "pending"})
+                results_pending = await self._store.query(_WEBHOOK_EVENTS, {"status": "pending"})
+                results_claimed = await self._store.query(_WEBHOOK_EVENTS, {"status": "claimed"})
+                results = results_pending + results_claimed
+                results.sort(key=lambda x: x.get("created_at") or "")
+
                 claimed = []
                 for r in results:
                     if len(claimed) >= limit:
                         break
-                    next_attempt = r.get("next_attempt_at")
-                    if not next_attempt:
-                        eligible = True
+
+                    status = r.get("status")
+                    if status == "pending":
+                        next_attempt = r.get("next_attempt_at")
+                        if not next_attempt:
+                            eligible = True
+                        else:
+                            dt = parse_dt(next_attempt)
+                            eligible = dt and dt <= now
+                    elif status == "claimed":
+                        claimed_at_str = r.get("claimed_at")
+                        if claimed_at_str:
+                            claimed_at_dt = parse_dt(claimed_at_str)
+                            eligible = claimed_at_dt and claimed_at_dt < stale_cutoff
+                        else:
+                            eligible = True
                     else:
-                        dt = parse_dt(next_attempt)
-                        eligible = dt and dt <= now
-                    
+                        eligible = False
+
                     if eligible:
                         r["status"] = "claimed"
                         r["claimed_by"] = worker_id

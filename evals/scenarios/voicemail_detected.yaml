@@ -1,0 +1,16 @@
+name: voicemail_detected
+description: Voicemail system answers. Call ends.
+prospect_persona: Voicemail system.
+initial_stage: opening
+turns:
+- speaker: prospect
+  text: Please leave a message after the tone.
+assertions:
+- type: voicemail_does_not_start_agent
+- type: final_stage
+  expected: end
+- type: final_outcome
+  expected: ended
+expected_final_stage: end
+tags:
+- voicemail

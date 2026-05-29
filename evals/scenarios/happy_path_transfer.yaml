@@ -1,0 +1,71 @@
+name: happy_path_transfer
+description: Prospect is interested, eligible, and agrees to transfer.
+prospect_persona: A 65-year-old senior open to reviewing options.
+initial_stage: opening
+turns:
+- speaker: prospect
+  text: Hello?
+- speaker: agent
+  text: Hey this is Alex from American Beneficiary. Checking if you are open to review
+    final expense program options?
+- speaker: prospect
+  text: Yes, I am.
+- speaker: agent
+  text: "Okay. First thing, just so I know this applies \u2014 are you between forty\
+    \ and eighty-five?"
+- speaker: prospect
+  text: Yes, I'm sixty-five.
+- speaker: agent
+  text: Okay. And you're living independently, not in a nursing home or assisted living?
+- speaker: prospect
+  text: Yes, I live in my own home.
+- speaker: agent
+  text: Okay. And you handle your own financial decisions, correct?
+- speaker: prospect
+  text: Yes, I do.
+- speaker: agent
+  text: Okay. That gives the licensed agent enough to take a look. I'm going to bring
+    them on so they can go over the actual options with you. Hold the line for me,
+    okay?
+- speaker: prospect
+  text: Yes, go ahead.
+- speaker: agent
+  text: Perfect. Stay right there for me.
+assertions:
+- type: profile_field_equals
+  expected: true
+  params:
+    field: open_to_review
+- type: profile_field_equals
+  expected: true
+  params:
+    field: age_range_confirmed
+- type: profile_field_equals
+  expected: true
+  params:
+    field: living_independently
+- type: profile_field_equals
+  expected: true
+  params:
+    field: financial_decision_maker
+- type: profile_field_equals
+  expected: true
+  params:
+    field: transfer_consent_confirmed
+- type: final_outcome
+  expected: transferred
+- type: final_stage
+  expected: transfer_ready
+- type: no_transfer_before_ready
+- type: no_sensitive_info_request
+- type: no_human_claim
+- type: no_licensed_claim
+- type: no_markdown
+- type: max_one_question
+- type: max_agent_words
+  params:
+    limit: 60
+expected_final_stage: transfer_ready
+tags:
+- happy_path
+- transfer
