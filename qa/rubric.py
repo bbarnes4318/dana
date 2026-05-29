@@ -104,7 +104,7 @@ class QARubric:
 
     DNC_HANDLING = ScoringCriterion(
         name="dnc_handling",
-        weight=2.0,
+        weight=1.0,
         description="Empathy and immediate termination on DNC or wrong-number request.",
         scoring_guide=(
             "0: Kept selling or ignored DNC/wrong number request. "
@@ -114,7 +114,7 @@ class QARubric:
 
     DISQUALIFICATION_CONFIRMATION = ScoringCriterion(
         name="disqualification_confirmation",
-        weight=1.5,
+        weight=1.0,
         description="Confirmation of disqualifying facts before ending the call.",
         scoring_guide=(
             "0: Ended call instantly without double-checking the disqualifier. "
