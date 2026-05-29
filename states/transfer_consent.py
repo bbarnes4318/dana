@@ -85,5 +85,5 @@ class TransferConsentState(BaseState):
         # Ambiguous but non-silent fallback
         return StateResult(
             next_stage=None,
-            response_guidance="Say: 'I’m going to bring the licensed agent on so they can go over the options. Hold the line for me, okay?'"
+            response_guidance="Say: 'Are you okay holding while I bring the licensed agent on?'"
         )
