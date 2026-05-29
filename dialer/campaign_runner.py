@@ -393,6 +393,35 @@ class CampaignRunner:
             await self.lead_queue.mark_completed(lead_id, outcome="completed")
             return "success_human_answered"
 
+        # Save outcome metrics and costs for non-human-answered call
+        tele_provider = "telnyx" if not is_dry_run else "none"
+        duration_val = 0.0
+        if 'call_details' in locals() and isinstance(call_details, dict):
+            duration_val = call_details.get("duration") or call_details.get("duration_seconds") or 0.0
+        
+        try:
+            from metrics.model_cost_metrics import calculate_and_save_costs
+            from metrics.outcome_metrics import save_outcome_for_call
+            await calculate_and_save_costs(
+                repository=self.repository,
+                call_id=call_id,
+                campaign_id=campaign_id,
+                stt_provider="none",
+                stt_seconds=0.0,
+                llm_model="none",
+                prompt_tokens=0,
+                completion_tokens=0,
+                tts_provider="none",
+                tts_characters=0,
+                telephony_provider=tele_provider,
+                telephony_seconds=float(duration_val),
+                dry_run=is_dry_run,
+                llm_tokens_estimated=False
+            )
+            await save_outcome_for_call(self.repository, call_id, campaign_id, outcome, cost=0.0)
+        except Exception as me:
+            logger.error("Failed to save non-human answered metrics: %s", me)
+
         # Emit call.completed event for all other outcomes
         from integrations.crm_webhooks import emit_crm_event_async
         await emit_crm_event_async(

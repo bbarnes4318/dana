@@ -13,7 +13,8 @@ import json
 import os
 import uuid
 from pathlib import Path
-from datetime import datetime, timezone, timedelta
+from datetime import date, datetime, timezone, timedelta
+from decimal import Decimal
 from typing import Any, Optional
 
 def parse_dt(val: Any) -> Optional[datetime]:
@@ -54,6 +55,8 @@ from storage.schemas import (
     ToolEvent,
     TrainingNote,
     Transfer,
+    CallCost,
+    OutcomeMetric,
 )
 
 # Collection name constants
@@ -70,6 +73,8 @@ _CONSENT_RECORDS = "consent_records"
 _LATENCY_METRICS = "latency_metrics"
 _CAMPAIGNS = "campaigns"
 _WEBHOOK_EVENTS = "webhook_events"
+_CALL_COSTS = "call_costs"
+_OUTCOME_METRICS = "outcome_metrics"
 
 
 class Repository:
@@ -374,13 +379,46 @@ class Repository:
         return await self._store.list_recent(_CALLS, limit=limit)
 
     async def get_campaign_metrics(self, campaign_id: str) -> dict[str, Any]:
-        """Calculate performance metrics for a specific campaign."""
+        """Calculate enhanced performance and cost metrics for a specific campaign."""
         calls = await self._store.query(_CALLS, {"campaign_id": campaign_id})
+        costs = await self._store.query(_CALL_COSTS, {"campaign_id": campaign_id})
         
-        total = len(calls)
-        answered = sum(1 for c in calls if c.get("answered_at") is not None)
-        completed = sum(1 for c in calls if c.get("ended_at") is not None)
+        total_calls = len(calls)
+        answered_calls = sum(1 for c in calls if c.get("answered_at") is not None or c.get("outcome") in ("human_answered", "transferred", "callback", "dnc", "disqualified"))
+        completed_calls = sum(1 for c in calls if c.get("ended_at") is not None)
         
+        outcomes: dict[str, int] = {}
+        for c in calls:
+            outcome = c.get("outcome") or "unknown"
+            outcomes[outcome] = outcomes.get(outcome, 0) + 1
+            
+        voicemails = outcomes.get("voicemail", 0)
+        transferred = outcomes.get("transferred", 0)
+        callbacks = outcomes.get("callback", 0)
+        dncs = outcomes.get("dnc", 0)
+        disqualified = outcomes.get("disqualified", 0)
+        
+        # Calculate total cost
+        total_cost = Decimal("0.0")
+        for cost_row in costs:
+            est = cost_row.get("estimated_cost")
+            if est is not None:
+                total_cost += Decimal(str(est))
+                
+        # Ratios (divide-by-zero safe)
+        answer_rate = float(Decimal(answered_calls) / Decimal(total_calls)) if total_calls > 0 else 0.0
+        voicemail_rate = float(Decimal(voicemails) / Decimal(total_calls)) if total_calls > 0 else 0.0
+        transfer_rate = float(Decimal(transferred) / Decimal(total_calls)) if total_calls > 0 else 0.0
+        callback_rate = float(Decimal(callbacks) / Decimal(total_calls)) if total_calls > 0 else 0.0
+        dnc_rate = float(Decimal(dncs) / Decimal(total_calls)) if total_calls > 0 else 0.0
+        disqualification_rate = float(Decimal(disqualified) / Decimal(total_calls)) if total_calls > 0 else 0.0
+        
+        cost_per_dial = float(total_cost / Decimal(total_calls)) if total_calls > 0 else 0.0
+        cost_per_answer = float(total_cost / Decimal(answered_calls)) if answered_calls > 0 else 0.0
+        cost_per_transfer = float(total_cost / Decimal(transferred)) if transferred > 0 else 0.0
+        cost_per_callback = float(total_cost / Decimal(callbacks)) if callbacks > 0 else 0.0
+        
+        # Calculate duration stats
         durations = [
             c.get("duration_seconds") 
             for c in calls 
@@ -389,6 +427,7 @@ class Repository:
         total_duration = sum(durations) if durations else 0.0
         avg_duration = total_duration / len(durations) if durations else 0.0
         
+        # Calculate QA stats
         qa_scores = [
             c.get("qa_score") 
             for c in calls 
@@ -396,21 +435,250 @@ class Repository:
         ]
         avg_qa = sum(qa_scores) / len(qa_scores) if qa_scores else 0.0
         
-        outcomes: dict[str, int] = {}
-        for c in calls:
-            outcome = c.get("outcome") or "unknown"
-            outcomes[outcome] = outcomes.get(outcome, 0) + 1
-            
         return {
             "campaign_id": campaign_id,
-            "total_calls": total,
-            "answered_calls": answered,
-            "completed_calls": completed,
+            "total_calls": total_calls,
+            "answered_calls": answered_calls,
+            "completed_calls": completed_calls,
             "total_duration_seconds": total_duration,
             "average_duration_seconds": avg_duration,
             "average_qa_score": avg_qa,
             "outcomes": outcomes,
+            "answer_rate": round(answer_rate, 4),
+            "voicemail_rate": round(voicemail_rate, 4),
+            "transfer_rate": round(transfer_rate, 4),
+            "callback_rate": round(callback_rate, 4),
+            "dnc_rate": round(dnc_rate, 4),
+            "disqualification_rate": round(disqualification_rate, 4),
+            "total_cost": float(total_cost),
+            "cost_per_dial": round(cost_per_dial, 4),
+            "cost_per_answer": round(cost_per_answer, 4),
+            "cost_per_transfer": round(cost_per_transfer, 4),
+            "cost_per_callback": round(cost_per_callback, 4),
         }
+
+    async def list_call_costs(self, campaign_id: str, from_date: Optional[datetime] = None, to_date: Optional[datetime] = None) -> list[dict]:
+        """List call costs for a campaign within optional date ranges."""
+        costs = await self._store.query(_CALL_COSTS, {"campaign_id": campaign_id})
+        filtered = []
+        for c in costs:
+            dt = parse_dt(c.get("created_at"))
+            if from_date and dt and dt < from_date:
+                continue
+            if to_date and dt and dt > to_date:
+                continue
+            
+            # Map back to dict with Decimal values
+            cost_dict = dict(c)
+            for field in ("usage_quantity", "unit_rate", "estimated_cost"):
+                if cost_dict.get(field) is not None:
+                    cost_dict[field] = Decimal(str(cost_dict[field]))
+            filtered.append(cost_dict)
+        return filtered
+
+    async def get_cost_summary(self, campaign_id: str, from_date: Optional[datetime] = None, to_date: Optional[datetime] = None) -> dict[str, Any]:
+        """Aggregate cost metrics grouped by component and provider using Decimals."""
+        costs = await self.list_call_costs(campaign_id, from_date, to_date)
+        
+        components = {}
+        providers = {}
+        total_cost = Decimal("0.0")
+        
+        for c in costs:
+            comp = c.get("component", "unknown")
+            prov = c.get("provider", "unknown")
+            est_cost = c.get("estimated_cost") or Decimal("0.0")
+            
+            components[comp] = components.get(comp, Decimal("0.0")) + est_cost
+            providers[prov] = providers.get(prov, Decimal("0.0")) + est_cost
+            total_cost += est_cost
+            
+        return {
+            "campaign_id": campaign_id,
+            "total_estimated_cost": float(total_cost),
+            "components": {k: float(v) for k, v in components.items()},
+            "providers": {k: float(v) for k, v in providers.items()}
+        }
+
+    async def save_call_cost(self, **kwargs: Any) -> str:
+        """Validate and persist or update a CallCost record, enforcing UNIQUE constraints."""
+        call_id = kwargs.get("call_id")
+        component = kwargs.get("component")
+        provider = kwargs.get("provider") or "unknown"
+        model = kwargs.get("model") or "unknown"
+        
+        if not call_id or not component:
+            raise ValueError("call_id and component are required for CallCost")
+            
+        # Convert numeric values to Decimal in kwargs
+        for field in ("usage_quantity", "unit_rate", "estimated_cost"):
+            if field in kwargs and kwargs[field] is not None:
+                kwargs[field] = Decimal(str(kwargs[field]))
+
+        # Look up existing matching row
+        existing = await self._store.query(_CALL_COSTS, {
+            "call_id": call_id,
+            "component": component,
+            "provider": provider,
+            "model": model
+        })
+
+        # Ensure provider and model are set in kwargs so they are not None
+        kwargs["provider"] = provider
+        kwargs["model"] = model
+
+        if existing:
+            # Upsert/Update case: merge with existing
+            merged_kwargs = dict(existing[0])
+            # Parse datetime fields
+            for field_name in ("created_at", "updated_at"):
+                if field_name in merged_kwargs:
+                    merged_kwargs[field_name] = parse_dt(merged_kwargs[field_name])
+            
+            # Convert fields in existing to Decimal to match Pydantic expectation
+            for field in ("usage_quantity", "unit_rate", "estimated_cost"):
+                if merged_kwargs.get(field) is not None:
+                    merged_kwargs[field] = Decimal(str(merged_kwargs[field]))
+            
+            # Update fields
+            merged_kwargs.update(kwargs)
+            merged_kwargs["updated_at"] = datetime.now(timezone.utc)
+            model_obj = CallCost(**merged_kwargs)
+        else:
+            # Insert case
+            kwargs.setdefault("id", str(uuid.uuid4()))
+            kwargs.setdefault("created_at", datetime.now(timezone.utc))
+            kwargs.setdefault("updated_at", datetime.now(timezone.utc))
+            model_obj = CallCost(**kwargs)
+
+        data = model_obj.model_dump(mode="json")
+        # For JSONL store compatibility (which uses json.dumps), convert Decimal to float
+        for field in ("usage_quantity", "unit_rate", "estimated_cost"):
+            if data.get(field) is not None:
+                data[field] = float(data[field])
+                
+        # Parse datetime strings to iso format
+        for field in ("created_at", "updated_at"):
+            if isinstance(data.get(field), datetime):
+                data[field] = data[field].isoformat()
+
+        return await self._store.save(_CALL_COSTS, data)
+
+    async def recompute_daily_outcome_metric(self, campaign_id: str, metric_date: date) -> None:
+        """Query and compute daily rollup metrics for a campaign, preventing double-counting."""
+        # Find all calls for campaign
+        campaign_calls = await self._store.query(_CALLS, {"campaign_id": campaign_id})
+        
+        # Filter calls for metric_date in Python
+        day_calls = []
+        for c in campaign_calls:
+            c_date_raw = c.get("created_at") or c.get("started_at")
+            c_date = parse_dt(c_date_raw)
+            if c_date and c_date.date() == metric_date:
+                day_calls.append(c)
+                
+        # Query total costs for these calls
+        total_day_cost = Decimal("0.0")
+        for call in day_calls:
+            call_id = call.get("call_id")
+            if call_id:
+                costs = await self._store.query(_CALL_COSTS, {"call_id": call_id})
+                for cost_row in costs:
+                    est = cost_row.get("estimated_cost")
+                    if est is not None:
+                        total_day_cost += Decimal(str(est))
+                        
+        # Ensure we query metric_date in the correct format for the store
+        query_date = metric_date
+        if not isinstance(self._store, PostgresStore):
+            query_date = metric_date.isoformat() if hasattr(metric_date, "isoformat") else str(metric_date)
+
+        # Check if record already exists
+        existing = await self._store.query(_OUTCOME_METRICS, {
+            "campaign_id": campaign_id,
+            "metric_date": query_date
+        })
+        
+        outcome_id = existing[0]["id"] if existing else str(uuid.uuid4())
+        created_at = parse_dt(existing[0]["created_at"]) if existing else datetime.now(timezone.utc)
+        
+        rollup = OutcomeMetric(
+            id=outcome_id,
+            campaign_id=campaign_id,
+            metric_date=metric_date,
+            total_dialed=len(day_calls),
+            answered=sum(1 for c in day_calls if c.get("answered_at") is not None or c.get("outcome") in ("human_answered", "transferred", "callback", "dnc", "disqualified", "ended")),
+            human_answered=sum(1 for c in day_calls if c.get("outcome") in ("human_answered", "transferred", "callback", "dnc", "disqualified", "ended")),
+            voicemail=sum(1 for c in day_calls if c.get("outcome") == "voicemail"),
+            no_answer=sum(1 for c in day_calls if c.get("outcome") == "no_answer"),
+            busy=sum(1 for c in day_calls if c.get("outcome") == "busy"),
+            failed=sum(1 for c in day_calls if c.get("outcome") in ("failed", "failed_to_place_call")),
+            open_to_review=sum(1 for c in day_calls if c.get("outcome") in ("transferred", "callback", "disqualified") or (c.get("qualification") and c.get("qualification").get("open_to_review"))),
+            qualified=sum(1 for c in day_calls if c.get("outcome") == "transferred" or (c.get("qualification") and c.get("qualification").get("is_qualified"))),
+            transferred=sum(1 for c in day_calls if c.get("outcome") == "transferred"),
+            callback=sum(1 for c in day_calls if c.get("outcome") == "callback"),
+            dnc=sum(1 for c in day_calls if c.get("outcome") == "dnc"),
+            disqualified=sum(1 for c in day_calls if c.get("outcome") == "disqualified"),
+            cost=total_day_cost,
+            created_at=created_at,
+            updated_at=datetime.now(timezone.utc)
+        )
+        
+        data = rollup.model_dump(mode="json")
+        data["cost"] = float(rollup.cost)
+        if isinstance(data.get("metric_date"), date):
+            data["metric_date"] = data["metric_date"].isoformat()
+        # Parse datetime strings to iso format
+        for field in ("created_at", "updated_at"):
+            if isinstance(data.get(field), datetime):
+                data[field] = data[field].isoformat()
+                
+        await self._store.save(_OUTCOME_METRICS, data)
+
+    async def get_daily_metrics(self, campaign_id: str, days: int = 7) -> list[dict[str, Any]]:
+        """Return daily rollup metrics for the past `days`, recomputing stale/missing days on the fly."""
+        from datetime import timedelta
+        today = datetime.now(timezone.utc).date()
+        result = []
+        for i in range(days):
+            dt = today - timedelta(days=i)
+            query_date = dt
+            if not isinstance(self._store, PostgresStore):
+                query_date = dt.isoformat()
+
+            rollups = await self._store.query(_OUTCOME_METRICS, {"campaign_id": campaign_id, "metric_date": query_date})
+            if not rollups:
+                # Recompute missing day rollup
+                await self.recompute_daily_outcome_metric(campaign_id, dt)
+                rollups = await self._store.query(_OUTCOME_METRICS, {"campaign_id": campaign_id, "metric_date": query_date})
+            
+            if rollups:
+                row = dict(rollups[0])
+                if isinstance(row.get("metric_date"), date):
+                    row["metric_date"] = row["metric_date"].isoformat()
+                if row.get("cost") is not None:
+                    row["cost"] = float(row["cost"])
+                result.append(row)
+            else:
+                result.append({
+                    "campaign_id": campaign_id,
+                    "metric_date": dt.isoformat(),
+                    "total_dialed": 0,
+                    "answered": 0,
+                    "human_answered": 0,
+                    "voicemail": 0,
+                    "no_answer": 0,
+                    "busy": 0,
+                    "failed": 0,
+                    "open_to_review": 0,
+                    "qualified": 0,
+                    "transferred": 0,
+                    "callback": 0,
+                    "dnc": 0,
+                    "disqualified": 0,
+                    "cost": 0.0
+                })
+        return result
 
     # ------------------------------------------------------------------
     # Dialer & Campaign Runner Helper Methods

@@ -180,6 +180,15 @@ class DanaAgent(Agent):
         self.should_disconnect = False
         self.warm_bridge_active = False
         self.fallback_disconnect_task: Optional[asyncio.Task] = None
+        # Metrics Accumulators
+        self.stt_seconds = 0.0
+        self.tts_characters = 0
+        self.prompt_tokens = 0
+        self.completion_tokens = 0
+        self.current_turn_response = ""
+        self.agent_speech_started_time = None
+        self.interrupted_current_turn = False
+        self.interrupted_at = None
 
     async def on_user_turn_completed(self, turn_ctx: llm.ChatContext, new_message: llm.ChatMessage) -> None:
         logger.debug(f"User turn completed: '{new_message.content}'")
@@ -228,6 +237,11 @@ class DanaAgent(Agent):
                         content=msg.content
                     ))
             
+            # Estimate prompt tokens
+            prompt_str = instructions + "".join(m.content for m in new_ctx.messages if m.content)
+            from metrics.model_cost_metrics import estimate_llm_tokens
+            self.prompt_tokens += estimate_llm_tokens(prompt_str)
+
             # Run LLM chat directly
             stream = self.llm.chat(
                 chat_ctx=new_ctx,
@@ -242,10 +256,14 @@ class DanaAgent(Agent):
                 content = chunk.choices[0].delta.content if chunk.choices else ""
                 if content:
                     response_text += content
+
+            # Estimate completion tokens
+            self.completion_tokens += estimate_llm_tokens(response_text)
             return response_text
 
         # Process user turn via the adapter exactly once
         result = await self.adapter.process_user_turn(user_text, chat_fn)
+        self.current_turn_response = result.agent_response or ""
         
         # Update stage in registry
         from speech.context_registry import update_call_stage
@@ -414,6 +432,9 @@ async def entrypoint(ctx: JobContext):
             if session.agent_state == "speaking" or getattr(session.agent_state, "value", None) == "speaking":
                 latency_recorder.mark("barge_in_detected")
                 logger.info("Barge-in detected - interrupting agent response")
+                agent.interrupted_current_turn = True
+                import time
+                agent.interrupted_at = time.perf_counter()
                 
                 # Interrupt the session
                 if asyncio.iscoroutinefunction(session.interrupt):
@@ -432,15 +453,37 @@ async def entrypoint(ctx: JobContext):
             if "speaking" in old_state_str:
                 logger.info("User speaking stopped")
                 latency_recorder.mark("user_speech_end")
+                dur = latency_recorder.duration("user_speech_start", "user_speech_end")
+                if dur is not None:
+                    agent.stt_seconds += (dur / 1000.0)
                 
     @session.on("agent_state_changed")
     def on_agent_state_changed(ev):
         state_str = str(ev.new_state).lower()
         old_state_str = str(ev.old_state).lower()
+        import time
         if "speaking" in state_str:
             latency_recorder.mark("agent_speech_started")
+            agent.agent_speech_started_time = time.perf_counter()
         elif "speaking" in old_state_str:
             latency_recorder.mark("agent_speech_stopped")
+            if getattr(agent, "interrupted_current_turn", False):
+                # Calculate portion spoken before interruption
+                start_time = getattr(agent, "agent_speech_started_time", None)
+                stop_time = getattr(agent, "interrupted_at", None) or time.perf_counter()
+                if start_time:
+                    dur = stop_time - start_time
+                    # 15 characters per second is a good standard speech speed
+                    chars_spoken = min(len(getattr(agent, "current_turn_response", "")), int(dur * 15.0))
+                    agent.tts_characters += max(0, chars_spoken)
+            else:
+                # Fully spoken without interruption
+                agent.tts_characters += len(getattr(agent, "current_turn_response", ""))
+            
+            # Reset flags
+            agent.interrupted_current_turn = False
+            agent.current_turn_response = ""
+
             if getattr(agent, "should_disconnect", False):
                 logger.info("Agent stopped speaking and should_disconnect is True. Disconnecting...")
                 if getattr(agent, "fallback_disconnect_task", None):
@@ -666,6 +709,69 @@ async def entrypoint(ctx: JobContext):
                 )
         except Exception as e:
             logger.error(f"Failed to execute QA scoring or emit qa.failed: {e}")
+
+        # Update calls table record with final outcome and duration
+        try:
+            if 'ended_at' not in locals():
+                ended_at = datetime.now(timezone.utc)
+            if 'started_at' not in locals():
+                started_at = latency_recorder.get_timestamp("call_start") or ended_at
+            if 'duration' not in locals():
+                duration = (ended_at - started_at).total_seconds()
+            if 'outcome' not in locals():
+                outcome = "ended"
+                if lead_prof.get("is_qualified"):
+                    outcome = "transferred"
+                elif lead_prof.get("callback_requested"):
+                    outcome = "callback"
+                elif lead_prof.get("do_not_call_requested"):
+                    outcome = "dnc"
+                elif lead_prof.get("disqualified_reason"):
+                    outcome = "disqualified"
+
+            # Retrieve existing call record to preserve fields (like dry_run)
+            existing_call = await shared.repository.get_call_record(call_id)
+            is_dry_run = existing_call.get("dry_run", False) if existing_call else False
+
+            await shared.repository.save_call(
+                call_id=call_id,
+                ended_at=ended_at,
+                duration_seconds=duration,
+                outcome=outcome,
+                latency_summary=latency_recorder.to_dict().get("durations"),
+                qa_score=locals().get("scorecard").overall_score if 'scorecard' in locals() else None
+            )
+
+            # Save model costs and outcome rollup
+            from metrics.model_cost_metrics import calculate_and_save_costs
+            from metrics.outcome_metrics import save_outcome_for_call
+            
+            tts_prov = "kokoro"
+            voice_lower = shared.config.tts_voice.lower()
+            if "eleven" in voice_lower:
+                tts_prov = "elevenlabs"
+            elif "openai" in voice_lower:
+                tts_prov = "openai"
+                
+            await calculate_and_save_costs(
+                repository=shared.repository,
+                call_id=call_id,
+                campaign_id=campaign_id,
+                stt_provider=shared.config.stt_provider,
+                stt_seconds=agent.stt_seconds,
+                llm_model=shared.config.llm_model,
+                prompt_tokens=agent.prompt_tokens,
+                completion_tokens=agent.completion_tokens,
+                tts_provider=tts_prov,
+                tts_characters=agent.tts_characters,
+                telephony_provider="telnyx",
+                telephony_seconds=duration,
+                dry_run=is_dry_run,
+                llm_tokens_estimated=True
+            )
+            await save_outcome_for_call(shared.repository, call_id, campaign_id, outcome, cost=0.0)
+        except Exception as ce:
+            logger.error(f"Failed to update call record or save metrics: {ce}")
 
         # Emit call.completed exactly once at the very end of the call cycle
         await emit_crm_event_async(

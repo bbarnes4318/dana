@@ -6,7 +6,8 @@ by :class:`storage.repository.Repository` for validation before persisting.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
+from decimal import Decimal
 from typing import Any, Optional
 
 from pydantic import BaseModel, Field
@@ -167,6 +168,51 @@ class Campaign(BaseModel):
     name: str
     status: str
     config: Optional[dict[str, Any]] = None
+    created_at: datetime = Field(default_factory=_utcnow)
+    updated_at: datetime = Field(default_factory=_utcnow)
+
+
+class CallCost(BaseModel):
+    """Estimated component cost for a specific call."""
+
+    id: Optional[str] = None
+    call_id: str
+    campaign_id: Optional[str] = None
+    component: str
+    provider: str = "unknown"
+    model: str = "unknown"
+    usage_unit: Optional[str] = None
+    usage_quantity: Optional[Decimal] = None
+    unit_rate: Optional[Decimal] = None
+    estimated_cost: Optional[Decimal] = None
+    currency: Optional[str] = None
+    rate_source: Optional[str] = None
+    estimated: Optional[bool] = None
+    dry_run: Optional[bool] = None
+    created_at: datetime = Field(default_factory=_utcnow)
+    updated_at: datetime = Field(default_factory=_utcnow)
+
+
+class OutcomeMetric(BaseModel):
+    """Daily aggregated outcome metrics for a campaign."""
+
+    id: Optional[str] = None
+    campaign_id: str
+    metric_date: date
+    total_dialed: int = 0
+    answered: int = 0
+    human_answered: int = 0
+    voicemail: int = 0
+    no_answer: int = 0
+    busy: int = 0
+    failed: int = 0
+    open_to_review: int = 0
+    qualified: int = 0
+    transferred: int = 0
+    callback: int = 0
+    dnc: int = 0
+    disqualified: int = 0
+    cost: Decimal = Decimal("0.0")
     created_at: datetime = Field(default_factory=_utcnow)
     updated_at: datetime = Field(default_factory=_utcnow)
 
