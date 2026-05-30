@@ -18,6 +18,12 @@ from training.rag_builder import (
     TrainingRagBuildResult,
     TrainingRagDocumentBuilder,
 )
+from training.daily_qa_miner import (
+    DailyQaMiner,
+    FailureCluster,
+    WinningResponseCandidate,
+    DailyQaMiningResult,
+)
 
 __all__ = [
     "TrainingIngestionResult",
@@ -33,4 +39,9 @@ __all__ = [
     "HumanReviewService",
     "TrainingRagBuildResult",
     "TrainingRagDocumentBuilder",
+    "DailyQaMiner",
+    "FailureCluster",
+    "WinningResponseCandidate",
+    "DailyQaMiningResult",
 ]
+
