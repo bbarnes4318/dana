@@ -14,6 +14,10 @@ from training.review_service import (
     ReviewActionResult,
     HumanReviewService,
 )
+from training.rag_builder import (
+    TrainingRagBuildResult,
+    TrainingRagDocumentBuilder,
+)
 
 __all__ = [
     "TrainingIngestionResult",
@@ -27,4 +31,6 @@ __all__ = [
     "TrainingExampleMiner",
     "ReviewActionResult",
     "HumanReviewService",
+    "TrainingRagBuildResult",
+    "TrainingRagDocumentBuilder",
 ]
