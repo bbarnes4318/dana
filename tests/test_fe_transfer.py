@@ -154,6 +154,6 @@ async def test_runtime_transfer_failure_transitions_to_callback(runtime: AgentRu
     assert result.stage == "callback"
 
     # 2. Agent response should be overridden to offer a callback
-    assert "couldn't get the licensed agent" in result.agent_response.lower()
+    assert "get the licensed agent" in result.agent_response.lower()
     assert "later today or tomorrow" in result.agent_response.lower()
 

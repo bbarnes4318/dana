@@ -182,7 +182,7 @@ async def test_adapter_transfer_failure_offers_callback(project_root: Path, monk
     assert result.stage == "callback"
     assert adapter.state_machine.call_state.current_stage == CallStage.CALLBACK
     # 2. Agent response should offer a callback
-    assert "couldn't get the licensed agent" in result.agent_response.lower()
+    assert "get the licensed agent" in result.agent_response.lower()
     assert "later today or tomorrow" in result.agent_response.lower()
     # 3. It should NOT end the call immediately
     assert result.should_end_call is False

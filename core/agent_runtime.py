@@ -27,6 +27,7 @@ from core.canonical_responses import (
     WRONG_NUMBER_CLOSE,
     NOT_INTERESTED_CLOSE,
     LICENSED_RESPONSE,
+    TRANSFER_FAILURE_CALLBACK,
 )
 from tools.tool_registry import ToolRegistry
 from safety.compliance_filter import ComplianceFilter
@@ -478,10 +479,7 @@ class AgentRuntime:
                             )
                         )
                         # Override agent_response to offer a callback
-                        agent_response = (
-                            "Looks like I couldn't get the licensed agent on the line right this second. "
-                            "I can have them call you back instead. Would later today or tomorrow work better?"
-                        )
+                        agent_response = TRANSFER_FAILURE_CALLBACK
                 except Exception as exc:
                     logger.error("Error executing tool %s: %s", action.tool_name, exc)
                     tool_results.append(str(exc))
