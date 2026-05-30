@@ -10,6 +10,10 @@ from training.example_miner import (
     MiningResult,
     TrainingExampleMiner,
 )
+from training.review_service import (
+    ReviewActionResult,
+    HumanReviewService,
+)
 
 __all__ = [
     "TrainingIngestionResult",
@@ -21,4 +25,6 @@ __all__ = [
     "MiningCandidate",
     "MiningResult",
     "TrainingExampleMiner",
+    "ReviewActionResult",
+    "HumanReviewService",
 ]
