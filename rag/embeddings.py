@@ -232,7 +232,26 @@ class OpenAIProvider(BaseEmbeddingProvider):
         if not self.api_key:
             raise ValueError("OPENAI_API_KEY environment variable is required for OpenAI provider.")
         self.model = model or os.environ.get("DANA_EMBEDDING_MODEL") or "text-embedding-3-small"
-        self.dimensions = dimensions or (int(os.environ.get("DANA_EMBEDDING_DIMENSIONS")) if os.environ.get("DANA_EMBEDDING_DIMENSIONS") else 1536)
+        
+        explicit_dims = os.environ.get("DANA_EMBEDDING_DIMENSIONS")
+        if dimensions is not None:
+            self.dimensions = dimensions
+        elif explicit_dims is not None:
+            self.dimensions = int(explicit_dims)
+        else:
+            rag_backend = os.environ.get("DANA_RAG_BACKEND")
+            emb_provider = os.environ.get("DANA_EMBEDDING_PROVIDER")
+            if rag_backend == "postgres" and emb_provider == "openai":
+                self.dimensions = 384
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.warning(
+                    "Postgres RAG backend configured with OpenAI embedding provider. "
+                    "Defaulting OpenAIProvider dimensions to 384 to match Postgres 'rag_documents' vector(384) table schema. "
+                    "Set DANA_EMBEDDING_DIMENSIONS explicitly to override."
+                )
+            else:
+                self.dimensions = 1536
 
     def embed_text(self, text: str) -> list[float]:
         text = text[:10000]

@@ -416,6 +416,31 @@ def test_no_external_provider_required_for_tests():
     assert provider.name == "deterministic"
 
 
+def test_openai_provider_dimensions_default_with_postgres_backend(monkeypatch):
+    """Verify that OpenAIProvider defaults to 384 dimensions when Postgres is the configured backend."""
+    monkeypatch.setenv("OPENAI_API_KEY", "test-api-key")
+    monkeypatch.setenv("DANA_RAG_BACKEND", "postgres")
+    monkeypatch.setenv("DANA_EMBEDDING_PROVIDER", "openai")
+    monkeypatch.delenv("DANA_EMBEDDING_DIMENSIONS", raising=False)
+    
+    from rag.embeddings import OpenAIProvider
+    provider = OpenAIProvider()
+    assert provider.dimensions == 384
+
+
+def test_openai_provider_dimensions_default_with_jsonl_backend(monkeypatch):
+    """Verify that OpenAIProvider defaults to 1536 dimensions when Postgres backend is not set."""
+    monkeypatch.setenv("OPENAI_API_KEY", "test-api-key")
+    monkeypatch.setenv("DANA_RAG_BACKEND", "jsonl")
+    monkeypatch.setenv("DANA_EMBEDDING_PROVIDER", "openai")
+    monkeypatch.delenv("DANA_EMBEDDING_DIMENSIONS", raising=False)
+    
+    from rag.embeddings import OpenAIProvider
+    provider = OpenAIProvider()
+    assert provider.dimensions == 1536
+
+
+
 @pytest.mark.postgres
 def test_postgres_pgvector_integration():
     """Optional postgres integration test if DATABASE_URL is set and pgvector exists."""
