@@ -38,7 +38,14 @@ TABLE_COLUMNS: dict[str, set[str]] = {
     "caller_ids": {"caller_id", "campaign_id", "status", "daily_call_count", "answer_rate", "dnc_rate", "complaint_rate", "stir_shaken_status", "last_used_at", "cooldown_until", "total_calls", "total_answers", "total_dncs", "total_complaints", "created_at", "updated_at"},
     "webhook_events": {"id", "event_type", "event_id", "destination", "payload", "status", "attempt_count", "next_attempt_at", "last_error", "response_status_code", "response_body_preview", "sent_at", "claimed_by", "claimed_at", "created_at", "updated_at"},
     "call_costs": {"id", "call_id", "campaign_id", "component", "provider", "model", "usage_unit", "usage_quantity", "unit_rate", "estimated_cost", "currency", "rate_source", "estimated", "dry_run", "created_at", "updated_at"},
-    "outcome_metrics": {"id", "campaign_id", "metric_date", "total_dialed", "answered", "human_answered", "voicemail", "no_answer", "busy", "failed", "open_to_review", "qualified", "transferred", "callback", "dnc", "disqualified", "cost", "created_at", "updated_at"}
+    "outcome_metrics": {"id", "campaign_id", "metric_date", "total_dialed", "answered", "human_answered", "voicemail", "no_answer", "busy", "failed", "open_to_review", "qualified", "transferred", "callback", "dnc", "disqualified", "cost", "created_at", "updated_at"},
+    "training_sources": {"id", "source_type", "source_uri", "title", "imported_at", "status", "metadata", "created_at"},
+    "training_examples": {"id", "source_id", "call_id", "stage", "user_text", "ideal_response", "bad_response", "labels", "approved_by", "approved_at", "use_for", "created_at"},
+    "eval_cases": {"id", "stage", "prospect_utterance", "expected_behavior", "must_include", "must_not_include", "expected_tool", "severity", "created_at"},
+    "prompt_versions": {"id", "file_path", "sha", "created_at", "created_by", "change_reason", "qa_thresholds", "canary_status"},
+    "human_review_items": {"id", "item_type", "payload", "status", "reviewer", "review_notes", "created_at", "reviewed_at"},
+    "deployment_experiments": {"id", "experiment_name", "prompt_version_id", "traffic_percent", "status", "metrics", "started_at", "ended_at", "created_at"},
+    "call_outcome_labels": {"id", "call_id", "campaign_id", "outcome", "sold", "issued", "transfer_quality_score", "agent_feedback", "labels", "created_at"}
 }
 
 ALLOWLIST_TABLES = set(TABLE_COLUMNS.keys())

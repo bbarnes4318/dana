@@ -6,6 +6,7 @@ by :class:`storage.repository.Repository` for validation before persisting.
 
 from __future__ import annotations
 
+import uuid
 from datetime import date, datetime, timezone
 from decimal import Decimal
 from typing import Any, Optional
@@ -215,4 +216,101 @@ class OutcomeMetric(BaseModel):
     cost: Decimal = Decimal("0.0")
     created_at: datetime = Field(default_factory=_utcnow)
     updated_at: datetime = Field(default_factory=_utcnow)
+
+
+class TrainingSource(BaseModel):
+    """Source material for training lessons."""
+
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    source_type: str
+    source_uri: str
+    title: str
+    imported_at: datetime = Field(default_factory=_utcnow)
+    status: str
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class TrainingExample(BaseModel):
+    """An individual training example for model instruction or fine-tuning."""
+
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    source_id: str
+    call_id: Optional[str] = None
+    stage: str
+    user_text: str
+    ideal_response: str
+    bad_response: Optional[str] = None
+    labels: dict[str, Any] = Field(default_factory=dict)
+    approved_by: Optional[str] = None
+    approved_at: Optional[datetime] = None
+    use_for: list[str] = Field(default_factory=list)
+    created_at: datetime = Field(default_factory=_utcnow)
+
+
+class EvalCase(BaseModel):
+    """An evaluation test case for the agent."""
+
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    stage: str
+    prospect_utterance: str
+    expected_behavior: str
+    must_include: list[str] = Field(default_factory=list)
+    must_not_include: list[str] = Field(default_factory=list)
+    expected_tool: Optional[str] = None
+    severity: str
+    created_at: datetime = Field(default_factory=_utcnow)
+
+
+class PromptVersion(BaseModel):
+    """A tracked version of an LLM prompt configuration."""
+
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    file_path: str
+    sha: Optional[str] = None
+    created_at: datetime = Field(default_factory=_utcnow)
+    created_by: str
+    change_reason: str
+    qa_thresholds: dict[str, Any] = Field(default_factory=dict)
+    canary_status: str
+
+
+class HumanReviewItem(BaseModel):
+    """A record queued for human annotation or compliance review."""
+
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    item_type: str
+    payload: dict[str, Any] = Field(default_factory=dict)
+    status: str
+    reviewer: Optional[str] = None
+    review_notes: Optional[str] = None
+    created_at: datetime = Field(default_factory=_utcnow)
+    reviewed_at: Optional[datetime] = None
+
+
+class DeploymentExperiment(BaseModel):
+    """An active experiment comparing prompt versions or model settings."""
+
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    experiment_name: str
+    prompt_version_id: Optional[str] = None
+    traffic_percent: float
+    status: str
+    metrics: dict[str, Any] = Field(default_factory=dict)
+    started_at: Optional[datetime] = None
+    ended_at: Optional[datetime] = None
+
+
+class CallOutcomeLabel(BaseModel):
+    """Downstream outcome metadata associated with a call (e.g. sale result)."""
+
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    call_id: str
+    campaign_id: Optional[str] = None
+    outcome: str
+    sold: Optional[bool] = None
+    issued: Optional[bool] = None
+    transfer_quality_score: Optional[float] = None
+    agent_feedback: Optional[str] = None
+    labels: dict[str, Any] = Field(default_factory=dict)
+    created_at: datetime = Field(default_factory=_utcnow)
 

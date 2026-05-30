@@ -57,6 +57,13 @@ from storage.schemas import (
     Transfer,
     CallCost,
     OutcomeMetric,
+    TrainingSource,
+    TrainingExample,
+    EvalCase,
+    PromptVersion,
+    HumanReviewItem,
+    DeploymentExperiment,
+    CallOutcomeLabel,
 )
 
 # Collection name constants
@@ -75,6 +82,13 @@ _CAMPAIGNS = "campaigns"
 _WEBHOOK_EVENTS = "webhook_events"
 _CALL_COSTS = "call_costs"
 _OUTCOME_METRICS = "outcome_metrics"
+_TRAINING_SOURCES = "training_sources"
+_TRAINING_EXAMPLES = "training_examples"
+_EVAL_CASES = "eval_cases"
+_PROMPT_VERSIONS = "prompt_versions"
+_HUMAN_REVIEW_ITEMS = "human_review_items"
+_DEPLOYMENT_EXPERIMENTS = "deployment_experiments"
+_CALL_OUTCOME_LABELS = "call_outcome_labels"
 
 
 class Repository:
@@ -209,6 +223,83 @@ class Repository:
         data.setdefault("id", str(uuid.uuid4()))
         return await self._store.save(_TRAINING_NOTES, data)
 
+    async def save_training_source(self, **kwargs: Any) -> str:
+        """Validate and persist a :class:`TrainingSource`.
+
+        Returns:
+            The ``id`` of the saved record.
+        """
+        source = TrainingSource(**kwargs)
+        data = source.model_dump(mode="json")
+        data.setdefault("id", str(uuid.uuid4()))
+        return await self._store.save(_TRAINING_SOURCES, data)
+
+    async def save_training_example(self, **kwargs: Any) -> str:
+        """Validate and persist a :class:`TrainingExample`.
+
+        Returns:
+            The ``id`` of the saved record.
+        """
+        example = TrainingExample(**kwargs)
+        data = example.model_dump(mode="json")
+        data.setdefault("id", str(uuid.uuid4()))
+        return await self._store.save(_TRAINING_EXAMPLES, data)
+
+    async def save_eval_case(self, **kwargs: Any) -> str:
+        """Validate and persist an :class:`EvalCase`.
+
+        Returns:
+            The ``id`` of the saved record.
+        """
+        case = EvalCase(**kwargs)
+        data = case.model_dump(mode="json")
+        data.setdefault("id", str(uuid.uuid4()))
+        return await self._store.save(_EVAL_CASES, data)
+
+    async def save_prompt_version(self, **kwargs: Any) -> str:
+        """Validate and persist a :class:`PromptVersion`.
+
+        Returns:
+            The ``id`` of the saved record.
+        """
+        version = PromptVersion(**kwargs)
+        data = version.model_dump(mode="json")
+        data.setdefault("id", str(uuid.uuid4()))
+        return await self._store.save(_PROMPT_VERSIONS, data)
+
+    async def save_human_review_item(self, **kwargs: Any) -> str:
+        """Validate and persist a :class:`HumanReviewItem`.
+
+        Returns:
+            The ``id`` of the saved record.
+        """
+        item = HumanReviewItem(**kwargs)
+        data = item.model_dump(mode="json")
+        data.setdefault("id", str(uuid.uuid4()))
+        return await self._store.save(_HUMAN_REVIEW_ITEMS, data)
+
+    async def save_deployment_experiment(self, **kwargs: Any) -> str:
+        """Validate and persist a :class:`DeploymentExperiment`.
+
+        Returns:
+            The ``id`` of the saved record.
+        """
+        experiment = DeploymentExperiment(**kwargs)
+        data = experiment.model_dump(mode="json")
+        data.setdefault("id", str(uuid.uuid4()))
+        return await self._store.save(_DEPLOYMENT_EXPERIMENTS, data)
+
+    async def save_call_outcome_label(self, **kwargs: Any) -> str:
+        """Validate and persist a :class:`CallOutcomeLabel`.
+
+        Returns:
+            The ``id`` of the saved record.
+        """
+        label = CallOutcomeLabel(**kwargs)
+        data = label.model_dump(mode="json")
+        data.setdefault("id", str(uuid.uuid4()))
+        return await self._store.save(_CALL_OUTCOME_LABELS, data)
+
     async def save_call(self, **kwargs: Any) -> str:
         """Validate and persist a :class:`Call`.
 
@@ -337,6 +428,62 @@ class Repository:
         """Retrieve a lead by primary key."""
         return await self._store.get(_LEADS, lead_id)
 
+    async def get_training_source(self, source_id: str) -> Optional[dict]:
+        """Retrieve a training source by primary key."""
+        return await self._store.get(_TRAINING_SOURCES, source_id)
+
+    async def query_training_sources(self, filters: dict) -> list[dict]:
+        """Query training sources matching the specified filters."""
+        return await self._store.query(_TRAINING_SOURCES, filters)
+
+    async def get_training_example(self, example_id: str) -> Optional[dict]:
+        """Retrieve a training example by primary key."""
+        return await self._store.get(_TRAINING_EXAMPLES, example_id)
+
+    async def query_training_examples(self, filters: dict) -> list[dict]:
+        """Query training examples matching the specified filters."""
+        return await self._store.query(_TRAINING_EXAMPLES, filters)
+
+    async def get_eval_case(self, case_id: str) -> Optional[dict]:
+        """Retrieve an eval case by primary key."""
+        return await self._store.get(_EVAL_CASES, case_id)
+
+    async def query_eval_cases(self, filters: dict) -> list[dict]:
+        """Query eval cases matching the specified filters."""
+        return await self._store.query(_EVAL_CASES, filters)
+
+    async def get_prompt_version(self, version_id: str) -> Optional[dict]:
+        """Retrieve a prompt version by primary key."""
+        return await self._store.get(_PROMPT_VERSIONS, version_id)
+
+    async def query_prompt_versions(self, filters: dict) -> list[dict]:
+        """Query prompt versions matching the specified filters."""
+        return await self._store.query(_PROMPT_VERSIONS, filters)
+
+    async def get_human_review_item(self, item_id: str) -> Optional[dict]:
+        """Retrieve a human review item by primary key."""
+        return await self._store.get(_HUMAN_REVIEW_ITEMS, item_id)
+
+    async def query_human_review_items(self, filters: dict) -> list[dict]:
+        """Query human review items matching the specified filters."""
+        return await self._store.query(_HUMAN_REVIEW_ITEMS, filters)
+
+    async def get_deployment_experiment(self, experiment_id: str) -> Optional[dict]:
+        """Retrieve a deployment experiment by primary key."""
+        return await self._store.get(_DEPLOYMENT_EXPERIMENTS, experiment_id)
+
+    async def query_deployment_experiments(self, filters: dict) -> list[dict]:
+        """Query deployment experiments matching the specified filters."""
+        return await self._store.query(_DEPLOYMENT_EXPERIMENTS, filters)
+
+    async def get_call_outcome_label(self, label_id: str) -> Optional[dict]:
+        """Retrieve a call outcome label by primary key."""
+        return await self._store.get(_CALL_OUTCOME_LABELS, label_id)
+
+    async def query_call_outcome_labels(self, filters: dict) -> list[dict]:
+        """Query call outcome labels matching the specified filters."""
+        return await self._store.query(_CALL_OUTCOME_LABELS, filters)
+
     async def get_campaign(self, campaign_id: str) -> Optional[dict]:
         """Retrieve a campaign by campaign_id or id, merging config into top-level."""
         raw_campaign = None
@@ -388,6 +535,28 @@ class Repository:
     async def list_recent_calls(self, limit: int = 50) -> list[dict]:
         """Return the most recent lead snapshots."""
         return await self._store.list_recent(_LEADS, limit=limit)
+
+    async def list_recent_training_sources(self, limit: int = 50) -> list[dict]:
+        """List recent training sources."""
+        return await self._store.list_recent(_TRAINING_SOURCES, limit=limit)
+
+    async def list_recent_training_examples(self, limit: int = 50) -> list[dict]:
+        """List recent training examples."""
+        return await self._store.list_recent(_TRAINING_EXAMPLES, limit=limit)
+
+    async def list_recent_eval_cases(self, limit: int = 50) -> list[dict]:
+        """List recent eval cases."""
+        return await self._store.list_recent(_EVAL_CASES, limit=limit)
+
+    async def list_pending_human_review_items(self, limit: int = 50) -> list[dict]:
+        """List pending human review items, sorted newest first."""
+        items = await self._store.query(_HUMAN_REVIEW_ITEMS, {"status": "pending"})
+        items.sort(key=lambda x: x.get("created_at") or "", reverse=True)
+        return items[:limit]
+
+    async def list_recent_deployment_experiments(self, limit: int = 50) -> list[dict]:
+        """List recent deployment experiments."""
+        return await self._store.list_recent(_DEPLOYMENT_EXPERIMENTS, limit=limit)
 
     async def get_lead_by_phone(self, phone_e164: str) -> Optional[dict]:
         """Return the most recent lead snapshot matching *phone_e164*, if it exists."""
