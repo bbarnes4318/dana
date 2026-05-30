@@ -12,6 +12,12 @@ from prompts.versioning import (
     PromptValidationResult,
     PromptVersionReport,
 )
+from prompts.patch_generator import (
+    PromptPatchGenerator,
+    PromptPatchCandidate,
+    PromptPatchGenerationResult,
+    PromptPatchValidationResult,
+)
 
 __all__ = [
     "PromptVersionManager",
@@ -19,4 +25,8 @@ __all__ = [
     "PromptVersionDiff",
     "PromptValidationResult",
     "PromptVersionReport",
+    "PromptPatchGenerator",
+    "PromptPatchCandidate",
+    "PromptPatchGenerationResult",
+    "PromptPatchValidationResult",
 ]
