@@ -554,6 +554,10 @@ class Repository:
         items.sort(key=lambda x: x.get("created_at") or "", reverse=True)
         return items[:limit]
 
+    async def list_recent_human_review_items(self, limit: int = 50) -> list[dict]:
+        """List recent human review items."""
+        return await self._store.list_recent(_HUMAN_REVIEW_ITEMS, limit=limit)
+
     async def list_recent_deployment_experiments(self, limit: int = 50) -> list[dict]:
         """List recent deployment experiments."""
         return await self._store.list_recent(_DEPLOYMENT_EXPERIMENTS, limit=limit)

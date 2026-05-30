@@ -5,6 +5,11 @@ from training.labeler import (
     TranscriptLabelingResult,
     TranscriptLabeler,
 )
+from training.example_miner import (
+    MiningCandidate,
+    MiningResult,
+    TrainingExampleMiner,
+)
 
 __all__ = [
     "TrainingIngestionResult",
@@ -13,4 +18,7 @@ __all__ = [
     "LabeledTranscriptTurn",
     "TranscriptLabelingResult",
     "TranscriptLabeler",
+    "MiningCandidate",
+    "MiningResult",
+    "TrainingExampleMiner",
 ]
