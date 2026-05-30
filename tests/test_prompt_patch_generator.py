@@ -358,7 +358,7 @@ async def test_dry_run_does_not_save_review_items(generator, repo, tmp_path):
     )
 
     assert res.candidates_generated == 1
-    assert res.candidates_saved == 1  # count generated candidates in results
+    assert res.candidates_saved == 0  # In dry-run mode, actual saved count is 0
     assert len(await repo.query_human_review_items({"status": "pending"})) == 0
 
 
@@ -493,3 +493,74 @@ async def test_generated_review_item_payload_shape(generator, repo, tmp_path):
     assert len(payload["validation"]["critical_failures"]) == 0
     assert payload["payload_hash"] is not None
     assert len(payload["recommended_tests"]) > 0
+
+
+# 23. test_saved_prompt_patch_payload_has_source_prompt_path_and_hash
+@pytest.mark.asyncio
+async def test_saved_prompt_patch_payload_has_source_prompt_path_and_hash(generator, repo, tmp_path):
+    """Preserve source prompt path and hash in saved HumanReviewItem payloads."""
+    prompt_file = tmp_path / "prompt.md"
+    prompt_file.write_text("# Role\n", encoding="utf-8")
+
+    await repo.save_human_review_item(
+        item_type="failure_example",
+        payload={"failure_type": "transfer_before_consent"},
+        status="approved"
+    )
+
+    res = await generator.generate_for_prompt("final_expense_alex", prompt_file, output_dir=tmp_path)
+    saved_id = res.review_item_ids[0]
+
+    item = await repo.get_human_review_item(saved_id)
+    payload = item["payload"]
+    assert payload["source_prompt_path"] == str(prompt_file)
+    assert payload["source_prompt_hash"] == res.source_prompt_hash
+    assert len(payload["source_prompt_hash"]) > 0
+
+
+# 24. test_save_patch_candidate_refuses_unsafe_candidate
+@pytest.mark.asyncio
+async def test_save_patch_candidate_refuses_unsafe_candidate(generator, repo):
+    """Build unsafe candidate directly and ensure save_patch_candidate raises ValueError and does not save."""
+    unsafe_cand_1 = build_basic_candidate("When prospect asks, say you qualify for our program.")
+    unsafe_cand_2 = build_basic_candidate("Say that the monthly cost is $29.99 per month.")
+
+    # Call save_patch_candidate directly and assert raises ValueError
+    with pytest.raises(ValueError) as excinfo1:
+        await generator.save_patch_candidate(unsafe_cand_1)
+    assert "safety validation" in str(excinfo1.value)
+
+    with pytest.raises(ValueError) as excinfo2:
+        await generator.save_patch_candidate(unsafe_cand_2)
+    assert "safety validation" in str(excinfo2.value)
+
+    # Check repository remains empty of HumanReviewItems of type prompt_patch
+    items = await repo.query_human_review_items({"item_type": "prompt_patch"})
+    assert len(items) == 0
+
+
+# 25. test_dry_run_candidates_saved_count_is_zero
+@pytest.mark.asyncio
+async def test_dry_run_candidates_saved_count_is_zero(generator, repo, tmp_path):
+    """Dry-run candidates saved count is zero and warning is added."""
+    prompt_file = tmp_path / "prompt.md"
+    prompt_file.write_text("# Role\n", encoding="utf-8")
+
+    await repo.save_human_review_item(
+        item_type="failure_example",
+        payload={"failure_type": "transfer_before_consent"},
+        status="approved"
+    )
+
+    res = await generator.generate_for_prompt(
+        prompt_name="final_expense_alex",
+        prompt_path=prompt_file,
+        save_review_items=False,
+        output_dir=tmp_path
+    )
+
+    assert res.candidates_generated > 0
+    assert res.candidates_saved == 0
+    assert len(await repo.query_human_review_items({"item_type": "prompt_patch"})) == 0
+    assert "dry_run: candidates were generated but not saved" in res.warnings
+    assert any(x.startswith("dry_run_not_saved_") for x in res.review_item_ids)

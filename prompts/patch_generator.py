@@ -590,8 +590,19 @@ class PromptPatchGenerator:
             required_tests=list(candidate.recommended_tests)
         )
 
-    async def save_patch_candidate(self, candidate: PromptPatchCandidate) -> Optional[str]:
+    async def save_patch_candidate(
+        self,
+        candidate: PromptPatchCandidate,
+        source_prompt_path: str = "",
+        source_prompt_hash: str = "",
+        prompt_text: str = "",
+    ) -> Optional[str]:
         """Save candidate to the repository as a pending HumanReviewItem if not duplicated or rejected."""
+        # Run validation first
+        validation_res = self.validate_patch_candidate(candidate, prompt_text)
+        if not validation_res.passed:
+            raise ValueError(f"Candidate failed safety validation: {validation_res.critical_failures + validation_res.high_failures}")
+
         # 1. Scan for existing duplicates
         existing_items = []
         try:
@@ -612,14 +623,13 @@ class PromptPatchGenerator:
                     return None
 
         # Build review item fields
-        validation_res = self.validate_patch_candidate(candidate, "")
         created_at_str = candidate.created_at.isoformat()
 
         payload = {
             "source": "prompt_patch_generator",
             "prompt_name": candidate.prompt_name,
-            "source_prompt_path": "",
-            "source_prompt_hash": "",
+            "source_prompt_path": source_prompt_path,
+            "source_prompt_hash": source_prompt_hash,
             "patch_type": candidate.patch_type,
             "title": candidate.title,
             "problem_summary": candidate.problem_summary,
@@ -800,6 +810,7 @@ class PromptPatchGenerator:
             if not validation.passed:
                 skipped_reasons["failed validation"] = skipped_reasons.get("failed validation", 0) + 1
                 candidates_skipped += 1
+                warnings.append(f"validation_failed: candidate '{candidate.title}' failed safety validation.")
                 continue
 
             # Check deduplication
@@ -822,7 +833,12 @@ class PromptPatchGenerator:
 
             if save_review_items:
                 # Save review item
-                saved_id = await self.save_patch_candidate(candidate)
+                saved_id = await self.save_patch_candidate(
+                    candidate,
+                    source_prompt_path=str(prompt_path),
+                    source_prompt_hash=prompt_hash,
+                    prompt_text=prompt_text
+                )
                 if saved_id:
                     review_item_ids.append(saved_id)
                     candidates_saved += 1
@@ -830,8 +846,10 @@ class PromptPatchGenerator:
                     skipped_reasons["failed save"] = skipped_reasons.get("failed save", 0) + 1
                     candidates_skipped += 1
             else:
-                review_item_ids.append("dry_run_not_saved")
-                candidates_saved += 1
+                review_item_ids.append(f"dry_run_not_saved_{candidate.patch_type}")
+
+        if not save_review_items and len(final_candidates) > 0:
+            warnings.append("dry_run: candidates were generated but not saved")
 
         total_scanned = (
             len(source_bundle.get("human_review_items") or [])
