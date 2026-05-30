@@ -18,6 +18,12 @@ from prompts.patch_generator import (
     PromptPatchGenerationResult,
     PromptPatchValidationResult,
 )
+from prompts.patch_preview import (
+    PromptPatchApplication,
+    PromptPatchPreviewResult,
+    PromptPatchGateResult,
+    PromptPatchPreviewer,
+)
 
 __all__ = [
     "PromptVersionManager",
@@ -29,4 +35,8 @@ __all__ = [
     "PromptPatchCandidate",
     "PromptPatchGenerationResult",
     "PromptPatchValidationResult",
+    "PromptPatchApplication",
+    "PromptPatchPreviewResult",
+    "PromptPatchGateResult",
+    "PromptPatchPreviewer",
 ]
