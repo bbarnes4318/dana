@@ -113,7 +113,8 @@ class Repository:
         elif os.environ.get("DATABASE_URL"):
             self._store = PostgresStore()
         else:
-            self._store = JsonlStore(data_dir=data_dir)
+            env_dir = os.environ.get("DANA_DATA_DIR")
+            self._store = JsonlStore(data_dir=env_dir or data_dir)
         self._claim_lock = asyncio.Lock()
 
     @property
@@ -459,6 +460,10 @@ class Repository:
     async def query_prompt_versions(self, filters: dict) -> list[dict]:
         """Query prompt versions matching the specified filters."""
         return await self._store.query(_PROMPT_VERSIONS, filters)
+
+    async def list_recent_prompt_versions(self, limit: int = 50) -> list[dict]:
+        """List recent prompt versions."""
+        return await self._store.list_recent(_PROMPT_VERSIONS, limit=limit)
 
     async def get_human_review_item(self, item_id: str) -> Optional[dict]:
         """Retrieve a human review item by primary key."""
