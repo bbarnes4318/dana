@@ -178,10 +178,24 @@ def redact_text(text: str) -> tuple[str, int]:
     text, matches = email_pattern.subn("[REDACTED_EMAIL]", text)
     count += matches
 
-    # 2. SSNs (e.g. 123-45-6789 or 123 45 6789)
+    # 2. SSNs
+    # (a) Standard formatted SSN (e.g. 123-45-6789 or 123 45 6789)
     ssn_pattern = re.compile(r"\b\d{3}[-\s]\d{2}[-\s]\d{4}\b")
     text, matches = ssn_pattern.subn("[REDACTED_SSN]", text)
     count += matches
+
+    # (b) Plain 9-digit number only if context suggests SSN/social security
+    ssn_plain_pattern = re.compile(
+        r"\b(?:ssn|social security|social|ssn#)\b\s*(?:number|no|#)?\s*(?:is|:|-)?\s*\b(\d{9})\b",
+        re.IGNORECASE
+    )
+    def ssn_plain_replacer(match):
+        nonlocal count
+        count += 1
+        matched_str = match.group(0)
+        num_str = match.group(1)
+        return matched_str.replace(num_str, "[REDACTED_SSN]")
+    text = ssn_plain_pattern.sub(ssn_plain_replacer, text)
 
     # 3. Credit Cards: 13 to 19 digits (with optional spaces/dashes)
     card_pattern = re.compile(r"\b\d{4}[- ]?\d{4}[- ]?\d{4}[- ]?\d{4}\b|\b\d{13,19}\b")
@@ -208,12 +222,12 @@ def redact_text(text: str) -> tuple[str, int]:
         return matched_str.replace(num_str, "[REDACTED_ACCOUNT]")
     text = routing_pattern.sub(routing_replacer, text)
 
-    # 6. Long Numeric Identifiers (10+ digits sequence, or 9 digit account fallback)
-    long_num_pattern = re.compile(r"\b\d[\d\s-]{8,25}\d\b")
+    # 6. Long Numeric Identifiers (10+ digits sequence)
+    long_num_pattern = re.compile(r"\b\d[\d\s-]{9,25}\d\b")
     def long_num_replacer(match):
         nonlocal count
         digits_only = "".join(c for c in match.group(0) if c.isdigit())
-        if len(digits_only) >= 9:
+        if len(digits_only) >= 10:
             count += 1
             return "[REDACTED_ACCOUNT]"
         return match.group(0)
@@ -337,7 +351,7 @@ class TrainingIngestionService:
         existing_status = "raw"
 
         if self.repository is not None:
-            recent_sources = await self.repository.list_recent_training_sources(limit=1000)
+            recent_sources = await self.repository.list_recent_training_sources(limit=5000)
             for src in recent_sources:
                 meta = src.get("metadata") or {}
                 if meta.get("content_hash") == content_hash:

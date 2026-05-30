@@ -181,3 +181,19 @@ def test_cli_ingest_file(tmp_path):
     assert data["duplicate_detected"] is False
     assert data["normalized_turn_count"] == 1
     assert data["redaction_count"] == 0
+
+
+def test_plain_9_digits_no_redaction():
+    """Plain 9 digit numbers without context are not redacted."""
+    text = "The sequence is 123456789. Also another code 999887777."
+    redacted, count = redact_text(text)
+    assert "123456789" in redacted
+    assert "999887777" in redacted
+    assert count == 0
+
+    # With context, the plain 9 digit number should be redacted as SSN
+    text_with_context = "My SSN is 999887777."
+    redacted_context, count_context = redact_text(text_with_context)
+    assert "[REDACTED_SSN]" in redacted_context
+    assert count_context == 1
+
