@@ -158,7 +158,7 @@ def test_cli_ingest_file(tmp_path):
     """Run CLI ingestion via subprocess and verify output structure."""
     import uuid
     test_file = tmp_path / "notes.txt"
-    unique_text = f"Agent: Welcome to our final expense check. {uuid.uuid4()}"
+    unique_text = f"Agent: Welcome to our final expense check. cli_test_{uuid.uuid4().hex}"
     test_file.write_text(unique_text, encoding="utf-8")
 
     # Call the script

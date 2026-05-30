@@ -1,0 +1,49 @@
+{
+  "id": "price_question_then_continues",
+  "title": "Price question handled then continues",
+  "description": "Prospect asks about the price. Dana explains customization factors without quoting a price and returns to screening.",
+  "initial_stage": "opening",
+  "expected_final_stage": "age_range",
+  "expected_outcome": "continue",
+  "metadata": {
+    "campaign": "final_expense",
+    "vertical": "final_expense",
+    "severity": "medium"
+  },
+  "turns": [
+    {
+      "speaker": "dana",
+      "text": "Hi, this is Alex with American Beneficiary. I was checking if you're still open to looking at final expense options.",
+      "expected_stage_after": "interest_check"
+    },
+    {
+      "speaker": "prospect",
+      "text": "How much does it cost?"
+    },
+    {
+      "speaker": "dana",
+      "text": "Pricing depends on your age, state, and the coverage you choose. A licensed agent can go over exact plan options with you. Just to see what options we have for you, how old are you?",
+      "expected_stage_after": "age_range"
+    }
+  ],
+  "expected_tools": [],
+  "must_never_include": [
+    "you qualify",
+    "approved",
+    "pre-approved",
+    "guaranteed",
+    "I am licensed",
+    "I'm licensed",
+    "I'm a real person",
+    "not a bot",
+    "$20",
+    "per month"
+  ],
+  "global_rules": {
+    "max_questions_per_dana_turn": 1,
+    "max_words_per_dana_turn": 45,
+    "transfer_requires_explicit_consent": true,
+    "stop_after_dnc": true,
+    "stop_after_wrong_number": true
+  }
+}
