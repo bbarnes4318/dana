@@ -2,17 +2,19 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import subprocess
 import sys
+import uuid
 from pathlib import Path
-from datetime import datetime, timezone
 import pytest
 
 from storage.repository import Repository
+from core.objection_classifier import ObjectionClassifier
 from training.ingestion import TrainingIngestionService
-from training.labeler import TranscriptLabeler, classify_objection, check_compliance_risk
+from training.labeler import TranscriptLabeler, OBJECTION_MAP
 
 
 @pytest.fixture
@@ -33,127 +35,216 @@ def ingestion_service(repo):
     return TrainingIngestionService(repository=repo)
 
 
-def test_labels_already_insured():
-    """Verify classification of already_insured objection."""
-    obj = classify_objection("I already have coverage through work", "prospect")
-    assert obj == "already_insured"
+def test_objection_map_alignment():
+    """Verify that all mapped intents in OBJECTION_MAP exist in the runtime YAML."""
+    classifier = ObjectionClassifier()
+    known = classifier.known_intents
+    for labeler_obj, runtime_obj in OBJECTION_MAP.items():
+        assert runtime_obj in known, f"Runtime objection intent '{runtime_obj}' is not in known intents: {known}"
 
 
-def test_labels_price_question():
-    """Verify classification of price_question objection."""
-    obj = classify_objection("How much is the monthly rate?", "prospect")
-    assert obj == "price_question"
+# ------------------------------------------------------------------
+# Explicit 18 Scenario Tests
+# ------------------------------------------------------------------
+
+# Scenario 1: already insured
+def test_scenario_already_insured(labeler):
+    turn = {"speaker": "prospect", "text": "I already have coverage through work", "turn_index": 0}
+    res = labeler.label_turn(turn)
+    assert res.label.objection_type == "already_insured"
+    assert res.label.objection_confidence == 0.8
+    assert len(res.label.reasons) > 0
+    assert any("already insured" in r.lower() for r in res.label.reasons)
+    assert res.label.is_failure_candidate is False
 
 
-def test_labels_are_you_real(labeler: TranscriptLabeler):
-    """Verify asks_if_real classification and sentiment of prospect turn."""
-    turn = {"speaker": "prospect", "text": "Are you a real person or an AI bot?", "turn_index": 0}
+# Scenario 2: price question
+def test_scenario_price_question(labeler):
+    turn = {"speaker": "prospect", "text": "How much does it cost?", "turn_index": 0}
+    res = labeler.label_turn(turn)
+    assert res.label.objection_type == "price_question"
+    assert res.label.objection_confidence == 0.8
+    assert len(res.label.reasons) > 0
+    assert any("price" in r.lower() for r in res.label.reasons)
+    assert res.label.is_failure_candidate is False
+
+
+# Scenario 3: are you real
+def test_scenario_are_you_real(labeler):
+    turn = {"speaker": "prospect", "text": "Are you a real person or an AI robot?", "turn_index": 0}
     res = labeler.label_turn(turn)
     assert res.label.objection_type == "asks_if_real"
+    assert res.label.objection_confidence == 0.8
     assert res.label.sentiment == "suspicious"
+    assert res.label.sentiment_confidence == 0.8
+    assert len(res.label.reasons) > 0
+    assert res.label.is_failure_candidate is False
 
 
-def test_labels_are_you_licensed(labeler: TranscriptLabeler):
-    """Verify asks_if_licensed classification of prospect turn."""
+# Scenario 4: are you licensed
+def test_scenario_are_you_licensed(labeler):
     turn = {"speaker": "prospect", "text": "Do you have a licensed agent ID?", "turn_index": 0}
     res = labeler.label_turn(turn)
     assert res.label.objection_type == "asks_if_licensed"
+    assert res.label.objection_confidence == 0.8
+    assert len(res.label.reasons) > 0
+    assert res.label.is_failure_candidate is False
 
 
-def test_labels_dnc():
-    """Verify classification of dnc stage and objection."""
-    obj = classify_objection("Take me off your list and stop calling", "prospect")
-    assert obj == "dnc"
+# Scenario 5: DNC
+def test_scenario_dnc(labeler):
+    turn = {"speaker": "prospect", "text": "Take me off your list and stop calling", "turn_index": 0}
+    res = labeler.label_turn(turn)
+    assert res.label.call_stage == "dnc"
+    assert res.label.stage_confidence == 0.8
+    assert res.label.objection_type == "dnc"
+    assert res.label.objection_confidence == 0.8
+    assert len(res.label.reasons) > 0
+    assert res.label.is_failure_candidate is False
 
 
-def test_labels_wrong_number(labeler: TranscriptLabeler):
-    """Verify wrong_number objection classification."""
+# Scenario 6: wrong number
+def test_scenario_wrong_number(labeler):
     turn = {"speaker": "prospect", "text": "You have the wrong person, not me.", "turn_index": 0}
     res = labeler.label_turn(turn)
     assert res.label.objection_type == "wrong_number"
+    assert res.label.objection_confidence == 0.8
+    assert len(res.label.reasons) > 0
+    assert res.label.is_failure_candidate is False
 
 
-def test_labels_busy_callback(labeler: TranscriptLabeler):
-    """Verify busy objection and callback stage classification."""
+# Scenario 7: busy/callback
+def test_scenario_busy_callback(labeler):
     turn = {"speaker": "prospect", "text": "I'm currently driving. Call me back tomorrow.", "turn_index": 0}
     res = labeler.label_turn(turn)
-    assert res.label.objection_type == "busy"
     assert res.label.call_stage == "callback"
+    assert res.label.stage_confidence == 0.8
+    assert res.label.objection_type == "busy"
+    assert res.label.objection_confidence == 0.8
+    assert len(res.label.reasons) > 0
+    assert res.label.is_failure_candidate is False
 
 
-def test_labels_nursing_home_disqualification(labeler: TranscriptLabeler):
-    """Verify disqualified stage classification for care facilities."""
+# Scenario 8: nursing home
+def test_scenario_nursing_home(labeler):
     turn = {"speaker": "prospect", "text": "I am living in a nursing home right now.", "turn_index": 0}
     res = labeler.label_turn(turn)
     assert res.label.call_stage == "disqualified"
+    assert res.label.stage_confidence == 0.8
+    assert len(res.label.reasons) > 0
+    assert res.label.is_failure_candidate is False
 
 
-def test_labels_spouse_decision_maker(labeler: TranscriptLabeler):
-    """Verify spouse/decision maker stage and objection classification."""
+# Scenario 9: spouse/decision maker
+def test_scenario_spouse_decision_maker(labeler):
     turn = {"speaker": "prospect", "text": "My spouse handles all the financial decisions.", "turn_index": 0}
     res = labeler.label_turn(turn)
     assert res.label.call_stage == "decision_maker"
+    assert res.label.stage_confidence == 0.8
     assert res.label.objection_type == "spouse"
+    assert res.label.objection_confidence == 0.8
+    assert len(res.label.reasons) > 0
+    assert res.label.is_failure_candidate is False
 
 
-def test_labels_transfer_consent(labeler: TranscriptLabeler):
-    """Verify transfer_consent stage classification."""
+# Scenario 10: transfer consent
+def test_scenario_transfer_consent(labeler):
     turn = {"speaker": "prospect", "text": "Sure, go ahead and connect me to the agent.", "turn_index": 0}
     res = labeler.label_turn(turn)
     assert res.label.call_stage == "transfer_consent"
+    assert res.label.stage_confidence == 0.8
+    assert len(res.label.reasons) > 0
+    assert res.label.is_failure_candidate is False
 
 
-def test_labels_hostile(labeler: TranscriptLabeler):
-    """Verify hostile objection and sentiment classification."""
+# Scenario 11: hostile
+def test_scenario_hostile(labeler):
     turn = {"speaker": "prospect", "text": "Stop harassing me or I will sue you!", "turn_index": 0}
     res = labeler.label_turn(turn)
     assert res.label.objection_type == "hostile"
+    assert res.label.objection_confidence == 0.8
     assert res.label.sentiment == "hostile"
+    assert res.label.sentiment_confidence == 0.8
+    assert len(res.label.reasons) > 0
+    assert res.label.is_failure_candidate is False
 
 
-def test_agent_price_quote_is_critical():
-    """Verify that agent quoting a specific premium/dollar is critical risk."""
-    risk, reasons = check_compliance_risk("agent", "Your monthly rate is going to be 50 dollars a month.")
-    assert risk == "critical"
-    assert any("price" in r.lower() for r in reasons)
+# Scenario 12: agent price quote
+def test_scenario_agent_price_quote(labeler):
+    turn = {"speaker": "agent", "text": "Your monthly rate is going to be 50 dollars a month.", "turn_index": 0}
+    res = labeler.label_turn(turn)
+    assert res.label.compliance_risk == "critical"
+    assert res.label.compliance_confidence == 1.0
+    assert len(res.label.reasons) > 0
+    assert any("price" in r.lower() for r in res.label.reasons)
+    assert res.label.is_failure_candidate is True
 
 
-def test_agent_you_qualify_is_critical():
-    """Verify that agent saying 'you qualify' is critical risk."""
-    risk, reasons = check_compliance_risk("agent", "You qualify for this american beneficiary option.")
-    assert risk == "critical"
-    assert any("qualify" in r.lower() for r in reasons)
+# Scenario 13: agent says you qualify
+def test_scenario_agent_says_you_qualify(labeler):
+    turn = {"speaker": "agent", "text": "You qualify for this american beneficiary option.", "turn_index": 0}
+    res = labeler.label_turn(turn)
+    assert res.label.compliance_risk == "critical"
+    assert res.label.compliance_confidence == 1.0
+    assert len(res.label.reasons) > 0
+    assert any("qualify" in r.lower() for r in res.label.reasons)
+    assert res.label.is_failure_candidate is True
 
 
-def test_agent_licensed_claim_is_critical():
-    """Verify that agent claiming to be licensed is critical risk."""
-    risk, reasons = check_compliance_risk("agent", "I am a licensed agent in your state.")
-    assert risk == "critical"
-    assert any("licensed" in r.lower() for r in reasons)
+# Scenario 14: agent licensed claim
+def test_scenario_agent_licensed_claim(labeler):
+    turn = {"speaker": "agent", "text": "I am a licensed agent in your state.", "turn_index": 0}
+    res = labeler.label_turn(turn)
+    assert res.label.compliance_risk == "critical"
+    assert res.label.compliance_confidence == 1.0
+    assert len(res.label.reasons) > 0
+    assert any("licensed" in r.lower() for r in res.label.reasons)
+    assert res.label.is_failure_candidate is True
 
 
-def test_agent_human_claim_is_high_or_critical():
-    """Verify that agent claiming to be human/real person is high risk."""
-    risk, reasons = check_compliance_risk("agent", "Yes, I am a real person, not a bot.")
-    assert risk == "high"
-    assert any("human" in r.lower() for r in reasons)
+# Scenario 15: agent human claim
+def test_scenario_agent_human_claim(labeler):
+    turn = {"speaker": "agent", "text": "Yes, I am a real person, not a bot.", "turn_index": 0}
+    res = labeler.label_turn(turn)
+    assert res.label.compliance_risk == "high"
+    assert res.label.compliance_confidence == 0.8
+    assert len(res.label.reasons) > 0
+    assert any("human" in r.lower() for r in res.label.reasons)
+    assert res.label.is_failure_candidate is True
 
 
-def test_agent_multiple_questions_failure_candidate(labeler: TranscriptLabeler):
-    """Verify that agent asking multiple questions in one turn is marked a failure."""
+# Scenario 16: agent multiple questions
+def test_scenario_agent_multiple_questions(labeler):
     turn = {"speaker": "agent", "text": "Are you between 40 and 85? Do you live independently?", "turn_index": 0}
     res = labeler.label_turn(turn)
+    assert res.label.compliance_risk == "medium"
+    assert res.label.compliance_confidence == 0.6
+    assert len(res.label.reasons) > 0
+    assert any("multiple questions" in r.lower() for r in res.label.reasons)
     assert res.label.is_failure_candidate is True
-    assert res.label.is_good_example_candidate is False
 
 
+# Scenario 17: agent after DNC
+def test_scenario_agent_after_dnc(labeler):
+    prev_turns = [
+        {"speaker": "prospect", "text": "Do not call me ever again.", "turn_index": 0}
+    ]
+    turn = {"speaker": "agent", "text": "Hello, but we have great offers.", "turn_index": 1}
+    res = labeler.label_turn(turn, prev_turns)
+    assert res.label.compliance_risk == "critical"
+    assert res.label.compliance_confidence == 1.0
+    assert len(res.label.reasons) > 0
+    assert any("dnc" in r.lower() for r in res.label.reasons)
+    assert res.label.is_failure_candidate is True
+
+
+# Scenario 18: label_training_source updates metadata
 @pytest.mark.asyncio
-async def test_label_training_source_updates_metadata(
+async def test_scenario_label_training_source_updates_metadata(
     ingestion_service: TrainingIngestionService,
     labeler: TranscriptLabeler,
     repo: Repository
 ):
-    """Verify that label_training_source correctly saves labeling output back to repository metadata."""
     transcript = (
         "Agent: Hello, this is Alex checking on your burial options.\n"
         "Prospect: How much does it cost?\n"
@@ -183,17 +274,70 @@ async def test_label_training_source_updates_metadata(
     assert meta["labels"]["total_turns"] == 3
 
 
-def test_cli_label_training_source(tmp_path):
+# ------------------------------------------------------------------
+# Additional Context Tests
+# ------------------------------------------------------------------
+
+def test_transfer_language_before_consent(labeler):
+    """Verify that agent using transfer language before consent is critical compliance risk."""
+    turn = {"speaker": "agent", "text": "Okay, let me transfer you to a licensed agent.", "turn_index": 1}
+    res = labeler.label_turn(turn, previous_turns=[])
+    assert res.label.compliance_risk == "critical"
+    assert res.label.compliance_confidence == 1.0
+    assert any("transfer language before prospect gave clear consent" in r.lower() for r in res.label.reasons)
+    assert res.label.is_failure_candidate is True
+
+
+def test_no_broad_numeric_matching_for_age(labeler):
+    """Verify that age-stage detection is not triggered by arbitrary numbers."""
+    turn = {"speaker": "prospect", "text": "I have 3 kids and my house number is 45.", "turn_index": 0}
+    res = labeler.label_turn(turn)
+    assert res.label.call_stage != "age_range"
+
+
+def test_agent_speaks_after_wrong_number(labeler):
+    """Verify that agent speaking after wrong number is failure candidate and critical risk."""
+    prev_turns = [
+        {"speaker": "prospect", "text": "No, this is wrong number. Not Jim.", "turn_index": 0}
+    ]
+    turn = {"speaker": "agent", "text": "Are you sure? We can check your details.", "turn_index": 1}
+    res = labeler.label_turn(turn, prev_turns)
+    assert res.label.compliance_risk == "critical"
+    assert res.label.compliance_confidence == 1.0
+    assert any("wrong number" in r.lower() for r in res.label.reasons)
+    assert res.label.is_failure_candidate is True
+
+
+def test_agent_speaks_after_hostile(labeler):
+    """Verify that agent speaking after hostile prospect is failure candidate."""
+    prev_turns = [
+        {"speaker": "prospect", "text": "Get the fuck off my phone!", "turn_index": 0}
+    ]
+    turn = {"speaker": "agent", "text": "Sorry, let me just explain.", "turn_index": 1}
+    res = labeler.label_turn(turn, prev_turns)
+    assert res.label.is_failure_candidate is True
+    assert any("hostile" in r.lower() for r in res.label.reasons)
+
+
+def test_repeated_push_after_not_interested(labeler):
+    """Verify that agent continuing to push after prospect says not interested is high risk."""
+    prev_turns = [
+        {"speaker": "prospect", "text": "I am not interested.", "turn_index": 0}
+    ]
+    turn = {"speaker": "agent", "text": "But this can save your family money.", "turn_index": 1}
+    res = labeler.label_turn(turn, prev_turns)
+    assert res.label.compliance_risk == "high"
+    assert res.label.compliance_confidence == 0.8
+    assert any("disinterest" in r.lower() for r in res.label.reasons)
+
+
+def test_cli_label_training_source():
     """Verify that the CLI labeler runs via subprocess and outputs correct JSON structure."""
-    # Write notes to ingest first
     import uuid
-    repo = Repository(data_dir=tmp_path)
+    default_repo = Repository()
     
-    # We must ingest a source first to get a valid source ID
-    # Inline run ingestion via helper script or direct repository save
-    # Let's save a source using repo
     meta = {
-        "content_hash": "dummyhash",
+        "content_hash": f"dummyhash-{uuid.uuid4()}",
         "normalized_turns": [
             {"speaker": "agent", "text": "Hello, this is Dana.", "turn_index": 0},
             {"speaker": "prospect", "text": "Not interested", "turn_index": 1}
@@ -202,16 +346,7 @@ def test_cli_label_training_source(tmp_path):
         "redaction_count": 0
     }
     
-    # Create the training_sources file inside tmp_path so CLI script can find it
-    # But wait, CLI script will read from default "./data".
-    # Since CLI runs in separate subprocess, let's write to the default "./data" or we can pass database path?
-    # Wait, our script reads from default "./data". So we can write directly via repo (using default data dir)
-    # or we can use a unique UUID content to prevent conflict!
-    # Let's write the source directly to the default repository store, and delete it/clean it up after,
-    # or just use a unique source ID and write it!
-    # Actually, we can use Repository() to save the dummy source, then pass its ID to the CLI.
-    # It will write to the default data/training_sources.jsonl. This is perfectly fine as long as we use a unique title/ID.
-    default_repo = Repository()
+    # Save a test source to default JSONL store to test CLI
     source_id = asyncio.run(default_repo.save_training_source(
         source_type="manager_note",
         source_uri=f"test://cli-label-{uuid.uuid4()}",
@@ -243,9 +378,5 @@ def test_cli_label_training_source(tmp_path):
         assert "failure_candidates" in data
         
     finally:
-        # Clean up by removing/marking the record if needed, but since it's JSONL append-only,
-        # it is fine to leave it (doesn't hurt other tests).
+        # Clean up is optional as it's just local test JSONL data.
         pass
-
-
-import asyncio
