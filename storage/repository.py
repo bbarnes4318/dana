@@ -484,6 +484,27 @@ class Repository:
         """Query call outcome labels matching the specified filters."""
         return await self._store.query(_CALL_OUTCOME_LABELS, filters)
 
+    async def query_calls(self, filters: dict) -> list[dict]:
+        """Query calls matching the specified filters."""
+        return await self._store.query(_CALLS, filters)
+
+    async def query_call_turns(self, filters: dict) -> list[dict]:
+        """Query call turns matching the specified filters."""
+        return await self._store.query(_CALL_TURNS, filters)
+
+    async def query_qa_reports(self, filters: dict) -> list[dict]:
+        """Query QA reports matching the specified filters."""
+        return await self._store.query(_QA_REPORTS, filters)
+
+    async def query_tool_events(self, filters: dict) -> list[dict]:
+        """Query tool events matching the specified filters."""
+        return await self._store.query(_TOOL_EVENTS, filters)
+
+    async def list_recent_calls_records(self, limit: int = 50) -> list[dict]:
+        """List recent call records from calls collection."""
+        return await self._store.list_recent(_CALLS, limit=limit)
+
+
     async def get_campaign(self, campaign_id: str) -> Optional[dict]:
         """Retrieve a campaign by campaign_id or id, merging config into top-level."""
         raw_campaign = None
