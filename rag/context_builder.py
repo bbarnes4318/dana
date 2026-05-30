@@ -7,6 +7,7 @@ for injection into Dana's system prompt.
 from __future__ import annotations
 
 import logging
+import os
 from typing import Optional
 
 from rag.document import Document
@@ -44,7 +45,6 @@ def _get_priority(doc: Document) -> int:
     topic = metadata.get("topic", "")
     source_file = metadata.get("source_file", "").lower()
 
-    # Check source file for compliance/script indicators
     if "compliance" in source_file:
         return _PRIORITY_ORDER["compliance"]
     if "script" in source_file:
@@ -95,31 +95,43 @@ class ContextBuilder:
             Formatted context string ready for system prompt injection.
             Empty string if no relevant documents are found.
         """
-        if not query or not query.strip():
-            return ""
+        fail_open = os.environ.get("DANA_RAG_FAIL_OPEN", "true").lower() == "true"
 
-        # Build enhanced query incorporating stage and objection context
-        enhanced_query = self._enhance_query(
-            query, call_stage, objection_type
-        )
+        try:
+            if not query or not query.strip():
+                return ""
 
-        # Retrieve more documents than we might need
-        documents = self._retriever.retrieve(
-            enhanced_query, call_stage=call_stage, top_k=10
-        )
+            # Build enhanced query incorporating stage and objection context
+            enhanced_query = self._enhance_query(
+                query, call_stage, objection_type
+            )
 
-        if not documents:
-            return ""
+            # Retrieve more documents than we might need
+            documents = self._retriever.retrieve(
+                enhanced_query,
+                call_stage=call_stage,
+                top_k=10,
+                topic=objection_type if objection_type else None,
+            )
 
-        # Sort by priority
-        documents = self._prioritize(documents)
+            if not documents:
+                return ""
 
-        # Format and truncate to max chars
-        context = self._format_context(
-            documents, call_stage, lead_profile, objection_type
-        )
+            # Sort by priority
+            documents = self._prioritize(documents)
 
-        return context
+            # Format and truncate to max chars
+            context = self._format_context(
+                documents, call_stage, lead_profile, objection_type
+            )
+
+            return context
+
+        except Exception as e:
+            logger.exception("RAG context builder error occurred: %s", e)
+            if fail_open:
+                return ""
+            raise
 
     def _enhance_query(
         self,
@@ -187,9 +199,9 @@ class ContextBuilder:
         # Add documents with source attribution
         for doc in documents:
             metadata = doc.metadata or {}
-            source_file = metadata.get("source_file", "unknown")
-            topic = metadata.get("topic", "")
-            section_name = metadata.get("section", "")
+            source_file = metadata.get("source_file") or doc.source or "unknown"
+            topic = metadata.get("topic") or doc.topic or ""
+            section_name = metadata.get("section") or ""
 
             # Build document entry
             label_parts = [f"[{source_file}]"]

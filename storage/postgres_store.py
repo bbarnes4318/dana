@@ -45,7 +45,12 @@ TABLE_COLUMNS: dict[str, set[str]] = {
     "prompt_versions": {"id", "file_path", "sha", "created_at", "created_by", "change_reason", "qa_thresholds", "canary_status"},
     "human_review_items": {"id", "item_type", "payload", "status", "reviewer", "review_notes", "created_at", "reviewed_at"},
     "deployment_experiments": {"id", "experiment_name", "prompt_version_id", "traffic_percent", "status", "metrics", "started_at", "ended_at", "created_at"},
-    "call_outcome_labels": {"id", "call_id", "campaign_id", "outcome", "sold", "issued", "transfer_quality_score", "agent_feedback", "labels", "created_at"}
+    "call_outcome_labels": {"id", "call_id", "campaign_id", "outcome", "sold", "issued", "transfer_quality_score", "agent_feedback", "labels", "created_at"},
+    "rag_documents": {
+        "id", "content", "embedding", "metadata", "source", "source_id", "source_type",
+        "topic", "call_stage", "doc_type", "approved", "quality_score", "compliance_priority",
+        "version", "created_at", "updated_at"
+    }
 }
 
 ALLOWLIST_TABLES = set(TABLE_COLUMNS.keys())

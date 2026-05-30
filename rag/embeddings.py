@@ -1,28 +1,30 @@
 """Embedding provider for RAG knowledge base.
 
-Uses TF-IDF as the default lightweight embedding method. Falls back to
-simple word-frequency vectors if scikit-learn is not available. Designed
-to be swappable for a real embedding model (e.g., sentence-transformers).
+Supports multiple embedding backends (deterministic fallback, legacy TF-IDF,
+sentence-transformers, and OpenAI) via a clean provider interface.
 """
 
 from __future__ import annotations
 
+import hashlib
 import math
+import os
 import re
 from abc import ABC, abstractmethod
 from collections import Counter
-from typing import Optional
+from typing import Any, Optional
 
 
 class BaseEmbeddingProvider(ABC):
-    """Abstract base class for embedding providers.
-
-    Subclass this to swap in a real embedding model (e.g., OpenAI,
-    sentence-transformers) while keeping the same interface.
-    """
+    """Abstract base class for embedding providers."""
 
     @abstractmethod
     def embed(self, text: str) -> list[float]:
+        """Generate an embedding vector for a single text."""
+        ...
+
+    @abstractmethod
+    def embed_text(self, text: str) -> list[float]:
         """Generate an embedding vector for a single text."""
         ...
 
@@ -33,15 +35,7 @@ class BaseEmbeddingProvider(ABC):
 
     @staticmethod
     def cosine_similarity(a: list[float], b: list[float]) -> float:
-        """Compute cosine similarity between two vectors.
-
-        Args:
-            a: First vector.
-            b: Second vector.
-
-        Returns:
-            Cosine similarity in range [-1, 1]. Returns 0.0 for zero vectors.
-        """
+        """Compute cosine similarity between two vectors."""
         if len(a) != len(b):
             raise ValueError(
                 f"Vector dimensions must match: {len(a)} != {len(b)}"
@@ -65,11 +59,7 @@ def _tokenize(text: str) -> list[str]:
 
 
 class _SimpleWordFrequencyProvider(BaseEmbeddingProvider):
-    """Fallback embedding using simple word frequency vectors.
-
-    Builds a vocabulary from all seen texts and represents each text
-    as a normalized term-frequency vector.
-    """
+    """Fallback embedding using simple word frequency vectors."""
 
     def __init__(self) -> None:
         self._vocab: dict[str, int] = {}
@@ -86,7 +76,6 @@ class _SimpleWordFrequencyProvider(BaseEmbeddingProvider):
     def _text_to_vector(self, text: str) -> list[float]:
         """Convert text to a term-frequency vector."""
         if self._vocab_size == 0:
-            # Build vocab from just this text
             self._build_vocab([text])
 
         tokens = _tokenize(text)
@@ -100,16 +89,23 @@ class _SimpleWordFrequencyProvider(BaseEmbeddingProvider):
 
         return vector
 
-    def embed(self, text: str) -> list[float]:
-        """Generate a word-frequency embedding for a single text."""
+    def embed_text(self, text: str) -> list[float]:
+        """Generate a single embedding vector."""
+        text = text[:10000]
         if self._vocab_size == 0:
             self._build_vocab([text])
         return self._text_to_vector(text)
 
+    def embed(self, text: str) -> list[float]:
+        return self.embed_text(text)
+
     def embed_batch(self, texts: list[str]) -> list[list[float]]:
-        """Generate word-frequency embeddings for multiple texts."""
-        self._build_vocab(texts)
-        return [self._text_to_vector(t) for t in texts]
+        """Generate embeddings for multiple texts."""
+        if not texts:
+            return []
+        cleaned = [t[:10000] for t in texts]
+        self._build_vocab(cleaned)
+        return [self._text_to_vector(t) for t in cleaned]
 
 
 class _TfidfProvider(BaseEmbeddingProvider):
@@ -125,8 +121,9 @@ class _TfidfProvider(BaseEmbeddingProvider):
         )
         self._is_fitted: bool = False
 
-    def embed(self, text: str) -> list[float]:
-        """Generate a TF-IDF embedding for a single text."""
+    def embed_text(self, text: str) -> list[float]:
+        """Generate a single embedding."""
+        text = text[:10000]
         if not self._is_fitted:
             matrix = self._vectorizer.fit_transform([text])
             self._is_fitted = True
@@ -134,52 +131,219 @@ class _TfidfProvider(BaseEmbeddingProvider):
             matrix = self._vectorizer.transform([text])
         return matrix.toarray()[0].tolist()
 
-    def embed_batch(self, texts: list[str]) -> list[list[float]]:
-        """Generate TF-IDF embeddings for multiple texts.
+    def embed(self, text: str) -> list[float]:
+        return self.embed_text(text)
 
-        Re-fits the vectorizer on the full corpus for best results.
-        """
-        matrix = self._vectorizer.fit_transform(texts)
+    def embed_batch(self, texts: list[str]) -> list[list[float]]:
+        """Generate batch embeddings."""
+        if not texts:
+            return []
+        cleaned = [t[:10000] for t in texts]
+        matrix = self._vectorizer.fit_transform(cleaned)
         self._is_fitted = True
         return [row.tolist() for row in matrix.toarray()]
 
 
-class EmbeddingProvider(BaseEmbeddingProvider):
-    """Smart embedding provider that uses TF-IDF if sklearn is available,
-    otherwise falls back to simple word-frequency vectors.
+class DeterministicFallbackProvider(BaseEmbeddingProvider):
+    """Deterministic, stable fallback embedding provider using hashing.
 
-    This class delegates to the best available backend and exposes a
-    unified interface. To swap for a real model, subclass
-    BaseEmbeddingProvider and replace this class.
-
-    Example::
-
-        provider = EmbeddingProvider()
-        vec = provider.embed("What is final expense insurance?")
-        vecs = provider.embed_batch(["text one", "text two"])
-        sim = provider.cosine_similarity(vecs[0], vecs[1])
+    Guarantees stable dimension sizes and vectors without network calls,
+    heavy libraries, or fit/vocab state.
     """
 
-    def __init__(self, backend: Optional[BaseEmbeddingProvider] = None) -> None:
-        if backend is not None:
-            self._backend = backend
-        else:
-            try:
-                self._backend = _TfidfProvider()
-                self._backend_name = "tfidf"
-            except ImportError:
-                self._backend = _SimpleWordFrequencyProvider()
-                self._backend_name = "word_frequency"
+    def __init__(self, dimensions: int = 384) -> None:
+        self.name = "deterministic"
+        self.dimensions = dimensions
+
+    def embed_text(self, text: str) -> list[float]:
+        """Generates a stable MD5 token hash vector."""
+        text = text[:10000]
+        if not text.strip():
+            return [0.0] * self.dimensions
+
+        tokens = _tokenize(text)
+        if not tokens:
+            return [0.0] * self.dimensions
+
+        vector = [0.0] * self.dimensions
+        for token in tokens:
+            # MD5 is stable across runs and processes
+            h = int(hashlib.md5(token.encode("utf-8")).hexdigest(), 16)
+            idx = h % self.dimensions
+            vector[idx] += 1.0
+
+        # Normalize L2
+        norm = math.sqrt(sum(x * x for x in vector))
+        if norm > 0.0:
+            vector = [x / norm for x in vector]
+
+        return vector
+
+    def embed(self, text: str) -> list[float]:
+        return self.embed_text(text)
+
+    def embed_batch(self, texts: list[str]) -> list[list[float]]:
+        if not texts:
+            return []
+        return [self.embed_text(t) for t in texts]
+
+
+class SentenceTransformersProvider(BaseEmbeddingProvider):
+    """SentenceTransformers embedding provider using local models."""
+
+    def __init__(self, model_name: str | None = None) -> None:
+        self.name = "sentence_transformers"
+        self.model_name = model_name or os.environ.get("DANA_EMBEDDING_MODEL") or "all-MiniLM-L6-v2"
+        
+        try:
+            from sentence_transformers import SentenceTransformer
+        except ImportError:
+            raise ImportError(
+                "The 'sentence-transformers' package is required for SentenceTransformers provider. "
+                "Install it using 'pip install sentence-transformers'."
+            )
+        self._model = SentenceTransformer(self.model_name)
+        self.dimensions = getattr(self._model, "get_sentence_embedding_dimension", lambda: 384)()
+
+    def embed_text(self, text: str) -> list[float]:
+        text = text[:10000]
+        if not text.strip():
+            return [0.0] * self.dimensions
+        res = self.embed_batch([text])
+        return res[0]
+
+    def embed(self, text: str) -> list[float]:
+        return self.embed_text(text)
+
+    def embed_batch(self, texts: list[str]) -> list[list[float]]:
+        if not texts:
+            return []
+        cleaned = [t[:10000] if t.strip() else " " for t in texts]
+        embeddings = self._model.encode(cleaned)
+        return [em.tolist() for em in embeddings]
+
+
+class OpenAIProvider(BaseEmbeddingProvider):
+    """OpenAI API embedding provider."""
+
+    def __init__(self, api_key: str | None = None, model: str | None = None, dimensions: int | None = None) -> None:
+        self.name = "openai"
+        self.api_key = api_key or os.environ.get("OPENAI_API_KEY")
+        if not self.api_key:
+            raise ValueError("OPENAI_API_KEY environment variable is required for OpenAI provider.")
+        self.model = model or os.environ.get("DANA_EMBEDDING_MODEL") or "text-embedding-3-small"
+        self.dimensions = dimensions or (int(os.environ.get("DANA_EMBEDDING_DIMENSIONS")) if os.environ.get("DANA_EMBEDDING_DIMENSIONS") else 1536)
+
+    def embed_text(self, text: str) -> list[float]:
+        text = text[:10000]
+        if not text.strip():
+            return [0.0] * self.dimensions
+        res = self.embed_batch([text])
+        return res[0] if res else [0.0] * self.dimensions
+
+    def embed(self, text: str) -> list[float]:
+        return self.embed_text(text)
+
+    def embed_batch(self, texts: list[str]) -> list[list[float]]:
+        if not texts:
+            return []
+        
+        cleaned = []
+        for t in texts:
+            c = t[:10000]
+            if not c.strip():
+                c = " "  # OpenAI fails on empty text
+            cleaned.append(c)
+
+        try:
+            import openai
+        except ImportError:
+            raise ImportError("The 'openai' package is required for OpenAI embedding provider. Install it using 'pip install openai'.")
+
+        client = openai.OpenAI(api_key=self.api_key)
+        kwargs = {"input": cleaned, "model": self.model}
+        if "text-embedding-3" in self.model and self.dimensions:
+            kwargs["dimensions"] = self.dimensions
+
+        response = client.embeddings.create(**kwargs)
+        data = sorted(response.data, key=lambda x: x.index)
+        return [item.embedding for item in data]
+
+
+class LegacyCompatibilityProvider(BaseEmbeddingProvider):
+    """Wraps legacy TF-IDF or simple word frequency backends."""
+
+    def __init__(self) -> None:
+        self.name = "legacy"
+        try:
+            self._backend = _TfidfProvider()
+            self._backend_name = "tfidf"
+        except ImportError:
+            self._backend = _SimpleWordFrequencyProvider()
+            self._backend_name = "word_frequency"
+        self.dimensions = None
+
+    def embed_text(self, text: str) -> list[float]:
+        return self._backend.embed(text)
+
+    def embed(self, text: str) -> list[float]:
+        return self.embed_text(text)
+
+    def embed_batch(self, texts: list[str]) -> list[list[float]]:
+        return self._backend.embed_batch(texts)
+
+
+class EmbeddingProvider(BaseEmbeddingProvider):
+    """Smart wrapper client providing the selected embedding provider backend."""
+
+    def __init__(self, backend_or_name: Optional[Any] = None) -> None:
+        self._provider: Optional[BaseEmbeddingProvider] = None
+
+        provider_name = os.environ.get("DANA_EMBEDDING_PROVIDER")
+        if isinstance(backend_or_name, str):
+            provider_name = backend_or_name
+        elif isinstance(backend_or_name, BaseEmbeddingProvider):
+            self._provider = backend_or_name
+            return
+
+        if not self._provider:
+            if provider_name == "openai":
+                self._provider = OpenAIProvider()
+            elif provider_name == "sentence_transformers":
+                self._provider = SentenceTransformersProvider()
+            elif provider_name == "legacy":
+                self._provider = LegacyCompatibilityProvider()
+            elif provider_name == "deterministic":
+                dim = int(os.environ.get("DANA_EMBEDDING_DIMENSIONS")) if os.environ.get("DANA_EMBEDDING_DIMENSIONS") else 384
+                self._provider = DeterministicFallbackProvider(dimensions=dim)
+            else:
+                dim = int(os.environ.get("DANA_EMBEDDING_DIMENSIONS")) if os.environ.get("DANA_EMBEDDING_DIMENSIONS") else 384
+                self._provider = DeterministicFallbackProvider(dimensions=dim)
+
+    @property
+    def name(self) -> str:
+        return self._provider.name
+
+    @property
+    def dimensions(self) -> int | None:
+        return self._provider.dimensions
+
+    def embed_text(self, text: str) -> list[float]:
+        return self._provider.embed_text(text)
+
+    def embed(self, text: str) -> list[float]:
+        return self._provider.embed(text)
+
+    def embed_batch(self, texts: list[str]) -> list[list[float]]:
+        return self._provider.embed_batch(texts)
 
     @property
     def backend_name(self) -> str:
-        """Name of the active backend."""
-        return getattr(self, "_backend_name", self._backend.__class__.__name__)
+        if hasattr(self._provider, "_backend_name"):
+            return self._provider._backend_name
+        return self._provider.name
 
-    def embed(self, text: str) -> list[float]:
-        """Generate an embedding vector for a single text."""
-        return self._backend.embed(text)
 
-    def embed_batch(self, texts: list[str]) -> list[list[float]]:
-        """Generate embedding vectors for multiple texts."""
-        return self._backend.embed_batch(texts)
+def get_embedding_provider(provider_name: str | None = None) -> EmbeddingProvider:
+    """Factory to obtain an EmbeddingProvider instance."""
+    return EmbeddingProvider(backend_or_name=provider_name)
