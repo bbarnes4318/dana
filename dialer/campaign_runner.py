@@ -50,6 +50,9 @@ class CampaignRunner:
         self._active_calls: Dict[str, dict] = {}  # call_id -> call details
         self._call_timestamps: List[datetime] = []
 
+        from dialer.pacing import CampaignPacer
+        self.campaign_pacer = CampaignPacer(repository)
+
     def _check_pacing(self, max_concurrent: int, cpm: int, now: datetime) -> bool:
         # Clean up old timestamps (older than 60 seconds)
         cutoff = now - timedelta(seconds=60)
@@ -122,7 +125,8 @@ class CampaignRunner:
                 max_concurrent = campaign.get("max_concurrent_calls", 5)
                 cpm = campaign.get("calls_per_minute", 20)
 
-                if not self._check_pacing(max_concurrent, cpm, now):
+                # Check CampaignPacer pacing BEFORE dialing step
+                if not await self.campaign_pacer.can_start_call(campaign_id):
                     await asyncio.sleep(1.0)
                     continue
 
@@ -170,6 +174,11 @@ class CampaignRunner:
             if not agent_available:
                 logger.info("No agents available for target states %s. Skipping dialing.", target_states)
                 return "no_agents_available_precheck"
+
+        # 2.5 CampaignPacer Pacing Check (BEFORE locking the lead)
+        if not await self.campaign_pacer.can_start_call(campaign_id):
+            logger.info("Pacing check blocked call for campaign %s", campaign_id)
+            return "pacing_blocked"
 
         # 3. Pull and lock the next eligible lead
         lock_holder_id = f"runner-{uuid.uuid4().hex[:8]}"
@@ -277,6 +286,9 @@ class CampaignRunner:
         # Increment attempt counter only now when real/dry call attempt starts
         call_id = f"call-{uuid.uuid4().hex[:12]}"
         
+        # Record call started in CampaignPacer
+        await self.campaign_pacer.mark_call_started(campaign_id, call_id)
+        
         # Atomically mark lead as dialing (increments attempts, updates last_attempt_at)
         await self.repository.mark_lead_attempted(lead_id, call_id, caller_id, now)
         await self.caller_id_pool.mark_used(caller_id, campaign_id, now)
@@ -300,6 +312,8 @@ class CampaignRunner:
             call_details = await self.call_service.place_call(lead, call_id, caller_id)
         except Exception as e:
             logger.error("Failed to place call via call service: %s", e)
+            # Record call finished in CampaignPacer
+            await self.campaign_pacer.mark_call_finished(campaign_id, call_id)
             # Revert/release lead as carrier failure
             retry_after = now + timedelta(seconds=campaign.get("cooldown_carrier_failure", 3600))
             await self.lead_queue.release_lead_on_failure(lead_id, "carrier_failure", retry_after)
@@ -394,6 +408,9 @@ class CampaignRunner:
             return "success_human_answered"
 
         # Save outcome metrics and costs for non-human-answered call
+        # Record call finished in CampaignPacer since it's not human answered and doesn't hand off
+        await self.campaign_pacer.mark_call_finished(campaign_id, call_id)
+
         tele_provider = "telnyx" if not is_dry_run else "none"
         duration_val = 0.0
         if 'call_details' in locals() and isinstance(call_details, dict):

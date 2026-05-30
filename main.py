@@ -841,6 +841,14 @@ async def entrypoint(ctx: JobContext):
                 ModelRouter.cleanup_call_routing(call_id)
             except Exception as re:
                 logger.error(f"Failed to cleanup routing state: {re}")
+
+            # Mark call finished in CampaignPacer
+            try:
+                from dialer.pacing import CampaignPacer
+                pacer = CampaignPacer(shared.repository)
+                await pacer.mark_call_finished(campaign_id, call_id)
+            except Exception as pe:
+                logger.error(f"Failed to mark call finished in campaign pacer: {pe}")
         except Exception as ce:
             logger.error(f"Failed to update call record or save metrics: {ce}")
 

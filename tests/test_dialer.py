@@ -29,6 +29,15 @@ def repo(tmp_path):
     return Repository(data_dir=tmp_path)
 
 
+@pytest.fixture(autouse=True)
+def clean_hot_state():
+    """Reset the hot state store singleton to prevent test state leakage."""
+    from runtime import hot_state
+    hot_state._store_instance = None
+    hot_state._degraded_mode = False
+    yield
+
+
 @pytest.fixture
 def agent_store():
     """Return an InMemoryAgentAvailabilityStore."""

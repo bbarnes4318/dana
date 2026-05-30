@@ -81,9 +81,9 @@ async def run_migrations(pool_or_conn: Any) -> None:
 async def main() -> int:
     """CLI runner main entrypoint."""
     logging.basicConfig(level=logging.INFO)
-    dsn = os.environ.get("DATABASE_URL")
+    dsn = os.environ.get("DATABASE_ADMIN_URL") or os.environ.get("DATABASE_URL")
     if not dsn:
-        print("DATABASE_URL is not set. Skipping migrations.", file=sys.stderr)
+        print("Neither DATABASE_ADMIN_URL nor DATABASE_URL is set. Skipping migrations.", file=sys.stderr)
         return 0
         
     try:

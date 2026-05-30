@@ -159,6 +159,11 @@ class Repository:
         turn = CallTurn(**kwargs)
         data = turn.model_dump(mode="json")
         data.setdefault("id", str(uuid.uuid4()))
+        from storage.write_behind import get_write_behind_queue
+        wb_queue = await get_write_behind_queue(self._store)
+        if wb_queue and wb_queue.enabled:
+            wb_queue.enqueue(_CALL_TURNS, data)
+            return data["id"]
         return await self._store.save(_CALL_TURNS, data)
 
     async def save_tool_event(self, **kwargs: Any) -> str:
@@ -170,6 +175,11 @@ class Repository:
         event = ToolEvent(**kwargs)
         data = event.model_dump(mode="json")
         data.setdefault("id", str(uuid.uuid4()))
+        from storage.write_behind import get_write_behind_queue
+        wb_queue = await get_write_behind_queue(self._store)
+        if wb_queue and wb_queue.enabled:
+            wb_queue.enqueue(_TOOL_EVENTS, data)
+            return data["id"]
         return await self._store.save(_TOOL_EVENTS, data)
 
     async def save_qa_report(self, **kwargs: Any) -> str:
@@ -181,6 +191,11 @@ class Repository:
         report = QAReport(**kwargs)
         data = report.model_dump(mode="json")
         data.setdefault("id", str(uuid.uuid4()))
+        from storage.write_behind import get_write_behind_queue
+        wb_queue = await get_write_behind_queue(self._store)
+        if wb_queue and wb_queue.enabled:
+            wb_queue.enqueue(_QA_REPORTS, data)
+            return data["id"]
         return await self._store.save(_QA_REPORTS, data)
 
     async def save_training_note(self, **kwargs: Any) -> str:
@@ -282,6 +297,11 @@ class Repository:
         model = LatencyMetric(**kwargs)
         data = model.model_dump(mode="json")
         data.setdefault("id", str(uuid.uuid4()))
+        from storage.write_behind import get_write_behind_queue
+        wb_queue = await get_write_behind_queue(self._store)
+        if wb_queue and wb_queue.enabled:
+            wb_queue.enqueue(_LATENCY_METRICS, data)
+            return data["id"]
         return await self._store.save(_LATENCY_METRICS, data)
 
     async def save_campaign(self, **kwargs: Any) -> str:
@@ -562,6 +582,11 @@ class Repository:
             if isinstance(data.get(field), datetime):
                 data[field] = data[field].isoformat()
 
+        from storage.write_behind import get_write_behind_queue
+        wb_queue = await get_write_behind_queue(self._store)
+        if wb_queue and wb_queue.enabled:
+            wb_queue.enqueue(_CALL_COSTS, data)
+            return data["id"]
         return await self._store.save(_CALL_COSTS, data)
 
     async def recompute_daily_outcome_metric(self, campaign_id: str, metric_date: date) -> None:
@@ -633,6 +658,11 @@ class Repository:
             if isinstance(data.get(field), datetime):
                 data[field] = data[field].isoformat()
                 
+        from storage.write_behind import get_write_behind_queue
+        wb_queue = await get_write_behind_queue(self._store)
+        if wb_queue and wb_queue.enabled:
+            wb_queue.enqueue(_OUTCOME_METRICS, data)
+            return
         await self._store.save(_OUTCOME_METRICS, data)
 
     async def get_daily_metrics(self, campaign_id: str, days: int = 7) -> list[dict[str, Any]]:

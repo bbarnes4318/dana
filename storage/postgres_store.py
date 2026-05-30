@@ -93,8 +93,17 @@ class PostgresStore(BaseStore):
             
             if not self._migrations_checked:
                 logger.info("Ensuring database migrations are applied...")
-                from storage.migrations import run_migrations
-                await run_migrations(self._pool)
+                # Connect directly using DATABASE_ADMIN_URL to avoid running migrations via PgBouncer
+                admin_dsn = os.environ.get("DATABASE_ADMIN_URL") or self._dsn
+                if admin_dsn:
+                    import asyncpg
+                    logger.info("Running migrations via direct admin connection to bypass PgBouncer...")
+                    conn = await asyncpg.connect(admin_dsn)
+                    try:
+                        from storage.migrations import run_migrations
+                        await run_migrations(conn)
+                    finally:
+                        await conn.close()
                 self._migrations_checked = True
 
     async def close(self) -> None:

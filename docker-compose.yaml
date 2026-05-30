@@ -1,17 +1,84 @@
 # =============================================================================
-# Dana Voice Agent — Docker Compose
-# Ultra-low-latency Voice AI on single L40/L40S GPU
+# Dana Voice Agent — Docker Compose (Production Environment)
+# Ultra-low-latency Voice AI on dedicated GPU servers
 # =============================================================================
 # Usage:
 #   Validate:  docker compose config
-#   Start:     docker compose --env-file .env up -d --build vllm-server voice-agent
+#   Start:     docker compose --env-file .env up -d --build postgres pgbouncer redis vllm-server voice-agent
 #   Logs:      docker compose logs -f --tail=100 voice-agent
 #   Stop:      docker compose down
-#
-# vLLM is PRIVATE — not exposed outside Docker's internal network.
 # =============================================================================
 
 services:
+  # ============================================
+  # PostgreSQL Database (Source of Truth)
+  # ============================================
+  postgres:
+    image: postgres:16-alpine
+    container_name: dana-postgres
+    restart: always
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-dana_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-dana_secure_pass}
+      POSTGRES_DB: ${POSTGRES_DB:-dana}
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+      - ./infra/postgres/postgresql.conf:/etc/postgresql/postgresql.conf:ro
+    command: postgres -c 'config_file=/etc/postgresql/postgresql.conf'
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-dana_user} -d $${POSTGRES_DB:-dana}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ============================================
+  # PgBouncer Connection Pooler (Production)
+  # ============================================
+  pgbouncer:
+    image: edoburu/pgbouncer:latest
+    container_name: dana-pgbouncer
+    restart: always
+    environment:
+      - DB_USER=${POSTGRES_USER:-dana_user}
+      - DB_PASSWORD=${POSTGRES_PASSWORD:-dana_secure_pass}
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_NAME=${POSTGRES_DB:-dana}
+      - POOL_MODE=transaction
+      - MAX_CLIENT_CONN=1000
+      - DEFAULT_POOL_SIZE=50
+      - RESERVE_POOL_SIZE=25
+    ports:
+      - "127.0.0.1:6432:6432"
+    volumes:
+      - ./infra/pgbouncer/pgbouncer.ini:/etc/pgbouncer/pgbouncer.ini:ro
+      - ./infra/pgbouncer/userlist.txt:/etc/pgbouncer/userlist.txt:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h localhost -p 6432 -U $${POSTGRES_USER:-dana_user} -d $${POSTGRES_DB:-dana}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ============================================
+  # Redis (Hot State & Ephemeral Cache)
+  # ============================================
+  redis:
+    image: redis:7-alpine
+    container_name: dana-redis
+    restart: always
+    ports:
+      - "127.0.0.1:6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   # ============================================
   # vLLM Server — LLM Inference (PRIVATE)
   # ============================================
@@ -22,10 +89,6 @@ services:
     restart: "no"
     ipc: host
     shm_size: "16gb"
-    # vLLM is NOT publicly exposed. Only accessible via Docker internal network.
-    # For local debug ONLY, uncomment the next two lines:
-    # ports:
-    #   - "127.0.0.1:8000:8000"
     environment:
       - NVIDIA_VISIBLE_DEVICES=0
       - HF_TOKEN=${HF_TOKEN:-}
@@ -72,9 +135,27 @@ services:
     depends_on:
       vllm-server:
         condition: service_healthy
+      postgres:
+        condition: service_healthy
+      pgbouncer:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     environment:
       - NVIDIA_VISIBLE_DEVICES=0
       - CUDA_VISIBLE_DEVICES=0
+      # ---- Database / PgBouncer ----
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-dana_user}:${POSTGRES_PASSWORD:-dana_secure_pass}@pgbouncer:6432/${POSTGRES_DB:-dana}
+      - DATABASE_ADMIN_URL=postgresql://${POSTGRES_USER:-dana_user}:${POSTGRES_PASSWORD:-dana_secure_pass}@postgres:5432/${POSTGRES_DB:-dana}
+      # ---- Redis Hot State ----
+      - REDIS_URL=redis://redis:6379/0
+      - DANA_USE_REDIS_HOT_STATE=true
+      - DANA_REDIS_KEY_PREFIX=dana
+      # ---- Write-Behind Queue ----
+      - DANA_WRITE_BEHIND_ENABLED=true
+      - DANA_WRITE_BEHIND_MAX_QUEUE_SIZE=10000
+      - DANA_WRITE_BEHIND_FLUSH_INTERVAL_MS=250
+      - DANA_WRITE_BEHIND_BATCH_SIZE=100
       # ---- vLLM (internal network) ----
       - VLLM_BASE_URL=http://vllm-server:8000/v1
       # ---- LiveKit ----
@@ -118,11 +199,12 @@ services:
             - driver: nvidia
               count: 1
               capabilities: [gpu]
-    # GPU memory budget (L40S 48GB):
-    #   vLLM:  ~70% → 33.6GB
-    #   STT (Whisper large-v3-turbo): ~3GB
-    #   TTS (Kokoro ONNX): ~1GB
-    #   Buffers/Overhead: ~10GB
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import faster_whisper; import kokoro_onnx; print('OK')\""]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
 
   # ============================================
   # LiveKit Server (local testing ONLY)
@@ -141,26 +223,14 @@ services:
     profiles:
       - local-testing
 
-  # ============================================
-  # Redis (for LiveKit state, local testing ONLY)
-  # ============================================
-  redis:
-    image: redis:7-alpine
-    container_name: dana-redis-local
-    restart: "no"
-    ports:
-      - "127.0.0.1:6379:6379"
-    volumes:
-      - redis-data:/data
-    profiles:
-      - local-testing
-
 volumes:
+  pg-data:
+    driver: local
+  redis-data:
+    driver: local
   vllm-cache:
     driver: local
   agent-cache:
-    driver: local
-  redis-data:
     driver: local
 
 networks:
