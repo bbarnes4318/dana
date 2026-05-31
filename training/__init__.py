@@ -46,6 +46,13 @@ from training.fine_tune_job_request import (
     FineTuneJobRequestResult,
     FineTuneJobRequestBuilder,
 )
+from training.fine_tune_job_tracker import (
+    FineTuneJobTrackerConfig,
+    FineTuneJobStartEligibilityResult,
+    FineTuneJobTrackingRecord,
+    FineTuneJobTrackingResult,
+    FineTuneJobTracker,
+)
 
 __all__ = [
     "TrainingIngestionResult",
@@ -81,6 +88,11 @@ __all__ = [
     "FineTuneJobRequestPackage",
     "FineTuneJobRequestResult",
     "FineTuneJobRequestBuilder",
+    "FineTuneJobTrackerConfig",
+    "FineTuneJobStartEligibilityResult",
+    "FineTuneJobTrackingRecord",
+    "FineTuneJobTrackingResult",
+    "FineTuneJobTracker",
 ]
 
 
