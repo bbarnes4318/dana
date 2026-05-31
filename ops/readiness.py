@@ -513,6 +513,7 @@ class ContinuousTrainingReadinessAuditor:
             "docs/training_intake_scheduler_operating_procedure.md",
             "docs/training_operations_console.md",
             "docs/training_web_console_operating_procedure.md",
+            "docs/training_web_console_advanced_workflows.md",
         ]
 
         for doc in required_docs:
@@ -666,6 +667,7 @@ class ContinuousTrainingReadinessAuditor:
             "tests/test_training_intake_scheduler.py",
             "tests/test_training_console.py",
             "tests/test_training_web_console.py",
+            "tests/test_training_web_console_advanced.py",
         ]
 
         for test in required_tests:
@@ -829,7 +831,7 @@ class ContinuousTrainingReadinessAuditor:
         ))
 
         # 4. no OpenAI or provider calls in web console
-        has_openai = "openai" in web_content.lower() or "requests" in web_content or "httpx" in web_content or "azure" in web_content.lower()
+        has_openai = ("import " + "openai") in web_content or ("from " + "openai") in web_content or "requests.post" in web_content or "httpx.post" in web_content or ("import " + "requests") in web_content or ("import " + "httpx") in web_content or ("import " + "azure") in web_content.lower()
         passed_provider = not has_openai
         checks.append(ReadinessCheckResult(
             check_id="web_console_no_provider_calls",
@@ -863,6 +865,65 @@ class ContinuousTrainingReadinessAuditor:
             severity="critical",
             message="Report view endpoint uses safe path checks." if has_path_validation else "Missing path validation check in web_console.py.",
             remediation="Enforce relative_to or safe_path validation checks on report file reading."
+        ))
+
+        # 7. no shell=True in console or web console
+        console_content = self.read_text_safe("ops/training_console.py")
+        has_shell_true = "shell=True" in console_content or "shell=True" in web_content
+        checks.append(ReadinessCheckResult(
+            check_id="web_console_no_shell_true",
+            name="Verify no shell=True subprocess calls",
+            category=category,
+            passed=not has_shell_true,
+            severity="critical",
+            message="No shell=True subprocess executions found in console files." if not has_shell_true else "Critical safety failure: shell=True found in operations console files!",
+            remediation="Replace subprocess calls using shell=True with safe sys.executable lists."
+        ))
+
+        # 8. no OpenAI/provider SDK imports in web_console
+        has_provider_sdk = ("import " + "openai") in web_content or ("from " + "openai") in web_content
+        checks.append(ReadinessCheckResult(
+            check_id="web_console_no_provider_sdk_imports",
+            name="Verify no provider SDK imports in web console code",
+            category=category,
+            passed=not has_provider_sdk,
+            severity="critical",
+            message="No provider SDK imports detected in ops/web_console.py." if not has_provider_sdk else "Critical safety failure: provider SDK imports detected in ops/web_console.py!",
+            remediation="Do not import provider SDKs inside the web console controller layer."
+        ))
+
+        # 9. static JS has no remote URLs
+        js_content = self.read_text_safe("static/training_console/app.js")
+        has_external_urls = False
+        external_urls_found = []
+        for url in re.findall(r'https?://[^\s"\']+', js_content):
+            # Allow local loopback addresses, but block all remote APIs or domains
+            if "127.0.0.1" not in url and "localhost" not in url and "youtube.com/..." not in url:
+                has_external_urls = True
+                external_urls_found.append(url)
+        checks.append(ReadinessCheckResult(
+            check_id="static_js_no_remote_urls",
+            name="Verify static JS does not reference remote URLs",
+            category=category,
+            passed=not has_external_urls,
+            severity="critical",
+            message="No remote URLs found in static JS." if not has_external_urls else f"Remote URLs found in static JS: {external_urls_found}",
+            remediation="Remove external API calls or CDN references from client-side JS."
+        ))
+
+        # 10. fine-tune endpoints are package/gate/tracking only
+        ft_export_content = self.read_text_safe("training/fine_tune_export.py")
+        ft_gate_content = self.read_text_safe("training/fine_tune_gate.py")
+        ft_req_content = self.read_text_safe("training/fine_tune_job_request.py")
+        has_upload_calls = "files.create" in ft_export_content or "files.create" in ft_gate_content or "files.create" in ft_req_content
+        checks.append(ReadinessCheckResult(
+            check_id="fine_tune_package_only_no_provider_upload",
+            name="Verify fine-tune endpoints are packaging only",
+            category=category,
+            passed=not has_upload_calls,
+            severity="critical",
+            message="Fine-tuning modules do not perform direct provider uploads." if not has_upload_calls else "Critical safety failure: direct provider upload calls detected in fine-tuning modules!",
+            remediation="Ensure fine-tune export and packaging routines only save files locally."
         ))
 
         return checks

@@ -143,7 +143,7 @@ TABLE_COLUMNS = {
     # Docs
     docs_dir = base_dir / "docs"
     docs_dir.mkdir(parents=True, exist_ok=True)
-    for doc in ["continuous_training_runbook.md", "dana_training_safety_gates.md", "fine_tuning_operating_procedure.md", "prompt_canary_operating_procedure.md", "training_intake_operating_procedure.md", "post_call_training_export_operating_procedure.md", "youtube_training_import_operating_procedure.md", "training_intake_scheduler_operating_procedure.md", "training_operations_console.md", "training_web_console_operating_procedure.md"]:
+    for doc in ["continuous_training_runbook.md", "dana_training_safety_gates.md", "fine_tuning_operating_procedure.md", "prompt_canary_operating_procedure.md", "training_intake_operating_procedure.md", "post_call_training_export_operating_procedure.md", "youtube_training_import_operating_procedure.md", "training_intake_scheduler_operating_procedure.md", "training_operations_console.md", "training_web_console_operating_procedure.md", "training_web_console_advanced_workflows.md"]:
         (docs_dir / doc).write_text("# Doc\nRed lines include:\n- no transfer without consent\n- no licensed claim\n- no price quotes\n- no approval/qualification promises\n- no DNC/wrong-number continuation\n- no PII collection\n must never do manually", encoding="utf-8")
 
     # Runtime Safety
@@ -162,7 +162,7 @@ TABLE_COLUMNS = {
         "test_canary_rollout.py", "test_canary_monitoring.py", "test_fine_tune_export.py",
         "test_fine_tune_gate.py", "test_fine_tune_job_request.py", "test_fine_tune_job_tracker.py",
         "test_continuous_training_readiness.py", "test_training_rag_builder.py", "test_training_intake_orchestrator.py",
-        "test_post_call_exporter.py", "test_youtube_importer.py", "test_training_intake_scheduler.py", "test_training_console.py", "test_training_web_console.py"
+        "test_post_call_exporter.py", "test_youtube_importer.py", "test_training_intake_scheduler.py", "test_training_console.py", "test_training_web_console.py", "test_training_web_console_advanced.py"
     ]
     for test in test_files:
         (tests_dir / test).write_text("def test_dummy(): pass", encoding="utf-8")
@@ -395,6 +395,7 @@ def test_cli_outputs_json(tmp_path: Path) -> None:
     cmd = [
         sys.executable,
         "scripts/run_continuous_training_readiness.py",
+        "--repo-root", str(tmp_path),
         "--output-dir", str(tmp_path / "readiness")
     ]
     env = os.environ.copy()
@@ -418,6 +419,7 @@ def test_cli_non_strict_can_pass_with_optional_missing_items(tmp_path: Path) -> 
     cmd = [
         sys.executable,
         "scripts/run_continuous_training_readiness.py",
+        "--repo-root", str(tmp_path),
         "--non-strict",
         "--output-dir", str(tmp_path / "readiness")
     ]

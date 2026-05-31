@@ -681,4 +681,773 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }
 
+  // =========================================================================
+  // Advanced Training Workflow Event Listeners (Prompt 27)
+  // =========================================================================
+
+  // 1. QA & Evals Tab
+  const qaMinerForm = document.getElementById("qa-miner-form");
+  if (qaMinerForm) {
+    qaMinerForm.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const date = document.getElementById("qa-date").value.trim();
+      const date_from = document.getElementById("qa-date-from").value.trim();
+      const date_to = document.getElementById("qa-date-to").value.trim();
+      const limit = document.getElementById("qa-limit").value;
+      const dry_run = document.getElementById("qa-dry-run").checked;
+      const btn = document.getElementById("btn-run-qa-miner");
+      const text = btn.innerText;
+
+      log("Running QA Miner...");
+      setButtonState(btn, true, text);
+
+      const payload = {
+        date: date || null,
+        date_from: date_from || null,
+        date_to: date_to || null,
+        limit: limit ? parseInt(limit) : null,
+        dry_run
+      };
+
+      try {
+        const response = await fetch("/api/qa/daily", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+        const data = await response.json();
+        if (response.ok) {
+          showStatus("QA Miner Finished", data);
+          log("QA Miner completed successfully.", "success");
+          refreshSummary();
+        } else {
+          showStatus("QA Miner Failed", data.error || data.message, true);
+          log(`QA Miner failed: ${data.error || data.message}`, "error");
+        }
+      } catch (error) {
+        showStatus("Connection Error", error.message, true);
+        log(`Network error running QA Miner: ${error.message}`, "error");
+      } finally {
+        setButtonState(btn, false, text);
+      }
+    });
+  }
+
+  const evalRunnerForm = document.getElementById("eval-runner-form");
+  if (evalRunnerForm) {
+    evalRunnerForm.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const case_id = document.getElementById("eval-case-id").value.trim();
+      const stage = document.getElementById("eval-stage").value.trim();
+      const objection = document.getElementById("eval-objection").value.trim();
+      const limit = document.getElementById("eval-limit").value;
+      const btn = document.getElementById("btn-run-evals");
+      const text = btn.innerText;
+
+      log("Running Eval Cases...");
+      setButtonState(btn, true, text);
+
+      const payload = {
+        case_id: case_id || null,
+        stage: stage || null,
+        objection: objection || null,
+        limit: limit ? parseInt(limit) : null
+      };
+
+      try {
+        const response = await fetch("/api/evals/run", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+        const data = await response.json();
+        if (response.ok) {
+          showStatus("Eval Run Finished", data);
+          log("Eval cases run completed successfully.", "success");
+          refreshSummary();
+        } else {
+          showStatus("Eval Run Failed", data.error || data.message, true);
+          log(`Eval cases run failed: ${data.error || data.message}`, "error");
+        }
+      } catch (error) {
+        showStatus("Connection Error", error.message, true);
+        log(`Network error running evals: ${error.message}`, "error");
+      } finally {
+        setButtonState(btn, false, text);
+      }
+    });
+  }
+
+  const replayForm = document.getElementById("replay-form");
+  if (replayForm) {
+    replayForm.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const fixture = document.getElementById("replay-fixture").value.trim();
+      const fixture_dir = document.getElementById("replay-dir").value.trim();
+      const mode = document.getElementById("replay-mode").value;
+      const fail_fast = document.getElementById("replay-fail-fast").checked;
+      const btn = document.getElementById("btn-run-replay");
+      const text = btn.innerText;
+
+      log("Running Transcript Replay...");
+      setButtonState(btn, true, text);
+
+      const payload = {
+        fixture: fixture || null,
+        fixture_dir: fixture_dir || null,
+        mode,
+        fail_fast
+      };
+
+      try {
+        const response = await fetch("/api/replay/run", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+        const data = await response.json();
+        if (response.ok) {
+          showStatus("Replay Finished", data);
+          log("Transcript replay completed successfully.", "success");
+          refreshSummary();
+        } else {
+          showStatus("Replay Failed", data.error || data.message, true);
+          log(`Transcript replay failed: ${data.error || data.message}`, "error");
+        }
+      } catch (error) {
+        showStatus("Connection Error", error.message, true);
+        log(`Network error running replays: ${error.message}`, "error");
+      } finally {
+        setButtonState(btn, false, text);
+      }
+    });
+  }
+
+  const simulationForm = document.getElementById("simulation-form");
+  if (simulationForm) {
+    simulationForm.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const persona = document.getElementById("sim-persona").value.trim();
+      const run_all = document.getElementById("sim-run-all").checked;
+      const btn = document.getElementById("btn-run-simulations");
+      const text = btn.innerText;
+
+      log("Running Prospect Simulations...");
+      setButtonState(btn, true, text);
+
+      const payload = {
+        persona: persona || null,
+        run_all
+      };
+
+      try {
+        const response = await fetch("/api/simulations/run", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+        const data = await response.json();
+        if (response.ok) {
+          showStatus("Simulations Finished", data);
+          log("Simulations completed successfully.", "success");
+          refreshSummary();
+        } else {
+          showStatus("Simulations Failed", data.error || data.message, true);
+          log(`Simulations failed: ${data.error || data.message}`, "error");
+        }
+      } catch (error) {
+        showStatus("Connection Error", error.message, true);
+        log(`Network error running simulations: ${error.message}`, "error");
+      } finally {
+        setButtonState(btn, false, text);
+      }
+    });
+  }
+
+  // 2. Prompt Improvements Tab
+  const patchGenerateForm = document.getElementById("patch-generate-form");
+  if (patchGenerateForm) {
+    patchGenerateForm.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const limit = document.getElementById("patch-limit").value;
+      const dry_run = document.getElementById("patch-dry-run").checked;
+      const btn = document.getElementById("btn-generate-patches");
+      const text = btn.innerText;
+
+      log("Generating prompt patch candidates...");
+      setButtonState(btn, true, text);
+
+      const payload = {
+        limit: limit ? parseInt(limit) : null,
+        dry_run
+      };
+
+      try {
+        const response = await fetch("/api/prompt/patches/generate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+        const data = await response.json();
+        if (response.ok) {
+          showStatus("Patches Generated", data);
+          log("Patch candidates generated successfully.", "success");
+          refreshSummary();
+        } else {
+          showStatus("Generation Failed", data.error || data.message, true);
+          log(`Patch generation failed: ${data.error || data.message}`, "error");
+        }
+      } catch (error) {
+        showStatus("Connection Error", error.message, true);
+        log(`Network error generating patches: ${error.message}`, "error");
+      } finally {
+        setButtonState(btn, false, text);
+      }
+    });
+  }
+
+  const patchPreviewForm = document.getElementById("patch-preview-form");
+  if (patchPreviewForm) {
+    patchPreviewForm.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const patch_id = document.getElementById("preview-patch-id").value.trim();
+      const create_candidate_version = document.getElementById("preview-create-version").checked;
+      const skip_gates = document.getElementById("preview-skip-gates").checked;
+      const btn = document.getElementById("btn-preview-patches");
+      const text = btn.innerText;
+
+      log("Running patch preview and verification gates...");
+      setButtonState(btn, true, text);
+
+      const payload = {
+        patch_id: patch_id || null,
+        approved_only: true,
+        create_candidate_version,
+        skip_gates
+      };
+
+      try {
+        const response = await fetch("/api/prompt/patches/preview", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+        const data = await response.json();
+        if (response.ok) {
+          showStatus("Preview Finished", data);
+          log("Preview and gating validation finished.", "success");
+          refreshSummary();
+        } else {
+          showStatus("Preview Failed", data.error || data.message, true);
+          log(`Preview failed: ${data.error || data.message}`, "error");
+        }
+      } catch (error) {
+        showStatus("Connection Error", error.message, true);
+        log(`Network error running preview: ${error.message}`, "error");
+      } finally {
+        setButtonState(btn, false, text);
+      }
+    });
+  }
+
+  const btnListPromptVersions = document.getElementById("btn-list-prompt-versions");
+  const promptVersionsTbody = document.getElementById("prompt-versions-tbody");
+  if (btnListPromptVersions) {
+    btnListPromptVersions.addEventListener("click", async () => {
+      const text = btnListPromptVersions.innerText;
+      log("Listing prompt versions...");
+      setButtonState(btnListPromptVersions, true, text);
+
+      try {
+        const response = await fetch("/api/prompt/versions?limit=50");
+        const data = await response.json();
+        if (response.ok && data.success) {
+          const versions = data.data.versions || [];
+          if (versions.length === 0) {
+            promptVersionsTbody.innerHTML = `<tr><td colspan="6" style="text-align: center; color: var(--text-muted);">No prompt versions found.</td></tr>`;
+          } else {
+            promptVersionsTbody.innerHTML = "";
+            versions.forEach(v => {
+              const tr = document.createElement("tr");
+              tr.innerHTML = `
+                <td style="font-family: monospace; font-size:0.75rem;">${v.id}</td>
+                <td>${v.file_path}</td>
+                <td>${v.created_by}</td>
+                <td>${new Date(v.created_at).toLocaleString()}</td>
+                <td>${v.change_reason}</td>
+                <td><span class="badge badge-safety">${v.canary_status}</span></td>
+              `;
+              promptVersionsTbody.appendChild(tr);
+            });
+          }
+          log(`Loaded ${versions.length} versions.`, "success");
+        } else {
+          log(`Failed to list versions: ${data.error || data.message}`, "error");
+        }
+      } catch (error) {
+        log(`Network error listing versions: ${error.message}`, "error");
+      } finally {
+        setButtonState(btnListPromptVersions, false, text);
+      }
+    });
+  }
+
+  // 3. Canary Tab
+  const canaryCreateForm = document.getElementById("canary-create-form");
+  if (canaryCreateForm) {
+    canaryCreateForm.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const prompt_version_id = document.getElementById("canary-candidate-id").value.trim();
+      const traffic_percent = document.getElementById("canary-traffic").value;
+      const operator = document.getElementById("canary-operator").value.trim();
+      const notes = document.getElementById("canary-notes").value.trim();
+      const btn = document.getElementById("btn-create-canary-plan");
+      const text = btn.innerText;
+
+      log("Creating canary rollout plan...");
+      setButtonState(btn, true, text);
+
+      const payload = {
+        prompt_version_id,
+        traffic_percent: parseFloat(traffic_percent),
+        operator,
+        notes: notes || null
+      };
+
+      try {
+        const response = await fetch("/api/canary/create", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+        const data = await response.json();
+        if (response.ok) {
+          showStatus("Canary Plan Created", data);
+          log("Canary rollout plan created successfully.", "success");
+          refreshSummary();
+          listCanaries();
+        } else {
+          showStatus("Canary Plan Failed", data.error || data.message, true);
+          log(`Canary plan failed: ${data.error || data.message}`, "error");
+        }
+      } catch (error) {
+        showStatus("Connection Error", error.message, true);
+        log(`Network error creating canary: ${error.message}`, "error");
+      } finally {
+        setButtonState(btn, false, text);
+      }
+    });
+  }
+
+  const btnCheckCanaryCandidate = document.getElementById("btn-check-canary-candidate");
+  if (btnCheckCanaryCandidate) {
+    btnCheckCanaryCandidate.addEventListener("click", async () => {
+      const prompt_version_id = document.getElementById("canary-candidate-id").value.trim();
+      if (!prompt_version_id) {
+        alert("PromptVersion ID is required.");
+        return;
+      }
+      const text = btnCheckCanaryCandidate.innerText;
+      log(`Checking eligibility for version ${prompt_version_id}...`);
+      setButtonState(btnCheckCanaryCandidate, true, text);
+
+      try {
+        const response = await fetch("/api/canary/check-candidate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ prompt_version_id })
+        });
+        const data = await response.json();
+        if (response.ok) {
+          showStatus("Eligibility Checked", data);
+          log("Eligibility check completed.", "success");
+        } else {
+          showStatus("Check Failed", data.error || data.message, true);
+          log(`Check failed: ${data.error || data.message}`, "error");
+        }
+      } catch (error) {
+        log(`Network error: ${error.message}`, "error");
+      } finally {
+        setButtonState(btnCheckCanaryCandidate, false, text);
+      }
+    });
+  }
+
+  window.triggerCanaryAction = async function(action) {
+    const experimentId = document.getElementById("canary-experiment-id").value.trim();
+    const operator = document.getElementById("canary-action-operator").value.trim();
+    const notes = document.getElementById("canary-action-notes").value.trim();
+
+    if (!experimentId) {
+      alert("Experiment ID is required.");
+      return;
+    }
+    if (!operator) {
+      alert("Operator identity is required.");
+      return;
+    }
+    if ((action === "rollback" || action === "cancel") && !notes) {
+      alert("Notes/Reason is strictly required for rollback or cancellation!");
+      return;
+    }
+
+    log(`Triggering canary action: ${action}...`);
+    try {
+      const response = await fetch(`/api/canary/${experimentId}/${action}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ operator, notes, reason: notes })
+      });
+      const data = await response.json();
+      if (response.ok) {
+        showStatus(`Canary ${action} Successful`, data);
+        log(`Canary action ${action} succeeded.`, "success");
+        refreshSummary();
+        listCanaries();
+      } else {
+        showStatus(`Canary ${action} Failed`, data.error || data.message, true);
+        log(`Canary action ${action} failed: ${data.error || data.message}`, "error");
+      }
+    } catch (error) {
+      showStatus("Connection Error", error.message, true);
+      log(`Network error running canary action: ${error.message}`, "error");
+    }
+  };
+
+  const btnMonitorCanary = document.getElementById("btn-monitor-canary");
+  if (btnMonitorCanary) {
+    btnMonitorCanary.addEventListener("click", async () => {
+      const experiment_id = document.getElementById("canary-experiment-id").value.trim();
+      const text = btnMonitorCanary.innerText;
+      log("Running canary monitoring check...");
+      setButtonState(btnMonitorCanary, true, text);
+
+      try {
+        const response = await fetch("/api/canary/monitor", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ experiment_id: experiment_id || null })
+        });
+        const data = await response.json();
+        if (response.ok) {
+          showStatus("Monitoring Complete", data);
+          log("Canary monitoring report generated.", "success");
+        } else {
+          showStatus("Monitoring Failed", data.error || data.message, true);
+          log(`Monitoring failed: ${data.error || data.message}`, "error");
+        }
+      } catch (error) {
+        log(`Network error: ${error.message}`, "error");
+      } finally {
+        setButtonState(btnMonitorCanary, false, text);
+      }
+    });
+  }
+
+  const btnListCanaries = document.getElementById("btn-list-canaries");
+  const canaryTbody = document.getElementById("canary-tbody");
+  async function listCanaries() {
+    const text = btnListCanaries.innerText;
+    log("Listing canary experiments...");
+    setButtonState(btnListCanaries, true, text);
+
+    try {
+      const response = await fetch("/api/canary/list?limit=50");
+      const data = await response.json();
+      if (response.ok && data.success) {
+        const experiments = data.data.canaries || [];
+        if (experiments.length === 0) {
+          canaryTbody.innerHTML = `<tr><td colspan="6" style="text-align: center; color: var(--text-muted);">No canary experiments found.</td></tr>`;
+        } else {
+          canaryTbody.innerHTML = "";
+          experiments.forEach(e => {
+            const tr = document.createElement("tr");
+            tr.innerHTML = `
+              <td style="font-family: monospace; font-size:0.75rem;">${e.id}</td>
+              <td>${e.experiment_name}</td>
+              <td style="font-family: monospace; font-size:0.75rem;">${e.prompt_version_id}</td>
+              <td>${e.traffic_percent}%</td>
+              <td><span class="badge ${e.status === 'running' || e.status === 'active' ? 'badge-safety' : 'badge-alert'}">${e.status}</span></td>
+              <td><button class="btn btn-secondary" onclick="document.getElementById('canary-experiment-id').value = '${e.id}'; log('Selected experiment ${e.id} for control.');" style="padding: 0.15rem 0.4rem; font-size:0.75rem; width:auto;">Select</button></td>
+            `;
+            canaryTbody.appendChild(tr);
+          });
+        }
+        log(`Loaded ${experiments.length} canary experiments.`, "success");
+      } else {
+        log(`Failed to list canaries: ${data.error || data.message}`, "error");
+      }
+    } catch (error) {
+      log(`Network error listing canaries: ${error.message}`, "error");
+    } finally {
+      setButtonState(btnListCanaries, false, text);
+    }
+  }
+  if (btnListCanaries) {
+    btnListCanaries.addEventListener("click", listCanaries);
+  }
+
+  // 4. Fine-Tune Tab
+  const ftExportForm = document.getElementById("ft-export-form");
+  if (ftExportForm) {
+    ftExportForm.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const limit = document.getElementById("ft-export-limit").value;
+      const stage = document.getElementById("ft-export-stage").value.trim();
+      const objection = document.getElementById("ft-export-objection").value.trim();
+      const dry_run = document.getElementById("ft-export-dry-run").checked;
+      const btn = document.getElementById("btn-ft-export");
+      const text = btn.innerText;
+
+      log("Exporting fine-tuning dataset...");
+      setButtonState(btn, true, text);
+
+      const payload = {
+        limit: limit ? parseInt(limit) : null,
+        stage: stage || null,
+        objection: objection || null,
+        dry_run
+      };
+
+      try {
+        const response = await fetch("/api/fine-tune/export", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+        const data = await response.json();
+        if (response.ok) {
+          showStatus("Export Finished", data);
+          log("Dataset exported successfully.", "success");
+          refreshSummary();
+        } else {
+          showStatus("Export Failed", data.error || data.message, true);
+          log(`Export failed: ${data.error || data.message}`, "error");
+        }
+      } catch (error) {
+        showStatus("Connection Error", error.message, true);
+        log(`Network error: ${error.message}`, "error");
+      } finally {
+        setButtonState(btn, false, text);
+      }
+    });
+  }
+
+  const ftGateForm = document.getElementById("ft-gate-form");
+  if (ftGateForm) {
+    ftGateForm.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const dataset_path = document.getElementById("ft-gate-path").value.trim();
+      const strict = document.getElementById("ft-gate-strict").checked;
+      const btn = document.getElementById("btn-ft-gate");
+      const text = btn.innerText;
+
+      log("Executing compliance quality gate scan...");
+      setButtonState(btn, true, text);
+
+      try {
+        const response = await fetch("/api/fine-tune/gate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ dataset_path, strict })
+        });
+        const data = await response.json();
+        if (response.ok) {
+          showStatus("Gate Check Completed", data);
+          log("Gate scan completed successfully.", "success");
+        } else {
+          showStatus("Gate Check Failed", data.error || data.message, true);
+          log(`Gate scan failed: ${data.error || data.message}`, "error");
+        }
+      } catch (error) {
+        showStatus("Connection Error", error.message, true);
+        log(`Network error: ${error.message}`, "error");
+      } finally {
+        setButtonState(btn, false, text);
+      }
+    });
+  }
+
+  const ftRequestForm = document.getElementById("ft-request-form");
+  if (ftRequestForm) {
+    ftRequestForm.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const dataset_path = document.getElementById("ft-req-dataset").value.trim();
+      const gate_report_path = document.getElementById("ft-req-gate").value.trim();
+      const provider = document.getElementById("ft-req-provider").value;
+      const dry_run = document.getElementById("ft-req-dry-run").checked;
+      const btn = document.getElementById("btn-ft-request");
+      const text = btn.innerText;
+
+      log("Preparing job request package...");
+      setButtonState(btn, true, text);
+
+      const payload = {
+        dataset_path,
+        gate_report_path: gate_report_path || null,
+        provider,
+        dry_run
+      };
+
+      try {
+        const response = await fetch("/api/fine-tune/job-request", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+        const data = await response.json();
+        if (response.ok) {
+          showStatus("Job Configuration Prepared", data);
+          log("Job request package built successfully.", "success");
+        } else {
+          showStatus("Preparation Failed", data.error || data.message, true);
+          log(`Preparation failed: ${data.error || data.message}`, "error");
+        }
+      } catch (error) {
+        showStatus("Connection Error", error.message, true);
+        log(`Network error: ${error.message}`, "error");
+      } finally {
+        setButtonState(btn, false, text);
+      }
+    });
+  }
+
+  const ftTrackForm = document.getElementById("ft-track-form");
+  if (ftTrackForm) {
+    ftTrackForm.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const job_request_id = document.getElementById("ft-track-id").value.trim();
+      const status = document.getElementById("ft-track-status").value;
+      const operator = document.getElementById("ft-track-operator").value.trim();
+      const provider_job_id = document.getElementById("ft-track-provider-job-id").value.trim();
+      const notes = document.getElementById("ft-track-notes").value.trim();
+      const btn = document.getElementById("btn-ft-track");
+      const text = btn.innerText;
+
+      log("Saving job tracking record...");
+      setButtonState(btn, true, text);
+
+      const payload = {
+        job_request_id,
+        status,
+        operator,
+        provider_job_id: provider_job_id || null,
+        notes: notes || null
+      };
+
+      try {
+        const response = await fetch("/api/fine-tune/track", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+        const data = await response.json();
+        if (response.ok) {
+          showStatus("Tracking Saved", data);
+          log("Tracking record saved successfully.", "success");
+          refreshSummary();
+          listFTTracking();
+        } else {
+          showStatus("Saving Failed", data.error || data.message, true);
+          log(`Saving failed: ${data.error || data.message}`, "error");
+        }
+      } catch (error) {
+        showStatus("Connection Error", error.message, true);
+        log(`Network error: ${error.message}`, "error");
+      } finally {
+        setButtonState(btn, false, text);
+      }
+    });
+  }
+
+  const btnListFTTracking = document.getElementById("btn-list-ft-tracking");
+  const ftTrackingTbody = document.getElementById("ft-tracking-tbody");
+  async function listFTTracking() {
+    const text = btnListFTTracking.innerText;
+    log("Listing tracking logs...");
+    setButtonState(btnListFTTracking, true, text);
+
+    try {
+      const response = await fetch("/api/fine-tune/tracking?limit=50");
+      const data = await response.json();
+      if (response.ok && data.success) {
+        const records = data.data.records || [];
+        if (records.length === 0) {
+          ftTrackingTbody.innerHTML = `<tr><td colspan="6" style="text-align: center; color: var(--text-muted);">No tracking logs found.</td></tr>`;
+        } else {
+          ftTrackingTbody.innerHTML = "";
+          records.forEach(r => {
+            const tr = document.createElement("tr");
+            tr.innerHTML = `
+              <td style="font-family: monospace; font-size:0.75rem;">${r.id || r.request_id || '—'}</td>
+              <td><span class="badge badge-safety">${r.status}</span></td>
+              <td>${r.operator || r.actor || '—'}</td>
+              <td>${r.provider_job_id || '—'}</td>
+              <td>${r.notes || r.reason || '—'}</td>
+              <td>${r.updated_at ? new Date(r.updated_at).toLocaleString() : '—'}</td>
+            `;
+            ftTrackingTbody.appendChild(tr);
+          });
+        }
+        log(`Loaded ${records.length} tracking logs.`, "success");
+      } else {
+        log(`Failed to list tracking: ${data.error || data.message}`, "error");
+      }
+    } catch (error) {
+      log(`Network error listing tracking: ${error.message}`, "error");
+    } finally {
+      setButtonState(btnListFTTracking, false, text);
+    }
+  }
+  if (btnListFTTracking) {
+    btnListFTTracking.addEventListener("click", listFTTracking);
+  }
+
+  // 5. Post-Call Tab
+  const postcallForm = document.getElementById("postcall-form");
+  if (postcallForm) {
+    postcallForm.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const payloadStr = document.getElementById("postcall-payload").value.trim();
+      const enabled = document.getElementById("postcall-enabled").checked;
+      const run_intake = document.getElementById("postcall-intake").checked;
+      const dry_run = document.getElementById("postcall-dry-run").checked;
+      const btn = document.getElementById("btn-postcall-export");
+      const text = btn.innerText;
+
+      let payload;
+      try {
+        payload = JSON.parse(payloadStr);
+      } catch (err) {
+        alert("Completed Call Payload must be valid JSON!");
+        return;
+      }
+
+      log("Running completed call export validation...");
+      setButtonState(btn, true, text);
+
+      try {
+        const response = await fetch("/api/post-call/export", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ payload, enabled, run_intake, dry_run })
+        });
+        const data = await response.json();
+        if (response.ok) {
+          showStatus("Export Validated", data);
+          log("Post-call export validation completed.", "success");
+          refreshSummary();
+        } else {
+          showStatus("Validation Failed", data.error || data.message, true);
+          log(`Validation failed: ${data.error || data.message}`, "error");
+        }
+      } catch (error) {
+        showStatus("Connection Error", error.message, true);
+        log(`Network error validating post-call: ${error.message}`, "error");
+      } finally {
+        setButtonState(btn, false, text);
+      }
+    });
+  }
+
 });

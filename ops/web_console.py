@@ -460,6 +460,228 @@ class TrainingWebConsoleServer(ThreadingHTTPServer):
                     }
                 })
 
+            # =================================================================
+            # Advanced Training Workflow APIs (Prompt 27)
+            # =================================================================
+
+            # A. QA & Evals
+            elif route == "/api/qa/daily":
+                if not body:
+                    return (400, {"success": False, "error": "JSON body is required."})
+                res = await self.console.run_daily_qa(
+                    date=body.get("date"),
+                    date_from=body.get("date_from"),
+                    date_to=body.get("date_to"),
+                    dry_run=bool(body.get("dry_run", False)),
+                    limit=body.get("limit"),
+                )
+                return (200 if res.success else 400, res.model_dump(mode="json"))
+
+            elif route == "/api/evals/run":
+                case_id = body.get("case_id") if body else None
+                stage = body.get("stage") if body else None
+                objection = body.get("objection") if body else None
+                limit = body.get("limit") if body else None
+                res = await self.console.run_eval_cases(
+                    case_id=case_id,
+                    stage=stage,
+                    objection=objection,
+                    limit=limit,
+                )
+                return (200 if res.success else 400, res.model_dump(mode="json"))
+
+            elif route == "/api/replay/run":
+                fixture = body.get("fixture") if body else None
+                fixture_dir = body.get("fixture_dir") if body else None
+                mode = body.get("mode", "static") if body else "static"
+                fail_fast = bool(body.get("fail_fast", False)) if body else False
+                res = await self.console.run_transcript_replay(
+                    fixture=fixture,
+                    fixture_dir=fixture_dir,
+                    mode=mode,
+                    fail_fast=fail_fast,
+                )
+                return (200 if res.success else 400, res.model_dump(mode="json"))
+
+            elif route == "/api/simulations/run":
+                persona = body.get("persona") if body else None
+                run_all = bool(body.get("run_all", False)) if body else False
+                res = await self.console.run_prospect_simulations(
+                    persona=persona,
+                    run_all=run_all,
+                )
+                return (200 if res.success else 400, res.model_dump(mode="json"))
+
+            # B. Prompt
+            elif route == "/api/prompt/versions":
+                limit = int(query_params.get("limit", [50])[0])
+                res = await self.console.list_prompt_versions(limit=limit)
+                return (200 if res.success else 400, res.model_dump(mode="json"))
+
+            elif route == "/api/prompt/patches/generate":
+                dry_run = bool(body.get("dry_run", False)) if body else False
+                limit = body.get("limit") if body else None
+                res = await self.console.generate_prompt_patches(
+                    dry_run=dry_run,
+                    limit=limit,
+                )
+                return (200 if res.success else 400, res.model_dump(mode="json"))
+
+            elif route == "/api/prompt/patches/preview":
+                patch_id = body.get("patch_id") if body else None
+                approved_only = bool(body.get("approved_only", True)) if body else True
+                create_candidate = bool(body.get("create_candidate_version", False)) if body else False
+                skip_gates = bool(body.get("skip_gates", False)) if body else False
+                res = await self.console.preview_prompt_patches(
+                    patch_id=patch_id,
+                    approved_only=approved_only,
+                    create_candidate_version=create_candidate,
+                    skip_gates=skip_gates,
+                )
+                return (200 if res.success else 400, res.model_dump(mode="json"))
+
+            # C. Canary
+            elif route.startswith("/api/canary/"):
+                parts = route.split("/")
+                if len(parts) == 4 and parts[3] == "list":
+                    limit = int(query_params.get("limit", [50])[0])
+                    res = await self.console.list_canaries(limit=limit)
+                    return (200 if res.success else 400, res.model_dump(mode="json"))
+                elif len(parts) == 4 and parts[3] == "check-candidate":
+                    if not body:
+                        return (400, {"success": False, "error": "JSON body is required."})
+                    pvid = body.get("prompt_version_id")
+                    if not pvid:
+                        return (400, {"success": False, "error": "prompt_version_id is required."})
+                    res = await self.console.check_canary_candidate(pvid)
+                    return (200 if res.success else 400, res.model_dump(mode="json"))
+                elif len(parts) == 4 and parts[3] == "create":
+                    if not body:
+                        return (400, {"success": False, "error": "JSON body is required."})
+                    pvid = body.get("prompt_version_id")
+                    traffic = float(body.get("traffic_percent", 1.0))
+                    operator = body.get("operator")
+                    notes = body.get("notes")
+                    if not pvid:
+                        return (400, {"success": False, "error": "prompt_version_id is required."})
+                    if not operator:
+                        return (400, {"success": False, "error": "operator is required."})
+                    res = await self.console.create_canary_plan(pvid, traffic, operator, notes)
+                    return (200 if res.success else 400, res.model_dump(mode="json"))
+                elif len(parts) == 4 and parts[3] == "monitor":
+                    exp_id = body.get("experiment_id") if body else None
+                    res = await self.console.monitor_canary(exp_id)
+                    return (200 if res.success else 400, res.model_dump(mode="json"))
+                elif len(parts) == 5:
+                    experiment_id = parts[3]
+                    action = parts[4]
+                    if not body:
+                        return (400, {"success": False, "error": "JSON body is required."})
+                    operator = body.get("operator")
+                    notes = body.get("notes") or body.get("reason")
+                    
+                    if not operator:
+                        return (400, {"success": False, "error": "operator is required."})
+                    if action in ("rollback", "cancel") and not notes:
+                        return (400, {"success": False, "error": "notes/reason is required for rollback/cancel."})
+                        
+                    if action == "approve":
+                        res = await self.console.approve_canary(experiment_id, operator, notes)
+                    elif action == "start":
+                        res = await self.console.start_canary(experiment_id, operator, notes)
+                    elif action == "pause":
+                        res = await self.console.pause_canary(experiment_id, operator, notes)
+                    elif action == "rollback":
+                        res = await self.console.rollback_canary(experiment_id, operator, notes)
+                    elif action == "complete":
+                        res = await self.console.complete_canary(experiment_id, operator, notes)
+                    elif action == "cancel":
+                        res = await self.console.cancel_canary(experiment_id, operator, notes)
+                    else:
+                        return (404, {"success": False, "error": f"Invalid canary action: {action}"})
+                    return (200 if res.success else 400, res.model_dump(mode="json"))
+                elif len(parts) == 4:
+                    experiment_id = parts[3]
+                    res = await self.console.show_canary(experiment_id)
+                    return (200 if res.success else 400, res.model_dump(mode="json"))
+
+            # D. Fine-tune
+            elif route == "/api/fine-tune/export":
+                dry_run = bool(body.get("dry_run", False)) if body else False
+                limit = body.get("limit") if body else None
+                stage = body.get("stage") if body else None
+                objection = body.get("objection") if body else None
+                res = await self.console.export_fine_tune_dataset(
+                    dry_run=dry_run,
+                    limit=limit,
+                    stage=stage,
+                    objection=objection,
+                )
+                return (200 if res.success else 400, res.model_dump(mode="json"))
+
+            elif route == "/api/fine-tune/gate":
+                if not body or not body.get("dataset_path"):
+                    return (400, {"success": False, "error": "dataset_path is required."})
+                strict = bool(body.get("strict", True))
+                res = await self.console.gate_fine_tune_dataset(
+                    dataset_path=body["dataset_path"],
+                    strict=strict,
+                )
+                return (200 if res.success else 400, res.model_dump(mode="json"))
+
+            elif route == "/api/fine-tune/job-request":
+                if not body or not body.get("dataset_path"):
+                    return (400, {"success": False, "error": "dataset_path is required."})
+                gate_report = body.get("gate_report_path")
+                provider = body.get("provider", "openai")
+                dry_run = bool(body.get("dry_run", False))
+                res = await self.console.prepare_fine_tune_job_request(
+                    dataset_path=body["dataset_path"],
+                    gate_report_path=gate_report,
+                    provider=provider,
+                    dry_run=dry_run,
+                )
+                return (200 if res.success else 400, res.model_dump(mode="json"))
+
+            elif route == "/api/fine-tune/track":
+                if not body or not body.get("job_request_id"):
+                    return (400, {"success": False, "error": "job_request_id is required."})
+                if not body.get("operator"):
+                    return (400, {"success": False, "error": "operator is required."})
+                status = body.get("status", "requested")
+                operator = body["operator"]
+                notes = body.get("notes")
+                provider_job_id = body.get("provider_job_id")
+                res = await self.console.track_fine_tune_job(
+                    job_request_id=body["job_request_id"],
+                    status=status,
+                    operator=operator,
+                    notes=notes,
+                    provider_job_id=provider_job_id,
+                )
+                return (200 if res.success else 400, res.model_dump(mode="json"))
+
+            elif route == "/api/fine-tune/tracking":
+                limit = int(query_params.get("limit", [50])[0])
+                res = await self.console.list_fine_tune_tracking(limit=limit)
+                return (200 if res.success else 400, res.model_dump(mode="json"))
+
+            # E. Post-call Export
+            elif route == "/api/post-call/export":
+                if not body or "payload" not in body:
+                    return (400, {"success": False, "error": "payload is required."})
+                payload = body["payload"]
+                enabled = bool(body.get("enabled", True))
+                run_intake = bool(body.get("run_intake", False))
+                dry_run = bool(body.get("dry_run", False))
+                res = await self.console.export_completed_call_payload(
+                    payload=payload,
+                    enabled=enabled,
+                    run_intake=run_intake,
+                    dry_run=dry_run,
+                )
+                return (200 if res.success else 400, res.model_dump(mode="json"))
+
             return (404, {"success": False, "error": f"API route not found: {route}"})
 
         except Exception as e:

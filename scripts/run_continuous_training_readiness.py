@@ -13,6 +13,7 @@ def main():
     parser = argparse.ArgumentParser(description="Run continuous training pipeline readiness audit.")
     
     parser.add_argument("--output-dir", type=str, default="data/ops_readiness", help="Output directory for reports.")
+    parser.add_argument("--repo-root", type=str, default=None, help="Repository root path.")
     parser.add_argument("--strict", action="store_true", default=True, help="Fail on high severity checks.")
     parser.add_argument("--non-strict", dest="strict", action="store_false", help="Do not fail on high severity checks.")
     parser.add_argument("--fail-on-medium", action="store_true", help="Fail on medium severity checks.")
@@ -48,7 +49,7 @@ def main():
     )
 
     try:
-        auditor = ContinuousTrainingReadinessAuditor()
+        auditor = ContinuousTrainingReadinessAuditor(repo_root=args.repo_root)
         result = auditor.run_all_checks(config)
         
         # Output clean JSON result to stdout

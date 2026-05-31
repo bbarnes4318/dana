@@ -71,6 +71,11 @@
           <button class="tab-btn" data-tab="intake-tab" style="text-align: left; border-bottom: none; border-left: 2px solid transparent;">📥 Training Intake & Import</button>
           <button class="tab-btn" data-tab="scheduler-tab" style="text-align: left; border-bottom: none; border-left: 2px solid transparent;">⏳ Scheduler iteration</button>
           <button class="tab-btn" data-tab="readiness-tab" style="text-align: left; border-bottom: none; border-left: 2px solid transparent;">🛡️ Readiness Auditor</button>
+          <button class="tab-btn" data-tab="qa-tab" style="text-align: left; border-bottom: none; border-left: 2px solid transparent;">🧪 QA & Evals</button>
+          <button class="tab-btn" data-tab="prompt-tab" style="text-align: left; border-bottom: none; border-left: 2px solid transparent;">📝 Prompt Improvements</button>
+          <button class="tab-btn" data-tab="canary-tab" style="text-align: left; border-bottom: none; border-left: 2px solid transparent;">🐥 Canary Rollouts</button>
+          <button class="tab-btn" data-tab="finetune-tab" style="text-align: left; border-bottom: none; border-left: 2px solid transparent;">⚙️ Fine-Tune Operations</button>
+          <button class="tab-btn" data-tab="postcall-tab" style="text-align: left; border-bottom: none; border-left: 2px solid transparent;">📞 Post-Call Export Test</button>
           <button class="tab-btn" data-tab="reports-tab" style="text-align: left; border-bottom: none; border-left: 2px solid transparent;">📊 Operator Reports</button>
         </nav>
       </section>
@@ -344,6 +349,473 @@
         </section>
       </div>
 
+      <!-- TAB: QA & Evals (Prompt 27) -->
+      <div id="qa-tab" class="tab-content">
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem;">
+          
+          <!-- Daily QA Miner -->
+          <section class="card">
+            <div class="card-title">Daily QA Miner</div>
+            <form id="qa-miner-form">
+              <div class="form-group">
+                <label for="qa-date">Single Date (YYYY-MM-DD)</label>
+                <input type="text" id="qa-date" class="form-control" placeholder="2026-05-31">
+              </div>
+              <div style="display: flex; gap: 0.5rem;">
+                <div class="form-group" style="flex: 1;">
+                  <label for="qa-date-from">Date From</label>
+                  <input type="text" id="qa-date-from" class="form-control" placeholder="YYYY-MM-DD">
+                </div>
+                <div class="form-group" style="flex: 1;">
+                  <label for="qa-date-to">Date To</label>
+                  <input type="text" id="qa-date-to" class="form-control" placeholder="YYYY-MM-DD">
+                </div>
+              </div>
+              <div class="form-group">
+                <label for="qa-limit">Limit</label>
+                <input type="number" id="qa-limit" class="form-control" placeholder="100">
+              </div>
+              <div class="checkbox-group">
+                <input type="checkbox" id="qa-dry-run">
+                <label for="qa-dry-run">Dry Run (No Review Items saved)</label>
+              </div>
+              <button type="submit" id="btn-run-qa-miner" class="btn btn-primary">⛏️ Run QA Miner</button>
+            </form>
+          </section>
+
+          <!-- Eval Case Runner -->
+          <section class="card">
+            <div class="card-title">Eval Case Runner</div>
+            <form id="eval-runner-form">
+              <div class="form-group">
+                <label for="eval-case-id">Case ID (Optional)</label>
+                <input type="text" id="eval-case-id" class="form-control" placeholder="e.g. case_123">
+              </div>
+              <div class="form-group">
+                <label for="eval-stage">Stage Filter (Optional)</label>
+                <input type="text" id="eval-stage" class="form-control" placeholder="e.g. greeting">
+              </div>
+              <div class="form-group">
+                <label for="eval-objection">Objection String Filter (Optional)</label>
+                <input type="text" id="eval-objection" class="form-control" placeholder="e.g. price">
+              </div>
+              <div class="form-group">
+                <label for="eval-limit">Limit Cases</label>
+                <input type="number" id="eval-limit" class="form-control" placeholder="50">
+              </div>
+              <button type="submit" id="btn-run-evals" class="btn btn-primary">🧪 Run Eval Cases</button>
+            </form>
+          </section>
+
+          <!-- Transcript Replay -->
+          <section class="card">
+            <div class="card-title">Transcript Replay Tester</div>
+            <form id="replay-form">
+              <div class="form-group">
+                <label for="replay-fixture">Single Fixture File Path (Optional)</label>
+                <input type="text" id="replay-fixture" class="form-control" placeholder="e.g. evals/fixtures/transcripts/dnc_request.json">
+              </div>
+              <div class="form-group">
+                <label for="replay-dir">Fixtures Directory</label>
+                <input type="text" id="replay-dir" class="form-control" value="evals/fixtures/transcripts">
+              </div>
+              <div class="form-group">
+                <label for="replay-mode">Execution Mode</label>
+                <select id="replay-mode" class="form-control">
+                  <option value="static">Static (Recorded turns)</option>
+                  <option value="runtime">Runtime (Agent engine)</option>
+                </select>
+              </div>
+              <div class="checkbox-group">
+                <input type="checkbox" id="replay-fail-fast">
+                <label for="replay-fail-fast">Fail Fast</label>
+              </div>
+              <button type="submit" id="btn-run-replay" class="btn btn-primary">🔄 Run Transcript Replays</button>
+            </form>
+          </section>
+
+          <!-- Prospect Simulator -->
+          <section class="card">
+            <div class="card-title">Prospect Simulator Scenarios</div>
+            <form id="simulation-form">
+              <div class="form-group">
+                <label for="sim-persona">Persona ID Filter (Optional)</label>
+                <input type="text" id="sim-persona" class="form-control" placeholder="e.g. busy_bill">
+              </div>
+              <div class="checkbox-group">
+                <input type="checkbox" id="sim-run-all" checked>
+                <label for="sim-run-all">Run All Default Personas</label>
+              </div>
+              <button type="submit" id="btn-run-simulations" class="btn btn-primary">🎮 Run Simulations</button>
+            </form>
+          </section>
+
+        </div>
+      </div>
+
+      <!-- TAB: Prompt Improvements (Prompt 27) -->
+      <div id="prompt-tab" class="tab-content">
+        <!-- Safety Alert -->
+        <div class="card" style="border-left: 3px solid var(--warning); background-color: rgba(245, 158, 11, 0.03); margin-bottom: 1.5rem;">
+          <div class="card-title" style="color: var(--warning); font-size: 0.85rem; margin-bottom: 0.25rem;">⚠️ Safety Warning</div>
+          <p style="font-size: 0.75rem; color: var(--text-secondary); margin: 0;">
+            <strong>Preview and Candidate Creation Only.</strong> Prompt versioning and preview gates do not edit live prompt files (e.g. prompts/final_expense_alex.md). Versions are staged locally in the Human Review Item queue and PromptVersion database records.
+          </p>
+        </div>
+
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; margin-bottom: 1.5rem;">
+          <!-- Generate Patches -->
+          <section class="card">
+            <div class="card-title">Generate Prompt Patch Candidates</div>
+            <form id="patch-generate-form">
+              <div class="form-group">
+                <label for="patch-limit">Scan Source Limit</label>
+                <input type="number" id="patch-limit" class="form-control" value="100" min="1">
+              </div>
+              <div class="checkbox-group">
+                <input type="checkbox" id="patch-dry-run">
+                <label for="patch-dry-run">Dry Run (Do not save review item candidates)</label>
+              </div>
+              <button type="submit" id="btn-generate-patches" class="btn btn-primary">✨ Generate Patch Candidates</button>
+            </form>
+          </section>
+
+          <!-- Preview & Gate Checks -->
+          <section class="card">
+            <div class="card-title">Preview & Gate approved Patches</div>
+            <form id="patch-preview-form">
+              <div class="form-group">
+                <label for="preview-patch-id">Review Item Patch ID (Optional)</label>
+                <input type="text" id="preview-patch-id" class="form-control" placeholder="All approved if empty">
+              </div>
+              <div class="checkbox-group">
+                <input type="checkbox" id="preview-approved-only" checked disabled>
+                <label for="preview-approved-only">Only load approved patches</label>
+              </div>
+              <div class="checkbox-group">
+                <input type="checkbox" id="preview-create-version">
+                <label for="preview-create-version">Create Candidate PromptVersion if gates pass</label>
+              </div>
+              <div class="checkbox-group">
+                <input type="checkbox" id="preview-skip-gates">
+                <label for="preview-skip-gates">Skip validation gates (Not recommended)</label>
+              </div>
+              <button type="submit" id="btn-preview-patches" class="btn btn-primary">🔍 Run Preview & Verification Gates</button>
+            </form>
+          </section>
+        </div>
+
+        <!-- Prompt Versions Table -->
+        <section class="card">
+          <div class="card-title">
+            <span>Staged Prompt Versions</span>
+            <button id="btn-list-prompt-versions" class="btn btn-secondary" style="width: auto; padding: 0.25rem 0.5rem; font-size: 0.75rem;">🔄 Load Versions</button>
+          </div>
+          <div class="table-wrapper">
+            <table>
+              <thead>
+                <tr>
+                  <th>Version ID</th>
+                  <th>Path</th>
+                  <th>Created By</th>
+                  <th>Created At</th>
+                  <th>Change Reason</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody id="prompt-versions-tbody">
+                <tr>
+                  <td colspan="6" style="text-align: center; color: var(--text-muted);">No prompt versions loaded. Click Load Versions.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </div>
+
+      <!-- TAB: Canary (Prompt 27) -->
+      <div id="canary-tab" class="tab-content">
+        <!-- Safety Alert -->
+        <div class="card" style="border-left: 3px solid var(--warning); background-color: rgba(245, 158, 11, 0.03); margin-bottom: 1.5rem;">
+          <div class="card-title" style="color: var(--warning); font-size: 0.85rem; margin-bottom: 0.25rem;">⚠️ Safety Warning</div>
+          <p style="font-size: 0.75rem; color: var(--text-secondary); margin: 0;">
+            <strong>No Auto-Promotion.</strong> The canary manager schedules and monitors variants, but runtime traffic routing still respects existing environment control configurations. Rollbacks and cancellation require operator name and detailed reason notes.
+          </p>
+        </div>
+
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; margin-bottom: 1.5rem;">
+          <!-- Canary Candidate Checks & Plan creation -->
+          <section class="card">
+            <div class="card-title">Check Eligibility & Create Canary</div>
+            <form id="canary-create-form">
+              <div class="form-group">
+                <label for="canary-candidate-id">Staged PromptVersion ID *</label>
+                <input type="text" id="canary-candidate-id" class="form-control" placeholder="Paste version ID" required>
+              </div>
+              <div class="form-group">
+                <label for="canary-traffic">Initial Traffic %</label>
+                <input type="number" id="canary-traffic" class="form-control" value="5.0" min="0.1" max="100.0" step="0.1">
+              </div>
+              <div class="form-group">
+                <label for="canary-operator">Operator *</label>
+                <input type="text" id="canary-operator" class="form-control" placeholder="Your name" required>
+              </div>
+              <div class="form-group">
+                <label for="canary-notes">Canary Notes</label>
+                <textarea id="canary-notes" class="form-control" placeholder="Stating rollout purpose..."></textarea>
+              </div>
+              <div style="display: flex; gap: 0.5rem;">
+                <button type="button" id="btn-check-canary-candidate" class="btn btn-secondary" style="flex: 1;">🔍 Check Eligibility</button>
+                <button type="submit" id="btn-create-canary-plan" class="btn btn-primary" style="flex: 1;">🐥 Create Plan</button>
+              </div>
+            </form>
+          </section>
+
+          <!-- Canary Control States -->
+          <section class="card">
+            <div class="card-title">Canary State Controller</div>
+            <form id="canary-control-form">
+              <div class="form-group">
+                <label for="canary-experiment-id">Active Experiment ID *</label>
+                <input type="text" id="canary-experiment-id" class="form-control" placeholder="Paste experiment ID" required>
+              </div>
+              <div class="form-group">
+                <label for="canary-action-operator">Operator Identity *</label>
+                <input type="text" id="canary-action-operator" class="form-control" placeholder="Your name" required>
+              </div>
+              <div class="form-group">
+                <label for="canary-action-notes">Notes / Reason (Required for Rollback & Cancel) *</label>
+                <textarea id="canary-action-notes" class="form-control" placeholder="Provide notes or reasons..."></textarea>
+              </div>
+              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem;">
+                <button type="button" onclick="triggerCanaryAction('approve')" class="btn btn-success">✅ Approve</button>
+                <button type="button" onclick="triggerCanaryAction('start')" class="btn btn-primary">🚀 Start</button>
+                <button type="button" onclick="triggerCanaryAction('pause')" class="btn btn-warning">⏸️ Pause</button>
+                <button type="button" onclick="triggerCanaryAction('rollback')" class="btn btn-danger">🚨 Rollback</button>
+                <button type="button" onclick="triggerCanaryAction('complete')" class="btn btn-success">🎉 Complete</button>
+                <button type="button" onclick="triggerCanaryAction('cancel')" class="btn btn-danger">❌ Cancel</button>
+              </div>
+              <button type="button" id="btn-monitor-canary" class="btn btn-secondary" style="margin-top: 0.5rem; width: 100%;">📊 Run Monitoring Analysis</button>
+            </form>
+          </section>
+        </div>
+
+        <!-- Canary List Table -->
+        <section class="card">
+          <div class="card-title">
+            <span>Canary Rollouts</span>
+            <button id="btn-list-canaries" class="btn btn-secondary" style="width: auto; padding: 0.25rem 0.5rem; font-size: 0.75rem;">🔄 Load Canary Experiments</button>
+          </div>
+          <div class="table-wrapper">
+            <table>
+              <thead>
+                <tr>
+                  <th>Experiment ID</th>
+                  <th>Name</th>
+                  <th>Prompt Version ID</th>
+                  <th>Traffic %</th>
+                  <th>Status</th>
+                  <th>Details</th>
+                </tr>
+              </thead>
+              <tbody id="canary-tbody">
+                <tr>
+                  <td colspan="6" style="text-align: center; color: var(--text-muted);">No canary rollouts loaded. Click Load Canary Experiments.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </div>
+
+      <!-- TAB: Fine-Tune Operations (Prompt 27) -->
+      <div id="finetune-tab" class="tab-content">
+        <!-- Safety Alert -->
+        <div class="card" style="border-left: 3px solid var(--warning); background-color: rgba(245, 158, 11, 0.03); margin-bottom: 1.5rem;">
+          <div class="card-title" style="color: var(--warning); font-size: 0.85rem; margin-bottom: 0.25rem;">⚠️ Safety Warning</div>
+          <p style="font-size: 0.75rem; color: var(--text-secondary); margin: 0;">
+            <strong>Offline Packaging Only.</strong> This interface generates local training export datasets, verifies compliance gates, and prepares configuration files. It does not upload files or initiate fine-tuning jobs on provider servers (OpenAI/Azure API keys are not invoked).
+          </p>
+        </div>
+
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; margin-bottom: 1.5rem;">
+          <!-- Export Dataset -->
+          <section class="card">
+            <div class="card-title">1. Export Fine-Tune Dataset</div>
+            <form id="ft-export-form">
+              <div class="form-group">
+                <label for="ft-export-limit">Limit Examples</label>
+                <input type="number" id="ft-export-limit" class="form-control" placeholder="Limit">
+              </div>
+              <div class="form-group">
+                <label for="ft-export-stage">Stage Filter (Optional)</label>
+                <input type="text" id="ft-export-stage" class="form-control" placeholder="e.g. greeting">
+              </div>
+              <div class="form-group">
+                <label for="ft-export-objection">Objection Filter (Optional)</label>
+                <input type="text" id="ft-export-objection" class="form-control" placeholder="e.g. price">
+              </div>
+              <div class="checkbox-group">
+                <input type="checkbox" id="ft-export-dry-run">
+                <label for="ft-export-dry-run">Dry Run (Do not save files)</label>
+              </div>
+              <button type="submit" id="btn-ft-export" class="btn btn-primary">📁 Export Dataset Package</button>
+            </form>
+          </section>
+
+          <!-- Gate Dataset -->
+          <section class="card">
+            <div class="card-title">2. Gate Dataset Compliance</div>
+            <form id="ft-gate-form">
+              <div class="form-group">
+                <label for="ft-gate-path">Exported Dataset Path *</label>
+                <input type="text" id="ft-gate-path" class="form-control" placeholder="data/fine_tune_exports/..." required>
+              </div>
+              <div class="checkbox-group">
+                <input type="checkbox" id="ft-gate-strict" checked>
+                <label for="ft-gate-strict">Strict (Fail on medium warnings)</label>
+              </div>
+              <button type="submit" id="btn-ft-gate" class="btn btn-primary">🛡️ Run Quality Gate Check</button>
+            </form>
+          </section>
+
+          <!-- Prepare Job Request -->
+          <section class="card">
+            <div class="card-title">3. Prepare Fine-Tune Job Configuration</div>
+            <form id="ft-request-form">
+              <div class="form-group">
+                <label for="ft-req-dataset">Dataset Path *</label>
+                <input type="text" id="ft-req-dataset" class="form-control" placeholder="data/fine_tune_exports/..." required>
+              </div>
+              <div class="form-group">
+                <label for="ft-req-gate">Gate Report Path (Optional)</label>
+                <input type="text" id="ft-req-gate" class="form-control" placeholder="data/fine_tune_approvals/...">
+              </div>
+              <div class="form-group">
+                <label for="ft-req-provider">Target Provider</label>
+                <select id="ft-req-provider" class="form-control">
+                  <option value="openai">openai</option>
+                  <option value="azure_openai">azure_openai</option>
+                  <option value="generic">generic</option>
+                </select>
+              </div>
+              <div class="checkbox-group">
+                <input type="checkbox" id="ft-req-dry-run">
+                <label for="ft-req-dry-run">Dry Run Configuration only</label>
+              </div>
+              <button type="submit" id="btn-ft-request" class="btn btn-primary">⚙️ Prepare Job Request Package</button>
+            </form>
+          </section>
+
+          <!-- Track Manual Job -->
+          <section class="card">
+            <div class="card-title">4. Track Fine-Tuning Job Status</div>
+            <form id="ft-track-form">
+              <div class="form-group">
+                <label for="ft-track-id">Job Request ID *</label>
+                <input type="text" id="ft-track-id" class="form-control" placeholder="Request Review Item ID" required>
+              </div>
+              <div class="form-group">
+                <label for="ft-track-status">Fine-Tune State Status *</label>
+                <select id="ft-track-status" class="form-control">
+                  <option value="requested">requested</option>
+                  <option value="approved">approved</option>
+                  <option value="submitted_manually">submitted_manually</option>
+                  <option value="running">running</option>
+                  <option value="succeeded">succeeded</option>
+                  <option value="failed">failed</option>
+                  <option value="cancelled">cancelled</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label for="ft-track-operator">Operator *</label>
+                <input type="text" id="ft-track-operator" class="form-control" placeholder="Your name" required>
+              </div>
+              <div class="form-group">
+                <label for="ft-track-provider-job-id">Provider Job ID (Optional)</label>
+                <input type="text" id="ft-track-provider-job-id" class="form-control" placeholder="e.g. ft-job-1234">
+              </div>
+              <div class="form-group">
+                <label for="ft-track-notes">Notes</label>
+                <textarea id="ft-track-notes" class="form-control" placeholder="Tracking notes..."></textarea>
+              </div>
+              <button type="submit" id="btn-ft-track" class="btn btn-primary">💾 Save Tracking Record</button>
+            </form>
+          </section>
+        </div>
+
+        <!-- Tracking Table -->
+        <section class="card">
+          <div class="card-title">
+            <span>Fine-Tune Tracking History</span>
+            <button id="btn-list-ft-tracking" class="btn btn-secondary" style="width: auto; padding: 0.25rem 0.5rem; font-size: 0.75rem;">🔄 Load Tracking</button>
+          </div>
+          <div class="table-wrapper">
+            <table>
+              <thead>
+                <tr>
+                  <th>Request ID</th>
+                  <th>Status</th>
+                  <th>Actor</th>
+                  <th>Provider Job ID</th>
+                  <th>Notes</th>
+                  <th>Updated At</th>
+                </tr>
+              </thead>
+              <tbody id="ft-tracking-tbody">
+                <tr>
+                  <td colspan="6" style="text-align: center; color: var(--text-muted);">No tracking logs loaded. Click Load Tracking.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </div>
+
+      <!-- TAB: Post-Call Export Test (Prompt 27) -->
+      <div id="postcall-tab" class="tab-content">
+        <!-- Safety Alert -->
+        <div class="card" style="border-left: 3px solid var(--warning); background-color: rgba(245, 158, 11, 0.03); margin-bottom: 1.5rem;">
+          <div class="card-title" style="color: var(--warning); font-size: 0.85rem; margin-bottom: 0.25rem;">⚠️ Safety Warning</div>
+          <p style="font-size: 0.75rem; color: var(--text-secondary); margin: 0;">
+            <strong>Test Mode Only.</strong> Export testing via this utility does not enable the live call-runtime post-call hook. The live runtime hooks remain disabled by default to protect live production performance.
+          </p>
+        </div>
+
+        <section class="card">
+          <div class="card-title">Post-Call Export Test Utility</div>
+          <form id="postcall-form">
+            <div class="form-group">
+              <label for="postcall-payload">Completed Call Payload JSON *</label>
+              <textarea id="postcall-payload" class="form-control" style="min-height: 200px; font-family: monospace;" placeholder='{
+  "call_id": "call_test_123",
+  "started_at": "2026-05-31T12:00:00Z",
+  "answered_at": "2026-05-31T12:00:05Z",
+  "ended_at": "2026-05-31T12:05:00Z",
+  "duration_seconds": 295,
+  "transcript": [
+    {"speaker": "agent", "text": "Hi, this is Alex.", "stage": "greeting", "timestamp": "2026-05-31T12:00:06Z"},
+    {"speaker": "prospect", "text": "Who are you?", "stage": "greeting", "timestamp": "2026-05-31T12:00:10Z"}
+  ]
+}' required></textarea>
+            </div>
+            <div class="checkbox-group">
+              <input type="checkbox" id="postcall-enabled" checked>
+              <label for="postcall-enabled">Enabled (Enforces parser checks)</label>
+            </div>
+            <div class="checkbox-group">
+              <input type="checkbox" id="postcall-intake">
+              <label for="postcall-intake">Run Intake immediately after export</label>
+            </div>
+            <div class="checkbox-group">
+              <input type="checkbox" id="postcall-dry-run">
+              <label for="postcall-dry-run">Dry Run (No files written)</label>
+            </div>
+            <button type="submit" id="btn-postcall-export" class="btn btn-primary">📞 Run Exporter Validation</button>
+          </form>
+        </section>
+      </div>
+
       <!-- TAB: Reports -->
       <div id="reports-tab" class="tab-content">
         <section class="card">
@@ -352,12 +824,17 @@
             <div style="flex: 1; min-width: 150px;">
               <select id="reports-filter-type" class="form-control">
                 <option value="">All Categories</option>
-                <option value="qa">Daily QA reports (data/reports/)</option>
-                <option value="intake">Intake reports (data/intake_reports/)</option>
-                <option value="prompt">Prompt versions (data/prompt_versions/)</option>
-                <option value="canary">Canary rollouts (data/canary/)</option>
-                <option value="fine_tune">Fine-tune tracking (data/fine_tune_job_tracking/)</option>
-                <option value="readiness">Readiness audits (data/ops_readiness/)</option>
+                <option value="intake">intake (data/intake_reports/)</option>
+                <option value="qa">qa (data/reports/)</option>
+                <option value="eval">eval (data/evals/)</option>
+                <option value="replay">replay (data/evals/)</option>
+                <option value="simulation">simulation (data/simulations/)</option>
+                <option value="prompt_patch">prompt_patch (data/prompt_patches/)</option>
+                <option value="canary">canary (data/canary/)</option>
+                <option value="fine_tune">fine_tune (data/fine_tune_job_tracking/)</option>
+                <option value="readiness">readiness (data/ops_readiness/)</option>
+                <option value="scheduler">scheduler (data/intake_reports/)</option>
+                <option value="web_console">web_console (data/training_console/)</option>
               </select>
             </div>
             <button id="btn-list-reports" class="btn btn-secondary" style="width: auto;">📁 List Reports</button>

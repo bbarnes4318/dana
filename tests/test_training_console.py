@@ -442,3 +442,121 @@ def test_docs_exist_and_include_safety_limits():
     assert "no provider upload" in content.lower()
     assert "no fine-tune" in content.lower()
     assert "no live deployment" in content.lower()
+
+
+# 23. test_console_run_daily_qa_returns_action_result
+@pytest.mark.asyncio
+async def test_console_run_daily_qa_returns_action_result(console):
+    with patch("training.daily_qa_miner.DailyQaMiner.mine_date") as mock_mine:
+        mock_mine.return_value = MagicMock()
+        res = await console.run_daily_qa(date="2026-05-31", dry_run=True)
+        assert isinstance(res, ConsoleActionResult)
+        assert res.success is True
+
+
+# 24. test_console_run_eval_cases_returns_action_result
+@pytest.mark.asyncio
+async def test_console_run_eval_cases_returns_action_result(console):
+    with patch("evals.case_runner.EvalCaseRunner.run_approved_cases") as mock_run:
+        mock_run.return_value = MagicMock()
+        res = await console.run_eval_cases(case_id="case_123")
+        assert isinstance(res, ConsoleActionResult)
+        assert res.success is True
+
+
+# 25. test_console_run_replay_returns_action_result
+@pytest.mark.asyncio
+async def test_console_run_replay_returns_action_result(console):
+    with patch("evals.transcript_replay.TranscriptReplayRunner.load_fixtures") as mock_load, \
+         patch("evals.transcript_replay.TranscriptReplayRunner.replay_fixtures") as mock_replay:
+        mock_load.return_value = [MagicMock()]
+        mock_replay.return_value = MagicMock()
+        res = await console.run_transcript_replay(fixture="evals/fixtures/transcripts/test.json", mode="static")
+        assert isinstance(res, ConsoleActionResult)
+        assert res.success is True
+
+
+# 26. test_console_run_simulations_returns_action_result
+@pytest.mark.asyncio
+async def test_console_run_simulations_returns_action_result(console):
+    with patch("simulations.prospect_simulator.SimulationRunner.run_persona") as mock_run, \
+         patch("simulations.prospect_simulator.SimulationRunner.write_run_report") as mock_report:
+        mock_run.return_value = MagicMock(passed=True, score=0.9)
+        res = await console.run_prospect_simulations(persona="busy_bill", output_dir="data/simulations")
+        assert isinstance(res, ConsoleActionResult)
+        assert res.success is True
+
+
+# 27. test_console_prompt_patch_methods_return_action_result
+@pytest.mark.asyncio
+async def test_console_prompt_patch_methods_return_action_result(console):
+    with patch("prompts.versioning.PromptVersionManager.list_prompt_versions") as mock_list, \
+         patch("prompts.patch_generator.PromptPatchGenerator.generate_for_prompt") as mock_gen, \
+         patch("prompts.patch_preview.PromptPatchPreviewer.build_preview") as mock_prev:
+        
+        mock_list.return_value = []
+        mock_gen.return_value = MagicMock()
+        mock_prev.return_value = MagicMock()
+
+        res_list = await console.list_prompt_versions()
+        res_gen = await console.generate_prompt_patches(dry_run=True)
+        res_prev = await console.preview_prompt_patches(patch_id="patch_1")
+
+        assert isinstance(res_list, ConsoleActionResult)
+        assert isinstance(res_gen, ConsoleActionResult)
+        assert isinstance(res_prev, ConsoleActionResult)
+        assert res_list.success is True
+        assert res_gen.success is True
+        assert res_prev.success is True
+
+
+# 28. test_console_canary_methods_require_operator
+@pytest.mark.asyncio
+async def test_console_canary_methods_require_operator(console):
+    # Verify that plan creation, approval, and cancellations check for empty operator values
+    res_plan = await console.create_canary_plan(prompt_version_id="v1", traffic_percent=5.0, operator="")
+    res_appr = await console.approve_canary(experiment_id="exp1", operator="", notes="my notes")
+    res_cancel = await console.cancel_canary(experiment_id="exp1", operator="", reason="notes")
+    
+    assert res_plan.success is False
+    assert res_appr.success is False
+    assert res_cancel.success is False
+    assert "Operator is required" in res_plan.message
+    assert "Operator is required" in res_appr.message
+    assert "Operator is required" in res_cancel.message
+
+
+# 29. test_console_fine_tune_methods_do_not_call_provider
+@pytest.mark.asyncio
+async def test_console_fine_tune_methods_do_not_call_provider(console):
+    # Asserts that checking gates and trackers only execute local routines
+    with patch("training.fine_tune_export.FineTuneExportBuilder.build_export") as mock_exp, \
+         patch("training.fine_tune_gate.FineTuneDatasetGate.run_gate") as mock_gate, \
+         patch("training.fine_tune_job_request.FineTuneJobRequestBuilder.build_request_package") as mock_req, \
+         patch("training.fine_tune_job_tracker.FineTuneJobTracker.list_tracking_records") as mock_track:
+         
+        mock_exp.return_value = MagicMock()
+        mock_gate.return_value = MagicMock()
+        mock_req.return_value = MagicMock()
+        mock_track.return_value = []
+
+        res_exp = await console.export_fine_tune_dataset(dry_run=True)
+        res_gate = await console.gate_fine_tune_dataset(dataset_path="data/exports/ft.jsonl")
+        res_req = await console.prepare_fine_tune_job_request(dataset_path="data/exports/ft.jsonl")
+        res_track = await console.list_fine_tune_tracking()
+
+        assert res_exp.success is True
+        assert res_gate.success is True
+        assert res_req.success is True
+        assert res_track.success is True
+
+
+# 30. test_console_post_call_export_returns_action_result
+@pytest.mark.asyncio
+async def test_console_post_call_export_returns_action_result(console):
+    with patch("training.post_call_exporter.PostCallExporter.export_completed_call") as mock_exp:
+        mock_exp.return_value = MagicMock()
+        res = await console.export_completed_call_payload(payload={"call_id": "1"}, dry_run=True)
+        assert isinstance(res, ConsoleActionResult)
+        assert res.success is True
+

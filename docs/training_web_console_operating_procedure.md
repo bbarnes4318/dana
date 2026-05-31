@@ -87,6 +87,24 @@ The dashboard displays counts for pending reviews, recent sources, prompts, cana
 2. Select a category (e.g., `qa`, `intake`, `readiness`) and click **List Reports**.
 3. Select a report file from the list and click **View** to display its full text in the viewer pane.
 
+### H. Advanced Continuous Training Workflows
+The console features five additional advanced tabs mapping to continuous training pipeline phases:
+1. **QA & Evals**: Runs Daily QA Mining, Eval case runs, Transcript Replays, and Prospect Simulations.
+2. **Prompt Improvements**: Views prompt versions, triggers patch candidates generation, and runs preview safety gates.
+3. **Canary Rollouts**: Creating rollout plans, verifying candidate eligibility, and managing canary experiment states.
+4. **Fine-Tune Operations**: Packaging, gating check runs, configuring job request options, and manually tracking fine-tuning status.
+5. **Post-Call Export Test**: Simulates completed call payload file dumps and ingestion parsing safely.
+
+> [!WARNING]
+> **Safety Gating Constraints:**
+> Even under advanced tabs, the web console operates as a local-only verification command layer. It never mutates live production prompts directly, uploads training packages to provider API endpoints, starts remote provider fine-tune jobs, or executes active model deployments.
+
+---
+
+## 📖 Detailed Advanced Procedures
+For in-depth step-by-step guidance on advanced verification loops and state control transitions, refer to:
+[docs/training_web_console_advanced_workflows.md](file:///C:/Users/jimbo/.gemini/antigravity/worktrees/ultimate-voice/dana-training-ops-console/docs/training_web_console_advanced_workflows.md)
+
 ---
 
 ## Troubleshooting & FAQ
