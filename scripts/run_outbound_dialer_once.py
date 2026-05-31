@@ -1,9 +1,16 @@
 #!/usr/bin/env python
+import os
+import sys
 import argparse
 import asyncio
 import json
-import sys
 from typing import Any
+
+# Ensure parent directory is on sys.path
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from config.env_loader import load_environment
+load_environment()
 
 from ops.training_console import TrainingOperationsConsole
 

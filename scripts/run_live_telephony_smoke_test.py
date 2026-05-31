@@ -12,6 +12,9 @@ import asyncio
 # Ensure parent directory is on sys.path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from config.env_loader import load_environment
+load_environment()
+
 from telephony.live_smoke_test import LiveTelephonySmokeTester, LiveSmokeTestConfig
 
 async def main():

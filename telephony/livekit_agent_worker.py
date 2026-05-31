@@ -1,5 +1,16 @@
 import os
 import sys
+
+# Safety fallback loading
+try:
+    from config.env_loader import load_environment
+    load_environment()
+except ImportError:
+    from pathlib import Path
+    sys.path.append(str(Path(__file__).resolve().parent.parent))
+    from config.env_loader import load_environment
+    load_environment()
+
 import uuid
 import logging
 import asyncio
@@ -508,7 +519,12 @@ async def run_room_session(ctx: Any, config: LiveKitAgentWorkerConfig) -> None:
         await export_completed_session_if_possible(session_state, shared.repository)
 
 
-async def start_worker(config: LiveKitAgentWorkerConfig) -> None:
+async def entrypoint_cb(ctx: Any):
+    config = build_worker_config_from_env()
+    await run_room_session(ctx, config)
+
+
+def start_worker(config: LiveKitAgentWorkerConfig) -> None:
     """Check configuration and start the job worker loop."""
     from livekit.agents import WorkerOptions, cli
     
@@ -519,9 +535,6 @@ async def start_worker(config: LiveKitAgentWorkerConfig) -> None:
 
     logger.info("Starting LiveKit Agent Worker Job Dispatch...")
     
-    async def entrypoint_cb(ctx: Any):
-        await run_room_session(ctx, config)
-
     opts = WorkerOptions(
         entrypoint_fnc=entrypoint_cb,
     )
@@ -535,7 +548,7 @@ async def start_worker(config: LiveKitAgentWorkerConfig) -> None:
 def run_worker():
     """Fallback run method called by scripts/run_livekit_agent_worker.py"""
     config = build_worker_config_from_env()
-    asyncio.run(start_worker(config))
+    start_worker(config)
 
 
 if __name__ == "__main__":

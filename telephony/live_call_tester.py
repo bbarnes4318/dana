@@ -1,4 +1,16 @@
 import os
+import sys
+
+# Safety fallback loading
+try:
+    from config.env_loader import load_environment
+    load_environment()
+except ImportError:
+    from pathlib import Path
+    sys.path.append(str(Path(__file__).resolve().parent.parent))
+    from config.env_loader import load_environment
+    load_environment()
+
 import uuid
 import hashlib
 from datetime import datetime, timezone

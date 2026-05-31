@@ -12,6 +12,9 @@ import asyncio
 # Ensure parent directory is in sys.path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from config.env_loader import load_environment
+load_environment()
+
 from telephony.livekit_agent_worker import audit_worker_status, start_worker, LiveKitAgentWorkerConfig
 
 def main():
@@ -67,7 +70,7 @@ def main():
     )
 
     try:
-        asyncio.run(start_worker(config))
+        start_worker(config)
     except KeyboardInterrupt:
         print("Worker stopped by operator.", file=sys.stderr)
         sys.exit(0)
