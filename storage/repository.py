@@ -171,6 +171,8 @@ class Repository:
         Returns:
             The ``id`` of the saved record.
         """
+        if "created_at" in kwargs and "timestamp" not in kwargs:
+            kwargs["timestamp"] = kwargs["created_at"]
         turn = CallTurn(**kwargs)
         data = turn.model_dump(mode="json")
         data.setdefault("id", str(uuid.uuid4()))
@@ -187,6 +189,8 @@ class Repository:
         Returns:
             The ``id`` of the saved record.
         """
+        if "created_at" in kwargs and "timestamp" not in kwargs:
+            kwargs["timestamp"] = kwargs["created_at"]
         event = ToolEvent(**kwargs)
         data = event.model_dump(mode="json")
         data.setdefault("id", str(uuid.uuid4()))
@@ -203,6 +207,8 @@ class Repository:
         Returns:
             The ``id`` of the saved record.
         """
+        if "created_at" in kwargs and "timestamp" not in kwargs:
+            kwargs["timestamp"] = kwargs["created_at"]
         report = QAReport(**kwargs)
         data = report.model_dump(mode="json")
         data.setdefault("id", str(uuid.uuid4()))

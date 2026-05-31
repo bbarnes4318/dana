@@ -580,3 +580,27 @@ async def test_pending_patch_with_prompt_patch_approved_true_is_rejected(preview
     
     with pytest.raises(ValueError):
         await previewer.load_approved_patch_items(["p_pending_true"])
+
+
+# 25. test_build_preview_respects_limit
+@pytest.mark.asyncio
+async def test_build_preview_respects_limit(previewer, repo, tmp_path):
+    prompt_file = tmp_path / "prompt.md"
+    prompt_file.write_text("# Role\n", encoding="utf-8")
+    
+    p1 = build_basic_patch_item("p_limit1", "approved", {"proposed_text": "- Rule 1"})
+    p2 = build_basic_patch_item("p_limit2", "approved", {"proposed_text": "- Rule 2"})
+    await repo.save_human_review_item(**p1)
+    await repo.save_human_review_item(**p2)
+    
+    res = await previewer.build_preview(
+        prompt_name="final_expense_alex",
+        prompt_path=prompt_file,
+        patch_ids=None,
+        output_dir=tmp_path,
+        run_gates=False,
+        limit=1
+    )
+    assert res.patches_applied == 1
+    assert len(res.patch_review_item_ids) == 1
+

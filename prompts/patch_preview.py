@@ -647,13 +647,14 @@ class PromptPatchPreviewer:
         output_dir: str | Path = "data/prompt_patches/previews",
         run_gates: bool = True,
         create_candidate_version: bool = False,
+        limit: int = 50,
     ) -> PromptPatchPreviewResult:
         """Run candidate generation preview, checking validations, executing gates, writing reports."""
         preview_id = str(uuid.uuid4())
         warnings = []
 
         # Load approved patch items
-        patch_items = await self.load_approved_patch_items(patch_ids)
+        patch_items = await self.load_approved_patch_items(patch_ids, limit=limit)
         if not patch_items:
             warnings.append("No approved patch items to apply.")
 

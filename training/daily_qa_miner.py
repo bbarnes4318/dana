@@ -120,7 +120,7 @@ class DailyQaMiner:
 
     def _get_timestamp(self, record: dict) -> Optional[datetime]:
         """Safely extract timestamp from record."""
-        for field in ["created_at", "timestamp", "started_at", "ended_at", "call_started_at", "imported_at"]:
+        for field in ["timestamp", "started_at", "ended_at", "call_started_at", "created_at", "imported_at"]:
             if field in record and record[field]:
                 val = record[field]
                 dt = parse_dt(val)

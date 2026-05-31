@@ -60,7 +60,8 @@ async def run_cli() -> None:
             patch_ids=args.patch_id,
             output_dir=args.output_dir,
             run_gates=run_gates,
-            create_candidate_version=create_candidate_version
+            create_candidate_version=create_candidate_version,
+            limit=args.limit
         )
 
         # Handle json-only report deletion
