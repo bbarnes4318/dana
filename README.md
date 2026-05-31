@@ -44,3 +44,8 @@ For detailed setup, monitoring, backups, and restores, read the following files 
 *   [docs/PRODUCTION_INFRA.md](file:///c:/Users/jimbo/OneDrive/Desktop/ultimate-voice/docs/PRODUCTION_INFRA.md)
 *   [docs/DATABASE_ARCHITECTURE.md](file:///c:/Users/jimbo/OneDrive/Desktop/ultimate-voice/docs/DATABASE_ARCHITECTURE.md)
 *   [docs/OPERATIONS_RUNBOOK.md](file:///c:/Users/jimbo/OneDrive/Desktop/ultimate-voice/docs/OPERATIONS_RUNBOOK.md)
+*   [docs/continuous_training_runbook.md](file:///C:/Users/jimbo/.gemini/antigravity/worktrees/ultimate-voice/implement-canary-rollout-system/docs/continuous_training_runbook.md)
+*   [docs/dana_training_safety_gates.md](file:///C:/Users/jimbo/.gemini/antigravity/worktrees/ultimate-voice/implement-canary-rollout-system/docs/dana_training_safety_gates.md)
+*   [docs/fine_tuning_operating_procedure.md](file:///C:/Users/jimbo/.gemini/antigravity/worktrees/ultimate-voice/implement-canary-rollout-system/docs/fine_tuning_operating_procedure.md)
+*   [docs/prompt_canary_operating_procedure.md](file:///C:/Users/jimbo/.gemini/antigravity/worktrees/ultimate-voice/implement-canary-rollout-system/docs/prompt_canary_operating_procedure.md)
+
