@@ -134,8 +134,8 @@ class FineTuneExportBuilder:
         export_id = str(uuid.uuid4())[:8]
         warnings = []
         
-        # 1. Load candidate training examples
-        candidates = await self.load_candidate_training_examples(config)
+        # 1. Load candidate training examples (load all)
+        candidates = await self.load_all_training_examples_for_export(config)
         total_examples_scanned = len(candidates)
         
         eligible_records = []
@@ -150,6 +150,28 @@ class FineTuneExportBuilder:
         }
         
         for cand in candidates:
+            labels = cand.get("labels") or {}
+            
+            # Eligibility checks (only when require_fine_tune_eligible is True)
+            if config.require_fine_tune_eligible:
+                approved = bool(cand.get("approved_by") or cand.get("approved_at") or labels.get("human_review_item_id"))
+                if not approved:
+                    skipped_reasons["unapproved"] += 1
+                    continue
+                    
+                is_eligible = labels.get("fine_tune_eligible") is True
+                if not is_eligible:
+                    skipped_reasons["not_fine_tune_eligible"] += 1
+                    continue
+                    
+                use_for = cand.get("use_for") or []
+                rec_use = labels.get("recommended_use_for") or []
+                use_ft = ("fine_tune" in use_for or "fine_tune" in rec_use)
+                if not use_ft:
+                    skipped_reasons["not_fine_tune_eligible"] += 1
+                    continue
+
+
             # Stage / Objection filters before validation
             stage = cand.get("stage")
             if config.include_stages and stage not in config.include_stages:
@@ -159,7 +181,6 @@ class FineTuneExportBuilder:
                 skipped_reasons["filter_stage"] += 1
                 continue
                 
-            labels = cand.get("labels") or {}
             objection = labels.get("objection_type") or cand.get("objection_type") or labels.get("objection")
             if config.include_objection_types and objection not in config.include_objection_types:
                 skipped_reasons["filter_objection"] += 1
@@ -237,6 +258,9 @@ class FineTuneExportBuilder:
             result.report_markdown_path = report_md_p
             
         return result
+
+    async def load_all_training_examples_for_export(self, config: FineTuneExportConfig) -> list[dict]:
+        return await self.repository.query_training_examples({})
 
     async def load_candidate_training_examples(self, config: FineTuneExportConfig) -> list[dict]:
         all_examples = await self.repository.query_training_examples({})

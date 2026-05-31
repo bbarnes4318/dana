@@ -484,3 +484,71 @@ async def test_dnc_or_wrong_number_selling_example_rejected(repo: Repository, bu
     )
     res = await builder.build_export(config)
     assert res.eligible_examples == 1
+
+
+# 26. test_total_examples_scanned_counts_all_training_examples
+@pytest.mark.asyncio
+async def test_total_examples_scanned_counts_all_training_examples(repo: Repository, builder: FineTuneExportBuilder) -> None:
+    # 1. Eligible
+    await save_valid_approved_example(repo, id="ex-eligible")
+    # 2. Unapproved (no approved_by, approved_at, or human_review_item_id)
+    await save_valid_approved_example(repo, id="ex-unapproved", approved_by=None, approved_at=None, labels={"fine_tune_eligible": True})
+    # 3. Non-fine-tune
+    await save_valid_approved_example(repo, id="ex-non-ft", labels={"fine_tune_eligible": False})
+    # 4. Unsafe ("you qualify" critical failure)
+    await save_valid_approved_example(repo, id="ex-unsafe", ideal_response="Yes, you qualify.")
+
+    config = FineTuneExportConfig(
+        export_name="test_scanned_counts",
+        min_examples=1,
+        dry_run=True
+    )
+    res = await builder.build_export(config)
+    assert res.total_examples_scanned == 4
+
+
+# 27. test_skipped_reasons_counts_unapproved_and_not_fine_tune_eligible
+@pytest.mark.asyncio
+async def test_skipped_reasons_counts_unapproved_and_not_fine_tune_eligible(repo: Repository, builder: FineTuneExportBuilder) -> None:
+    await save_valid_approved_example(repo, id="ex-unapproved", approved_by=None, approved_at=None, labels={"fine_tune_eligible": True})
+    await save_valid_approved_example(repo, id="ex-non-ft", labels={"fine_tune_eligible": False})
+
+    config = FineTuneExportConfig(
+        export_name="test_skipped_reasons",
+        min_examples=1,
+        dry_run=True
+    )
+    res = await builder.build_export(config)
+    assert res.skipped_reasons["unapproved"] > 0
+    assert res.skipped_reasons["not_fine_tune_eligible"] > 0
+
+
+# 28. test_exported_examples_counts_after_dedupe
+@pytest.mark.asyncio
+async def test_exported_examples_counts_after_dedupe(repo: Repository, builder: FineTuneExportBuilder) -> None:
+    # Save two duplicate eligible examples
+    await save_valid_approved_example(
+        repo,
+        id="ex-dup-1",
+        user_text="Is this real?",
+        ideal_response="I am an automated assistant. A licensed agent can help you."
+    )
+    await save_valid_approved_example(
+        repo,
+        id="ex-dup-2",
+        user_text="Is this real?",
+        ideal_response="I am an automated assistant. A licensed agent can help you."
+    )
+
+    config = FineTuneExportConfig(
+        export_name="test_dedupe_counts",
+        min_examples=1,
+        dry_run=True
+    )
+    res = await builder.build_export(config)
+    # eligible_examples includes both valid pre-dedupe records
+    assert res.eligible_examples == 2
+    # exported_examples excludes duplicate
+    assert res.exported_examples == 1
+    assert res.skipped_reasons["duplicate"] == 1
+
