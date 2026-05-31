@@ -1850,6 +1850,64 @@ class TrainingOperationsConsole:
         except Exception as e:
             return ConsoleActionResult(action="get_telephony_campaign_analytics", success=False, message="Failed to generate campaign analytics.", error=str(e))
 
+    async def check_live_telephony_readiness(self, provider_config_id: str | None = None, campaign_id: str | None = None) -> ConsoleActionResult:
+        try:
+            from telephony.live_telephony_readiness import LiveTelephonyReadinessChecker
+            checker = LiveTelephonyReadinessChecker(repository=self.repository)
+            res = await checker.run(provider_config_id=provider_config_id, campaign_id=campaign_id)
+            return self.result_from_model("check_live_telephony_readiness", res, "Readiness check completed.")
+        except Exception as e:
+            return ConsoleActionResult(action="check_live_telephony_readiness", success=False, message="Failed to run readiness check.", error=str(e))
+
+    async def place_live_test_call(
+        self,
+        phone_number: str,
+        operator: str,
+        campaign_id: str | None = None,
+        provider_config_id: str | None = None,
+        wait_until_answered: bool = True,
+        krisp_enabled: bool = True
+    ) -> ConsoleActionResult:
+        try:
+            from telephony.live_call_tester import LiveCallTester, LiveCallTestConfig
+            tester = LiveCallTester(repository=self.repository)
+            config = LiveCallTestConfig(
+                phone_number=phone_number,
+                campaign_id=campaign_id,
+                provider_config_id=provider_config_id,
+                live_mode=True,
+                wait_until_answered=wait_until_answered,
+                krisp_enabled=krisp_enabled,
+                operator=operator
+            )
+            res = await tester.place_test_call(config)
+            return self.result_from_model("place_live_test_call", res, res.message)
+        except Exception as e:
+            return ConsoleActionResult(action="place_live_test_call", success=False, message="Failed to place live test call.", error=str(e))
+
+    async def check_livekit_agent_worker(self) -> ConsoleActionResult:
+        try:
+            from telephony.livekit_agent_worker import check_worker_dependencies
+            ok, err = check_worker_dependencies()
+            import os
+            cmd = "python scripts/run_livekit_agent_worker.py"
+            worker_enabled = os.environ.get("DANA_AGENT_WORKER_ENABLED") == "true"
+            data = {
+                "installed": ok,
+                "error": err,
+                "command": cmd,
+                "enabled": worker_enabled,
+                "status": "ready" if (ok and worker_enabled) else ("disabled" if ok else "dependencies_missing")
+            }
+            return ConsoleActionResult(
+                action="check_livekit_agent_worker",
+                success=True,
+                message="LiveKit agent worker status retrieved.",
+                data=data
+            )
+        except Exception as e:
+            return ConsoleActionResult(action="check_livekit_agent_worker", success=False, message="Failed to check LiveKit agent worker status.", error=str(e))
+
 
 def json_serializable(obj: Any) -> Any:
     """Recursively convert custom objects/dataclasses to JSON-serializable formats."""

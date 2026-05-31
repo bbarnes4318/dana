@@ -1,0 +1,185 @@
+import os
+import importlib.metadata
+from typing import List, Dict, Optional, Tuple
+from pydantic import BaseModel, Field
+from storage.repository import Repository
+from telephony.livekit_adapter import LiveKitOutboundAdapter
+
+class LiveTelephonyReadinessResult(BaseModel):
+    """Outbound telephony config readiness audit result."""
+    ready: bool
+    live_mode_enabled: bool
+    required_env: Dict[str, Optional[str]] = Field(default_factory=dict)
+    provider_config_ok: bool = False
+    outbound_trunk_id_present: bool = False
+    caller_id_present: bool = False
+    livekit_sdk_available: bool = False
+    agent_worker_ready: bool = False
+    campaign_ready: Optional[bool] = None
+    failures: List[str] = Field(default_factory=list)
+    warnings: List[str] = Field(default_factory=list)
+    next_steps: List[str] = Field(default_factory=list)
+
+
+class LiveTelephonyReadinessChecker:
+    """Audits environment and db configurations to certify outbound telephony readiness."""
+
+    def __init__(self, repository: Optional[Repository] = None, adapter: Optional[LiveKitOutboundAdapter] = None) -> None:
+        self.repository = repository or Repository()
+        self.adapter = adapter or LiveKitOutboundAdapter()
+
+    def check_env(self) -> dict:
+        """Collect status of all required/optional environment variables."""
+        return self.adapter.required_env_status()
+
+    def check_livekit_sdk(self) -> tuple[bool, Optional[str]]:
+        """Verify that the official LiveKit SDK classes can be imported."""
+        try:
+            from livekit import api
+            from livekit.protocol.sip import CreateSIPParticipantRequest
+            # Double check presence of expected structures
+            if not hasattr(api, "LiveKitAPI"):
+                return False, "LiveKitAPI class missing on imported api module"
+            return True, None
+        except ImportError as e:
+            return False, str(e)
+
+    async def check_provider_config(self, provider_config_id: str | None = None) -> dict:
+        """Inspect provider settings, either by config ID or environment variables fallback."""
+        res = {
+            "ok": True,
+            "outbound_trunk_id_present": False,
+            "caller_id_present": False,
+            "failures": []
+        }
+        
+        # 1. Resolve Trunk ID
+        trunk_id = os.environ.get("LIVEKIT_SIP_OUTBOUND_TRUNK_ID")
+        # 2. Resolve Caller ID
+        caller_id = os.environ.get("DANA_OUTBOUND_CALLER_ID")
+
+        if provider_config_id:
+            config = await self.repository.get_telephony_provider_config(provider_config_id)
+            if not config:
+                res["ok"] = False
+                res["failures"].append(f"Provider config '{provider_config_id}' not found in database.")
+            else:
+                trunk_id = config.get("livekit_sip_outbound_trunk_id") or trunk_id
+                caller_id = config.get("default_caller_id") or caller_id
+
+        if trunk_id:
+            res["outbound_trunk_id_present"] = True
+        else:
+            res["failures"].append("No LiveKit SIP Outbound Trunk ID configured (neither in provider config nor in LIVEKIT_SIP_OUTBOUND_TRUNK_ID env).")
+
+        if caller_id:
+            res["caller_id_present"] = True
+        else:
+            res["failures"].append("No outbound caller ID configured (neither in provider config nor in DANA_OUTBOUND_CALLER_ID env).")
+
+        if res["failures"]:
+            res["ok"] = False
+
+        return res
+
+    async def check_campaign(self, campaign_id: str | None = None) -> dict:
+        """Inspect campaign configuration and state."""
+        res = {
+            "ok": True,
+            "status": "not_provided",
+            "failures": []
+        }
+        if campaign_id:
+            campaign = await self.repository.get_outbound_campaign(campaign_id)
+            if not campaign:
+                res["ok"] = False
+                res["status"] = "not_found"
+                res["failures"].append(f"Campaign '{campaign_id}' not found.")
+            else:
+                status = campaign.get("status", "draft")
+                res["status"] = status
+                if status != "running":
+                    res["ok"] = False
+                    res["failures"].append(f"Campaign is in '{status}' status (must be running for outbound dials).")
+                
+                # Check lead capacity
+                leads = await self.repository.query_campaign_leads({"campaign_id": campaign_id})
+                active_leads = [l for l in leads if l.get("status") in ("new", "queued", "callback")]
+                if not active_leads:
+                    res["ok"] = False
+                    res["failures"].append("Campaign has no active/callable leads in its queue.")
+
+        return res
+
+    async def run(self, provider_config_id: str | None = None, campaign_id: str | None = None) -> LiveTelephonyReadinessResult:
+        """Run all readiness checks and compile the final report."""
+        failures = []
+        warnings = []
+        next_steps = []
+
+        # 1. Check live mode settings
+        live_mode_enabled = self.adapter.live_mode_enabled()
+        env_status = self.check_env()
+        
+        # Collect failures regarding live modes
+        if env_status.get("TELEPHONY_LIVE_MODE") != "true":
+            failures.append("TELEPHONY_LIVE_MODE is not set to 'true'.")
+            next_steps.append("Set environment variable TELEPHONY_LIVE_MODE=true")
+        if env_status.get("DANA_ENABLE_OUTBOUND_DIALER") != "true":
+            failures.append("DANA_ENABLE_OUTBOUND_DIALER is not set to 'true'.")
+            next_steps.append("Set environment variable DANA_ENABLE_OUTBOUND_DIALER=true")
+
+        # 2. Check general LiveKit secrets
+        for k in ["LIVEKIT_URL", "LIVEKIT_API_KEY", "LIVEKIT_API_SECRET"]:
+            if not env_status.get(k):
+                failures.append(f"Missing required secret environment variable: {k}")
+                next_steps.append(f"Provide environment variable {k}")
+
+        # 3. Check SDK
+        sdk_ok, sdk_err = self.check_livekit_sdk()
+        if not sdk_ok:
+            failures.append(f"LiveKit Python SDK check failed: {sdk_err}")
+            next_steps.append("Install required LiveKit packages (pip install livekit-api livekit-agents)")
+
+        # 4. Check Provider config
+        prov_status = await self.check_provider_config(provider_config_id)
+        if not prov_status["ok"]:
+            failures.extend(prov_status["failures"])
+            if not prov_status["outbound_trunk_id_present"]:
+                next_steps.append("Configure LIVEKIT_SIP_OUTBOUND_TRUNK_ID in environment or provider config")
+            if not prov_status["caller_id_present"]:
+                next_steps.append("Configure DANA_OUTBOUND_CALLER_ID in environment or provider config")
+
+        # 5. Check Campaign
+        campaign_status = None
+        if campaign_id:
+            camp_status = await self.check_campaign(campaign_id)
+            campaign_status = camp_status["ok"]
+            failures.extend(camp_status["failures"])
+            if camp_status["status"] == "not_found":
+                next_steps.append(f"Create a valid campaign with ID '{campaign_id}'")
+            elif camp_status["status"] in ("draft", "ready", "paused", "stopped"):
+                next_steps.append(f"Activate the campaign to running state via UI/CLI")
+
+        # 6. Check Agent Worker
+        worker_enabled = env_status.get("DANA_AGENT_WORKER_ENABLED") == "true"
+        if not worker_enabled:
+            warnings.append("DANA_AGENT_WORKER_ENABLED is not set to 'true'. Calls might place, but Dana agent worker will not join rooms automatically.")
+            next_steps.append("Set environment variable DANA_AGENT_WORKER_ENABLED=true and start scripts/run_livekit_agent_worker.py")
+
+        ready = len(failures) == 0
+
+        return LiveTelephonyReadinessResult(
+            ready=ready,
+            live_mode_enabled=live_mode_enabled,
+            required_env=env_status,
+            provider_config_ok=prov_status["ok"],
+            outbound_trunk_id_present=prov_status["outbound_trunk_id_present"],
+            caller_id_present=prov_status["caller_id_present"],
+            livekit_sdk_available=sdk_ok,
+            agent_worker_ready=worker_enabled and sdk_ok,
+            campaign_ready=campaign_status,
+            failures=failures,
+            warnings=warnings,
+            next_steps=next_steps
+        )

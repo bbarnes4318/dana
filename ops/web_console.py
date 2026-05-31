@@ -555,8 +555,51 @@ class TrainingWebConsoleServer(ThreadingHTTPServer):
                             campaign_id, live_mode=live_mode, dry_run=dry_run, max_calls=max_calls, operator=operator, force=force
                         )
                         return (200 if res.success else 400, res.model_dump(mode="json"))
-                    else:
-                        return (404, {"success": False, "error": f"Route not found: {route}"})
+            elif route == "/api/telephony/live/readiness" and method == "POST":
+                provider_config_id = body.get("provider_config_id") if body else None
+                campaign_id = body.get("campaign_id") if body else None
+                res = await self.console.check_live_telephony_readiness(
+                    provider_config_id=provider_config_id, campaign_id=campaign_id
+                )
+                return (200 if res.success else 400, res.model_dump(mode="json"))
+
+            elif route == "/api/telephony/live/test-call" and method == "POST":
+                if not body:
+                    return (400, {"success": False, "error": "JSON body is required."})
+                phone_number = body.get("phone_number")
+                operator = body.get("operator")
+                campaign_id = body.get("campaign_id")
+                provider_config_id = body.get("provider_config_id")
+                wait_until_answered = body.get("wait_until_answered", True)
+                krisp_enabled = body.get("krisp_enabled", True)
+                confirmation = body.get("confirmation")
+
+                if not phone_number:
+                    return (400, {"success": False, "error": "phone_number parameter is required."})
+                if not operator:
+                    return (400, {"success": False, "error": "operator parameter is required."})
+                if confirmation != "LIVE CALL":
+                    return (400, {"success": False, "error": "Confirmation 'LIVE CALL' is required to place a live test call."})
+
+                # Check if live mode environment keys are actually enabled
+                from telephony.livekit_adapter import LiveKitOutboundAdapter
+                adapter = LiveKitOutboundAdapter()
+                if not adapter.live_mode_enabled():
+                    return (400, {"success": False, "error": "Live calling environment flags are not active. Set TELEPHONY_LIVE_MODE=true and DANA_ENABLE_OUTBOUND_DIALER=true."})
+
+                res = await self.console.place_live_test_call(
+                    phone_number=phone_number,
+                    operator=operator,
+                    campaign_id=campaign_id,
+                    provider_config_id=provider_config_id,
+                    wait_until_answered=wait_until_answered,
+                    krisp_enabled=krisp_enabled
+                )
+                return (200 if res.success else 400, res.model_dump(mode="json"))
+
+            elif route == "/api/telephony/live/agent-worker" and method == "GET":
+                res = await self.console.check_livekit_agent_worker()
+                return (200 if res.success else 400, res.model_dump(mode="json"))
 
             elif route == "/api/telephony/calls/live" and method == "GET":
                 campaign_id = query_params.get("campaign_id", [None])[0]

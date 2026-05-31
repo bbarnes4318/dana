@@ -52,9 +52,16 @@ graph TD
   CheckHours -->|Yes| TriggerDial[Dial LiveKit SIP]
 ```
 
-## Local Testing Safeties
+## Live Mode Activation Safety
 
-By default, the campaign dialer operates in dry-run/mock mode. In this mode, mock attempts are recorded in the database, but no live SIP trunk triggers occur, protecting developer sandboxes from accidental carrier bills or compliance violations.
-To verify safety workflows locally, developers can test using:
-`python scripts/run_outbound_dialer_once.py --campaign-id "CAMP_ID" --dry-run`
-which will evaluate constraints and return logs of what would be dialed.
+To guarantee that developers or operators do not accidentally trigger real calls, two layers of safety guards are implemented:
+
+1. **Readiness Check Requirement**:
+   Before any real outbound dial or single test call is executed, a full `LiveTelephonyReadinessChecker` check must pass. This audits environment variables, LiveKit SDK availability, provider config settings, and campaign status. If any critical checks fail, the call is blocked.
+
+2. **Operator & Explicit Confirmation**:
+   Any live call trigger (via CLI or Web UI) requires:
+   - A valid Operator ID / Name.
+   - An explicit confirmation phrase input of `"LIVE CALL"`. If this exact string is not provided, the trigger will fail.
+
+These features ensure that all outbound dialing campaigns are triggered with deliberate intent.

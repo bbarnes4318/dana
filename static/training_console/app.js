@@ -1800,6 +1800,28 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // Dialer Tick Form
   const dialerTickForm = document.getElementById("dialer-tick-form");
+  const dialerLiveModeCheckbox = document.getElementById("dialer-live-mode");
+  const dialerDryRunCheckbox = document.getElementById("dialer-dry-run");
+  const dialerOperatorGroup = document.getElementById("dialer-operator-group");
+  const dialerLiveWarning = document.getElementById("dialer-live-warning");
+
+  if (dialerLiveModeCheckbox) {
+    dialerLiveModeCheckbox.addEventListener("change", () => {
+      const isLive = dialerLiveModeCheckbox.checked;
+      if (isLive) {
+        dialerDryRunCheckbox.checked = false;
+        dialerDryRunCheckbox.disabled = true;
+        if (dialerOperatorGroup) dialerOperatorGroup.style.display = "block";
+        if (dialerLiveWarning) dialerLiveWarning.style.display = "block";
+      } else {
+        dialerDryRunCheckbox.disabled = false;
+        dialerDryRunCheckbox.checked = true;
+        if (dialerOperatorGroup) dialerOperatorGroup.style.display = "none";
+        if (dialerLiveWarning) dialerLiveWarning.style.display = "none";
+      }
+    });
+  }
+
   if (dialerTickForm) {
     dialerTickForm.addEventListener("submit", async (e) => {
       e.preventDefault();
@@ -1807,7 +1829,7 @@ document.addEventListener("DOMContentLoaded", () => {
       const maxCalls = document.getElementById("dialer-max-calls").value;
       const dryRun = document.getElementById("dialer-dry-run").checked;
       const liveMode = document.getElementById("dialer-live-mode").checked;
-      const operator = document.getElementById("ctrl-operator").value.trim();
+      let operator = document.getElementById("ctrl-operator").value.trim();
       const btn = document.getElementById("btn-run-dialer-tick");
       const text = btn.innerText;
 
@@ -1815,10 +1837,29 @@ document.addEventListener("DOMContentLoaded", () => {
         alert("Please select a campaign first!");
         return;
       }
-      if (!operator) {
-        alert("Operator identity is required to run dialer ticks!");
-        document.getElementById("ctrl-operator").focus();
-        return;
+
+      if (liveMode) {
+        const dialerOp = document.getElementById("dialer-operator").value.trim();
+        if (dialerOp) operator = dialerOp;
+        
+        if (!operator) {
+          alert("Operator ID is required for live dialing pacing ticks!");
+          document.getElementById("dialer-operator").focus();
+          return;
+        }
+
+        const confirmText = document.getElementById("dialer-live-confirm").value.trim();
+        if (confirmText !== "LIVE CALL") {
+          alert("Please type 'LIVE CALL' in the confirmation box to execute real outbound calls.");
+          document.getElementById("dialer-live-confirm").focus();
+          return;
+        }
+      } else {
+        if (!operator) {
+          alert("Operator identity is required to run dialer ticks!");
+          document.getElementById("ctrl-operator").focus();
+          return;
+        }
       }
 
       log(`Executing dialer pacing tick on campaign ${campaignId}...`);
@@ -2076,6 +2117,187 @@ document.addEventListener("DOMContentLoaded", () => {
       log(`Error updating outcome: ${error.message}`, "error");
     }
   };
+
+  // Live Telephony Diagnostics & Testing Helpers
+  async function runReadinessAudit() {
+    const btn = document.getElementById("btn-check-readiness");
+    const resultsDiv = document.getElementById("readiness-audit-results");
+    if (!resultsDiv) return;
+
+    const campaignId = document.getElementById("dialer-camp-id").value || null;
+    const providerConfigId = document.getElementById("campaign-provider-telephony")?.value || null;
+
+    setButtonState(btn, true, "🔍 Running Audit...");
+    resultsDiv.innerHTML = "<p>Analyzing configuration readiness...</p>";
+
+    try {
+      const response = await fetch("/api/telephony/live/readiness", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ campaign_id: campaignId, provider_config_id: providerConfigId })
+      });
+      const data = await response.json();
+      if (response.ok && data.success) {
+        const audit = data.data;
+        let html = "";
+
+        if (audit.ready) {
+          html += `<div style="color: var(--success); font-weight: bold; margin-bottom: 0.5rem;">✅ ALL READINESS CHECKS PASSED. Ready for live outbound dialing!</div>`;
+        } else {
+          html += `<div style="color: var(--danger); font-weight: bold; margin-bottom: 0.5rem;">❌ AUDIT FAILED. Outbound calling is blocked:</div>`;
+          html += `<ul style="margin: 0 0 0.5rem 1.25rem; padding: 0; color: var(--danger);">`;
+          audit.failures.forEach(f => {
+            html += `<li>${f}</li>`;
+          });
+          html += `</ul>`;
+        }
+
+        if (audit.warnings && audit.warnings.length > 0) {
+          html += `<div style="color: var(--warning); font-weight: bold; margin-bottom: 0.25rem;">Warnings:</div>`;
+          html += `<ul style="margin: 0 0 0.5rem 1.25rem; padding: 0; color: var(--warning);">`;
+          audit.warnings.forEach(w => {
+            html += `<li>${w}</li>`;
+          });
+          html += `</ul>`;
+        }
+
+        if (audit.next_steps && audit.next_steps.length > 0) {
+          html += `<div style="font-weight: bold; margin-top: 0.25rem; margin-bottom: 0.25rem;">Next Steps to resolve:</div>`;
+          html += `<ol style="margin: 0; padding-left: 1.25rem;">`;
+          audit.next_steps.forEach(step => {
+            html += `<li>${step}</li>`;
+          });
+          html += `</ol>`;
+        }
+
+        resultsDiv.innerHTML = html;
+        log(`Readiness audit finished. Ready: ${audit.ready}`, audit.ready ? "success" : "warning");
+      } else {
+        resultsDiv.innerHTML = `<p style="color: var(--danger);">Error: ${data.error || data.message}</p>`;
+        log(`Readiness audit failed: ${data.error || data.message}`, "error");
+      }
+    } catch (err) {
+      resultsDiv.innerHTML = `<p style="color: var(--danger);">Network error: ${err.message}</p>`;
+      log(`Readiness audit network error: ${err.message}`, "error");
+    } finally {
+      setButtonState(btn, false, "🔍 Run Audit");
+    }
+  }
+
+  async function checkAgentWorkerStatus() {
+    const btn = document.getElementById("btn-check-worker");
+    const detailsDiv = document.getElementById("worker-status-details");
+    if (!detailsDiv) return;
+
+    setButtonState(btn, true, "🔄 Querying...");
+    detailsDiv.innerHTML = "<p>Querying agent worker daemon state...</p>";
+
+    try {
+      const response = await fetch("/api/telephony/live/agent-worker", { method: "GET" });
+      const data = await response.json();
+      if (response.ok && data.success) {
+        const status = data.data;
+        let html = "";
+
+        if (status.status === "ready") {
+          html += `<div style="color: var(--success); font-weight: bold; margin-bottom: 0.25rem;">● Active & Ready (Dana worker dependencies validated)</div>`;
+        } else if (status.status === "disabled") {
+          html += `<div style="color: var(--warning); font-weight: bold; margin-bottom: 0.25rem;">● Dependencies Present, but Worker Disabled (DANA_AGENT_WORKER_ENABLED!=true)</div>`;
+        } else {
+          html += `<div style="color: var(--danger); font-weight: bold; margin-bottom: 0.25rem;">● Missing Required Audio Dependencies</div>`;
+          if (status.error) {
+            html += `<div style="color: var(--danger); margin-bottom: 0.25rem; font-family: monospace; background: rgba(0,0,0,0.1); padding: 0.25rem; border-radius: 4px;">${status.error}</div>`;
+          }
+        }
+
+        html += `<p style="margin: 0.25rem 0 0 0;">Run command to start the background worker daemon:</p>`;
+        html += `<pre style="background: var(--bg-surface); padding: 0.5rem; border-radius: 4px; font-family: monospace; margin: 0.25rem 0 0 0; color: var(--text-primary); border: 1px solid var(--border);">${status.command}</pre>`;
+
+        detailsDiv.innerHTML = html;
+        log("Query agent worker status completed.", "success");
+      } else {
+        detailsDiv.innerHTML = `<p style="color: var(--danger);">Error: ${data.error || data.message}</p>`;
+        log(`Query agent worker status failed: ${data.error || data.message}`, "error");
+      }
+    } catch (err) {
+      detailsDiv.innerHTML = `<p style="color: var(--danger);">Network error: ${err.message}</p>`;
+      log(`Query agent worker status network error: ${err.message}`, "error");
+    } finally {
+      setButtonState(btn, false, "🔄 Query Status");
+    }
+  }
+
+  // Event Listeners for diagnostics
+  const btnCheckReadiness = document.getElementById("btn-check-readiness");
+  if (btnCheckReadiness) {
+    btnCheckReadiness.addEventListener("click", () => runReadinessAudit());
+  }
+
+  const btnCheckWorker = document.getElementById("btn-check-worker");
+  if (btnCheckWorker) {
+    btnCheckWorker.addEventListener("click", () => checkAgentWorkerStatus());
+  }
+
+  // Manual Test Call trigger
+  const testCallForm = document.getElementById("test-call-form");
+  if (testCallForm) {
+    testCallForm.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const phone = document.getElementById("test-call-phone").value.trim();
+      const operator = document.getElementById("test-call-operator").value.trim();
+      const wait = document.getElementById("test-call-wait").checked;
+      const krisp = document.getElementById("test-call-krisp").checked;
+      const btn = document.getElementById("btn-place-test-call");
+      const text = btn.innerText;
+
+      if (!phone || !operator) {
+        alert("Phone number and Operator name are required!");
+        return;
+      }
+
+      // Check confirmation prompt modal
+      const confirmation = prompt(`CRITICAL: You are about to initiate a REAL phone call to ${phone}.\nType "LIVE CALL" to authorize:`);
+      if (confirmation !== "LIVE CALL") {
+        alert("Authorisation failed. Test call cancelled.");
+        return;
+      }
+
+      setButtonState(btn, true, "📞 Dialing...");
+      log(`Initiating manual live test call to ${phone} (operator: ${operator})...`);
+
+      const payload = {
+        phone_number: phone,
+        operator: operator,
+        wait_until_answered: wait,
+        krisp_enabled: krisp,
+        confirmation: "LIVE CALL",
+        campaign_id: document.getElementById("dialer-camp-id").value || null,
+        provider_config_id: document.getElementById("campaign-provider-telephony")?.value || null
+      };
+
+      try {
+        const response = await fetch("/api/telephony/live/test-call", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+        const data = await response.json();
+        if (response.ok && data.success) {
+          showStatus("Test Call Placed", data.message);
+          log(`Test call dial result: Participant ID: ${data.data.livekit_participant_id}, Room: ${data.data.room_name}`, "success");
+          refreshAttempts();
+        } else {
+          showStatus("Test Call Failed", data.error || data.message, true);
+          log(`Test call error: ${data.error || data.message}`, "error");
+        }
+      } catch (err) {
+        showStatus("Network Error", err.message, true);
+        log(`Test call network error: ${err.message}`, "error");
+      } finally {
+        setButtonState(btn, false, text);
+      }
+    });
+  }
 
   // Initial load
   listProviders();

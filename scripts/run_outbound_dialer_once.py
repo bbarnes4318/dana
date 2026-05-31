@@ -27,11 +27,20 @@ async def main_async() -> int:
     parser.set_defaults(dry_run=True)
 
     parser.add_argument("--live-mode", action="store_true", help="Trigger live LiveKit dialer (requires TELEPHONY_LIVE_MODE env keys)")
+    parser.add_argument("--confirm", help="Must specify exact confirmation: 'LIVE CALL' if live mode is triggered")
     parser.add_argument("--max-calls", type=int, help="Limit number of calls to place in this tick")
     parser.add_argument("--operator", default="system", help="Operator identity running the dialer tick")
     parser.add_argument("--force", action="store_true", help="Force tick, bypassing calling window constraints (for testing only)")
 
     args = parser.parse_args()
+
+    # If live-mode is requested, require --confirm "LIVE CALL"
+    if args.live_mode:
+        if not args.confirm or args.confirm != "LIVE CALL":
+            sys.stderr.write("ERROR: Exact confirmation string '--confirm \"LIVE CALL\"' is required to execute real phone calls in live mode.\n")
+            print(json.dumps({"success": False, "error": "CONFIRMATION_REQUIRED"}))
+            return 1
+
     console = TrainingOperationsConsole()
 
     try:

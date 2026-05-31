@@ -1077,6 +1077,10 @@
                 <label for="dialer-max-calls">Max Calls to Trigger</label>
                 <input type="number" id="dialer-max-calls" class="form-control" placeholder="Default campaign concurrent limit">
               </div>
+              <div class="form-group" id="dialer-operator-group" style="display: none;">
+                <label for="dialer-operator">Operator ID *</label>
+                <input type="text" id="dialer-operator" class="form-control" placeholder="Required for live dialing">
+              </div>
               <div class="checkbox-group">
                 <input type="checkbox" id="dialer-dry-run" checked>
                 <label for="dialer-dry-run">Dry Run Mode (Simulate eligibility checks only)</label>
@@ -1084,6 +1088,13 @@
               <div class="checkbox-group">
                 <input type="checkbox" id="dialer-live-mode">
                 <label for="dialer-live-mode">Live Dial (Requires TELEPHONY_LIVE_MODE env flags)</label>
+              </div>
+              <div id="dialer-live-warning" style="display: none; border-left: 3px solid var(--danger); background-color: rgba(239, 68, 68, 0.05); padding: 0.5rem; margin-bottom: 0.5rem; border-radius: 4px;">
+                <div style="color: var(--danger); font-weight: bold; font-size: 0.75rem; margin-bottom: 0.25rem;">⚠️ DANGER: Real Phone Calls Trigger</div>
+                <div style="font-size: 0.7rem; color: var(--text-secondary); margin-bottom: 0.25rem;">
+                  This will place actual phone calls to leads in the campaign. Dry Run must be disabled. Type <strong>LIVE CALL</strong> to confirm:
+                </div>
+                <input type="text" id="dialer-live-confirm" class="form-control" style="font-size: 0.7rem; padding: 0.25rem 0.5rem;" placeholder="Type LIVE CALL here">
               </div>
               <button type="submit" id="btn-run-dialer-tick" class="btn btn-primary">⚡ Execute Dialer Tick</button>
             </form>
@@ -1129,7 +1140,62 @@
           </section>
         </div>
 
-        <!-- 4. Live Calls Monitor & Attempts Table -->
+        <!-- 4. Grid: Live Telephony Activation & Diagnostics -->
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; margin-bottom: 1.5rem;">
+          
+          <!-- A. Live Telephony Readiness Card -->
+          <section class="card" id="readiness-card">
+            <div class="card-title">
+              <span>Live Telephony Readiness Audit</span>
+              <button id="btn-check-readiness" class="btn btn-secondary" style="width: auto; padding: 0.25rem 0.5rem; font-size: 0.75rem;">🔍 Run Audit</button>
+            </div>
+            <div id="readiness-audit-results" style="font-size: 0.75rem; color: var(--text-secondary); line-height: 1.4;">
+              <p>Click "Run Audit" to verify environment keys, provider configs, and LiveKit SDK availability.</p>
+            </div>
+          </section>
+
+          <!-- B. Place Single Live Test Call -->
+          <section class="card" id="test-call-card">
+            <div class="card-title">Place Single Outbound Test Call</div>
+            <p style="font-size: 0.75rem; color: var(--text-secondary); margin-bottom: 0.5rem;">
+              <strong style="color: var(--danger);">WARNING:</strong> Placing a test call dials the phone number directly via LiveKit SIP trunk.
+            </p>
+            <form id="test-call-form">
+              <div class="form-group">
+                <label for="test-call-phone">Recipient Phone Number (E.164) *</label>
+                <input type="text" id="test-call-phone" class="form-control" placeholder="+15555550000" required>
+              </div>
+              <div class="form-group">
+                <label for="test-call-operator">Operator Name *</label>
+                <input type="text" id="test-call-operator" class="form-control" placeholder="Operator Name" required>
+              </div>
+              <div style="display: flex; gap: 1rem; margin-bottom: 0.5rem; font-size: 0.75rem;">
+                <div class="checkbox-group">
+                  <input type="checkbox" id="test-call-wait" checked>
+                  <label for="test-call-wait">Wait until answered</label>
+                </div>
+                <div class="checkbox-group">
+                  <input type="checkbox" id="test-call-krisp" checked>
+                  <label for="test-call-krisp">Krisp noise cancelling</label>
+                </div>
+              </div>
+              <button type="submit" id="btn-place-test-call" class="btn btn-danger" style="width: 100%;">📞 Place Real Test Call</button>
+            </form>
+          </section>
+
+          <!-- C. Agent Worker Status (Span 2) -->
+          <section class="card" style="grid-column: span 2;" id="worker-status-card">
+            <div class="card-title">
+              <span>Dana Agent Worker Status</span>
+              <button id="btn-check-worker" class="btn btn-secondary" style="width: auto; padding: 0.25rem 0.5rem; font-size: 0.75rem;">🔄 Query Status</button>
+            </div>
+            <div id="worker-status-details" style="font-size: 0.75rem; color: var(--text-secondary); line-height: 1.4;">
+              <p>Check status to see if the voice worker daemon is running or missing packages.</p>
+            </div>
+          </section>
+        </div>
+
+        <!-- 5. Live Calls Monitor & Attempts Table -->
         <section class="card" style="margin-bottom: 1.5rem;">
           <div class="card-title">
             <span>Real-time Live Calls Monitor</span>

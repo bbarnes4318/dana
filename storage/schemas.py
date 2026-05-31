@@ -403,6 +403,9 @@ class CallAttempt(BaseModel):
     livekit_participant_id: Optional[str] = None
     livekit_sip_call_id: Optional[str] = None
     provider_call_id: Optional[str] = None
+    sip_call_status: Optional[str] = None
+    sip_status_code: Optional[int] = None
+    sip_status: Optional[str] = None
     started_at: Optional[str] = None
     answered_at: Optional[str] = None
     ended_at: Optional[str] = None

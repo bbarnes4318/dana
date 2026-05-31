@@ -329,11 +329,17 @@ class DialerQueue:
                     await self.repository.save_campaign_lead(**lead)
                     continue
 
-                # Load Provider Config
-                if not provider_config:
-                    result.errors.append(f"Live dial failed: missing provider config for lead {lead_id}.")
+                # Load trunk ID from provider_config or env
+                outbound_trunk_id = None
+                if provider_config:
+                    outbound_trunk_id = provider_config.get("livekit_sip_outbound_trunk_id")
+                if not outbound_trunk_id:
+                    outbound_trunk_id = os.environ.get("LIVEKIT_SIP_OUTBOUND_TRUNK_ID")
+
+                if not outbound_trunk_id:
+                    result.errors.append(f"Live dial failed: missing outbound trunk ID for lead {lead_id}.")
                     attempt["status"] = "failed"
-                    attempt["failure_reason"] = "Missing provider configuration."
+                    attempt["failure_reason"] = "Missing LiveKit SIP Outbound Trunk ID."
                     attempt["ended_at"] = now.isoformat()
                     await self.repository.save_call_attempt(**attempt)
 
@@ -341,23 +347,50 @@ class DialerQueue:
                     await self.repository.save_campaign_lead(**lead)
                     continue
 
+                # Determine caller ID
+                caller_id = campaign.get("caller_id") or os.environ.get("DANA_OUTBOUND_CALLER_ID")
+
+                # Determine wait_until_answered and krisp_enabled
+                wait_until_answered_env = os.environ.get("DANA_WAIT_UNTIL_ANSWERED", "true").lower() == "true"
+                wait_until_answered = True
+                if provider_config and "wait_until_answered" in provider_config:
+                    wait_until_answered = bool(provider_config.get("wait_until_answered"))
+                else:
+                    wait_until_answered = wait_until_answered_env
+
+                krisp_enabled_env = os.environ.get("DANA_KRISP_ENABLED", "true").lower() == "true"
+                krisp_enabled = True
+                if provider_config and "krisp_enabled" in provider_config:
+                    krisp_enabled = bool(provider_config.get("krisp_enabled"))
+                else:
+                    krisp_enabled = krisp_enabled_env
+
                 dial_conf = LiveKitDialConfig(
                     live_mode=True,
-                    livekit_url=provider_config.get("livekit_url"),
-                    api_key=provider_config.get("livekit_api_key") or os.environ.get("LIVEKIT_API_KEY"),
-                    api_secret=provider_config.get("livekit_api_secret") or os.environ.get("LIVEKIT_API_SECRET"),
-                    outbound_trunk_id=provider_config.get("livekit_sip_outbound_trunk_id"),
+                    livekit_url=provider_config.get("livekit_url") if provider_config else os.environ.get("LIVEKIT_URL"),
+                    api_key=(provider_config.get("livekit_api_key") if provider_config else None) or os.environ.get("LIVEKIT_API_KEY"),
+                    api_secret=(provider_config.get("livekit_api_secret") if provider_config else None) or os.environ.get("LIVEKIT_API_SECRET"),
+                    outbound_trunk_id=outbound_trunk_id,
                     room_name=room_name,
                     phone_number=lead_phone,
-                    caller_id=campaign.get("caller_id"),
+                    caller_id=caller_id,
                     participant_identity=part_identity,
+                    wait_until_answered=wait_until_answered,
+                    krisp_enabled=krisp_enabled,
                     metadata={"campaign_id": campaign_id, "lead_id": lead_id, "attempt_id": attempt_id},
                 )
+
+                # Save CallAttempt *before* dialing with status "dialing"
+                await self.repository.save_call_attempt(**attempt)
 
                 dial_res = await self.adapter.dial(dial_conf)
 
                 if dial_res.success:
-                    attempt["status"] = "dialing"
+                    status_val = "in_progress"
+                    if wait_until_answered and dial_res.answered:
+                        status_val = "answered"
+                    
+                    attempt["status"] = status_val
                     attempt["livekit_participant_id"] = dial_res.livekit_participant_id
                     attempt["livekit_sip_call_id"] = dial_res.livekit_sip_call_id
                     attempt["provider_call_id"] = dial_res.provider_call_id
@@ -370,8 +403,8 @@ class DialerQueue:
                         campaign_id=campaign_id,
                         lead_id=lead_id,
                         attempt_id=attempt_id,
-                        call_id=attempt_id, # Link call_id to attempt_id
-                        status="starting",
+                        call_id=attempt_id,
+                        status="active",
                         current_stage="OPENING",
                         livekit_room_name=room_name,
                         participant_identity=part_identity,
@@ -379,6 +412,9 @@ class DialerQueue:
                         updated_at=now,
                     )
                     
+                    lead["status"] = "in_call"
+                    await self.repository.save_campaign_lead(**lead)
+
                     result.calls_started += 1
                     result.attempts_created += 1
                     result.attempt_ids.append(attempt_id)
@@ -386,10 +422,18 @@ class DialerQueue:
                     result.errors.append(f"Live dial failed for lead {lead_id}: {dial_res.message}")
                     attempt["status"] = "failed"
                     attempt["failure_reason"] = dial_res.message
+                    attempt["sip_call_status"] = dial_res.sip_call_status
+                    attempt["sip_status_code"] = dial_res.sip_status_code
+                    attempt["sip_status"] = dial_res.sip_status
                     attempt["ended_at"] = now.isoformat()
                     await self.repository.save_call_attempt(**attempt)
 
-                    lead["status"] = "failed"
+                    # Lead status "failed" unless retryable
+                    max_attempts = lead.get("max_attempts", 3)
+                    if lead.get("attempt_count", 0) < max_attempts:
+                        lead["status"] = "queued"
+                    else:
+                        lead["status"] = "failed"
                     await self.repository.save_campaign_lead(**lead)
 
             else:

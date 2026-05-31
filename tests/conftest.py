@@ -225,6 +225,14 @@ api_mock = MagicMock()
 api_mock.CreateSIPParticipantRequest = MockCreateSIPParticipantRequest
 sys.modules['livekit.api'] = api_mock
 
+# Create livekit.protocol and livekit.protocol.sip mock modules
+protocol_mock = MagicMock()
+sip_proto_mock = MagicMock()
+sip_proto_mock.CreateSIPParticipantRequest = MockCreateSIPParticipantRequest
+protocol_mock.sip = sip_proto_mock
+sys.modules['livekit.protocol'] = protocol_mock
+sys.modules['livekit.protocol.sip'] = sip_proto_mock
+
 # Create top-level livekit
 livekit_mock = MagicMock()
 livekit_mock.rtc = rtc_mock
