@@ -601,6 +601,38 @@ class TrainingWebConsoleServer(ThreadingHTTPServer):
                 res = await self.console.check_livekit_agent_worker()
                 return (200 if res.success else 400, res.model_dump(mode="json"))
 
+            elif route == "/api/telephony/live/smoke-test" and method == "POST":
+                if not body:
+                    return (400, {"success": False, "error": "JSON body is required."})
+                phone_number = body.get("phone_number")
+                operator = body.get("operator")
+                confirm = body.get("confirm")
+                provider_config_id = body.get("provider_config_id")
+                campaign_id = body.get("campaign_id")
+                dry_run = bool(body.get("dry_run", False))
+                place_call = bool(body.get("place_call", True))
+                wait_until_answered = bool(body.get("wait_until_answered", True))
+                krisp_enabled = bool(body.get("krisp_enabled", True))
+
+                if not operator:
+                    return (400, {"success": False, "error": "operator parameter is required."})
+
+                if place_call and not dry_run and confirm != "LIVE CALL":
+                    return (400, {"success": False, "error": "Confirmation 'LIVE CALL' is required to execute a live smoke test call."})
+
+                res = await self.console.run_live_telephony_smoke_test(
+                    phone_number=phone_number,
+                    operator=operator,
+                    confirm=confirm or "",
+                    provider_config_id=provider_config_id,
+                    campaign_id=campaign_id,
+                    dry_run=dry_run,
+                    place_call=place_call,
+                    wait_until_answered=wait_until_answered,
+                    krisp_enabled=krisp_enabled
+                )
+                return (200 if res.success else 400, res.model_dump(mode="json"))
+
             elif route == "/api/telephony/calls/live" and method == "GET":
                 campaign_id = query_params.get("campaign_id", [None])[0]
                 limit = int(query_params.get("limit", [100])[0])

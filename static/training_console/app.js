@@ -2299,6 +2299,81 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
+  // Live Smoke Test Form submission
+  const smokeTestForm = document.getElementById("smoke-test-form");
+  if (smokeTestForm) {
+    smokeTestForm.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const operator = document.getElementById("smoke-test-operator").value.trim();
+      const phone = document.getElementById("smoke-test-phone").value.trim();
+      const providerId = document.getElementById("smoke-test-provider").value.trim() || null;
+      const campaignId = document.getElementById("smoke-test-campaign").value.trim() || null;
+      const dryRun = document.getElementById("smoke-test-dry-run").checked;
+      const placeCall = document.getElementById("smoke-test-place-call").checked;
+      const wait = document.getElementById("smoke-test-wait").checked;
+      const krisp = document.getElementById("smoke-test-krisp").checked;
+      const confirmInput = document.getElementById("smoke-test-confirm").value.trim();
+      
+      const btn = document.getElementById("btn-run-smoke-test");
+      const text = btn.innerText;
+
+      if (!operator) {
+        alert("Operator is required!");
+        return;
+      }
+
+      if (placeCall && !dryRun && confirmInput !== "LIVE CALL") {
+        alert("You must type LIVE CALL to confirm placing a live call!");
+        return;
+      }
+
+      setButtonState(btn, true, "🚀 Running Smoke Test...");
+      log(`Starting outbound telephony smoke test (dry-run: ${dryRun}, place-call: ${placeCall})...`);
+
+      const payload = {
+        operator: operator,
+        phone_number: phone || null,
+        provider_config_id: providerId,
+        campaign_id: campaignId,
+        dry_run: dryRun,
+        place_call: placeCall,
+        wait_until_answered: wait,
+        krisp_enabled: krisp,
+        confirm: confirmInput
+      };
+
+      try {
+        const response = await fetch("/api/telephony/live/smoke-test", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+        const data = await response.json();
+        
+        // Show results box
+        const resultsBox = document.getElementById("smoke-test-results");
+        const jsonBox = document.getElementById("smoke-test-output-json");
+        if (resultsBox && jsonBox) {
+          resultsBox.style.display = "block";
+          jsonBox.innerText = JSON.stringify(data, null, 2);
+        }
+
+        if (response.ok && data.success) {
+          showStatus("Smoke Test Passed", data.message || "Outbound smoke test run completed successfully.");
+          log(`Smoke test succeeded! Report paths: JSON: ${data.report_json_path}, MD: ${data.report_markdown_path}`, "success");
+        } else {
+          showStatus("Smoke Test Failed", data.error || data.message || "Failed to complete smoke test.", true);
+          log(`Smoke test failed: ${data.error || data.message}`, "error");
+        }
+      } catch (err) {
+        showStatus("Network Error", err.message, true);
+        log(`Smoke test network error: ${err.message}`, "error");
+      } finally {
+        setButtonState(btn, false, text);
+      }
+    });
+  }
+
   // Initial load
   listProviders();
   listCampaignsTel();

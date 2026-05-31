@@ -1193,7 +1193,65 @@
               <p>Check status to see if the voice worker daemon is running or missing packages.</p>
             </div>
           </section>
+
+          <!-- D. Live Smoke Test Card (Span 2) -->
+          <section class="card" style="grid-column: span 2;" id="smoke-test-card">
+            <div class="card-title">Live Telephony Smoke Test Runner</div>
+            <p style="font-size: 0.75rem; color: var(--text-secondary); margin-bottom: 0.5rem;">
+              This can place a real phone call. It only runs live when TELEPHONY_LIVE_MODE=true, DANA_ENABLE_OUTBOUND_DIALER=true, required LiveKit env vars are present, and confirmation is exactly LIVE CALL.
+            </p>
+            <form id="smoke-test-form">
+              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 0.5rem;">
+                <div class="form-group">
+                  <label for="smoke-test-operator">Operator Name *</label>
+                  <input type="text" id="smoke-test-operator" class="form-control" placeholder="Operator Name" required>
+                </div>
+                <div class="form-group">
+                  <label for="smoke-test-phone">Phone Number (Optional - fallbacks to DANA_TEST_CALL_TO)</label>
+                  <input type="text" id="smoke-test-phone" class="form-control" placeholder="+15555550000">
+                </div>
+              </div>
+              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 0.5rem;">
+                <div class="form-group">
+                  <label for="smoke-test-provider">Provider Config ID (Optional)</label>
+                  <input type="text" id="smoke-test-provider" class="form-control" placeholder="provider-config-id">
+                </div>
+                <div class="form-group">
+                  <label for="smoke-test-campaign">Campaign ID (Optional)</label>
+                  <input type="text" id="smoke-test-campaign" class="form-control" placeholder="campaign-id">
+                </div>
+              </div>
+              <div style="display: flex; gap: 1.5rem; margin-bottom: 0.75rem; font-size: 0.75rem; flex-wrap: wrap;">
+                <div class="checkbox-group">
+                  <input type="checkbox" id="smoke-test-dry-run">
+                  <label for="smoke-test-dry-run">Dry Run (Checks configuration only)</label>
+                </div>
+                <div class="checkbox-group">
+                  <input type="checkbox" id="smoke-test-place-call" checked>
+                  <label for="smoke-test-place-call">Place Call</label>
+                </div>
+                <div class="checkbox-group">
+                  <input type="checkbox" id="smoke-test-wait" checked>
+                  <label for="smoke-test-wait">Wait until answered</label>
+                </div>
+                <div class="checkbox-group">
+                  <input type="checkbox" id="smoke-test-krisp" checked>
+                  <label for="smoke-test-krisp">Krisp enabled</label>
+                </div>
+              </div>
+              <div class="form-group" style="margin-bottom: 0.75rem;">
+                <label for="smoke-test-confirm">Type <strong>LIVE CALL</strong> to confirm:</label>
+                <input type="text" id="smoke-test-confirm" class="form-control" placeholder="Type LIVE CALL here">
+              </div>
+              <button type="submit" id="btn-run-smoke-test" class="btn btn-danger" style="width: 100%;">🚀 Run Live Smoke Test</button>
+            </form>
+            <div id="smoke-test-results" style="font-size: 0.75rem; color: var(--text-secondary); line-height: 1.4; margin-top: 1rem; display: none;">
+              <h4 style="color: var(--text-primary); margin-bottom: 0.25rem;">Smoke Test Output</h4>
+              <pre id="smoke-test-output-json" style="background: rgba(0,0,0,0.2); padding: 0.5rem; border-radius: 4px; overflow-x: auto; max-height: 200px; font-family: monospace;"></pre>
+            </div>
+          </section>
         </div>
+
 
         <!-- 5. Live Calls Monitor & Attempts Table -->
         <section class="card" style="margin-bottom: 1.5rem;">

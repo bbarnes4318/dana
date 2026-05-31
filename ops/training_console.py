@@ -1908,6 +1908,50 @@ class TrainingOperationsConsole:
         except Exception as e:
             return ConsoleActionResult(action="check_livekit_agent_worker", success=False, message="Failed to check LiveKit agent worker status.", error=str(e))
 
+    async def run_live_telephony_smoke_test(
+        self,
+        phone_number: str | None,
+        operator: str,
+        confirm: str,
+        provider_config_id: str | None = None,
+        campaign_id: str | None = None,
+        dry_run: bool = False,
+        place_call: bool = True,
+        wait_until_answered: bool = True,
+        krisp_enabled: bool = True,
+    ) -> ConsoleActionResult:
+        try:
+            from telephony.live_smoke_test import LiveTelephonySmokeTester, LiveSmokeTestConfig
+            tester = LiveTelephonySmokeTester(repository=self.repository)
+            config = LiveSmokeTestConfig(
+                phone_number=phone_number,
+                operator=operator,
+                confirm=confirm,
+                provider_config_id=provider_config_id,
+                campaign_id=campaign_id,
+                dry_run=dry_run,
+                place_call=place_call,
+                wait_until_answered=wait_until_answered,
+                krisp_enabled=krisp_enabled
+            )
+            res = await tester.run(config)
+            return ConsoleActionResult(
+                action="run_live_telephony_smoke_test",
+                success=res.success,
+                message="Live smoke test executed.",
+                data=res.model_dump(mode="json"),
+                warnings=res.warnings,
+                report_json_path=res.report_json_path,
+                report_markdown_path=res.report_markdown_path
+            )
+        except Exception as e:
+            return ConsoleActionResult(
+                action="run_live_telephony_smoke_test",
+                success=False,
+                message="Failed to execute live smoke test.",
+                error=str(e)
+            )
+
 
 def json_serializable(obj: Any) -> Any:
     """Recursively convert custom objects/dataclasses to JSON-serializable formats."""

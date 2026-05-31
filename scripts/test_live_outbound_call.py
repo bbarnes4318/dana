@@ -59,7 +59,7 @@ async def main():
         operator=args.operator.strip(),
     )
 
-    print(f"Executing manual live test call to {args.to} under operator {args.operator}...", flush=True)
+    print(f"Executing manual live test call to {args.to} under operator {args.operator}...", file=sys.stderr, flush=True)
     res = await tester.place_test_call(config)
 
     # Output JSON representation

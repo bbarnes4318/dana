@@ -43,13 +43,25 @@ DANA_AGENT_WORKER_ENABLED=true
 - **Web UI**:
   Go to the **Telephony & Campaigns** tab, find the **Live Telephony Readiness Audit** card, and click **Run Audit**.
 
-### 2. Startup of the Agent Worker
+### 2. Live Smoke Test (Preferred Verification Method)
+Before starting campaigns or placing individual test calls, run the full automated smoke test. This tests readiness, worker dependencies, SIP trunking, and call attempts in a single guarded flow.
+- **CLI**:
+  ```bash
+  python scripts/run_live_telephony_smoke_test.py --operator "Jimmy" --to +15555550000 --confirm "LIVE CALL"
+  ```
+- **Web UI**:
+  1. Go to the **Telephony** tab and locate the **Live Smoke Test** card.
+  2. Enter **Operator Name**, optionally enter **Phone Number**, type **LIVE CALL** in the confirmation input box.
+  3. Click **Run Live Smoke Test**.
+- For more details, see the [Live Telephony Smoke Test Runbook](file:///C:/Users/jimbo/.gemini/antigravity/worktrees/ultimate-voice/telephony-campaign-ops-layer/docs/live_telephony_smoke_test.md).
+
+### 3. Startup of the Agent Worker
 - **CLI**:
   ```bash
   python scripts/run_livekit_agent_worker.py
   ```
 
-### 3. Placing a single Live Test Call
+### 4. Placing a single Live Test Call
 - **CLI**:
   ```bash
   python scripts/test_live_outbound_call.py --to +15555550000 --operator "Jimmy" --confirm "LIVE CALL"
