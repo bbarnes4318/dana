@@ -1207,3 +1207,179 @@ async def test_report_readable_for_nontechnical_manager(tmp_path: Path, tracker:
     assert "Executive Summary" in md_content
     assert "Safety Controls" in md_content
     assert "Required Next Steps" in md_content
+
+
+# 29. test_approved_start_item_without_start_authorized_fails
+@pytest.mark.asyncio
+async def test_approved_start_item_without_start_authorized_fails(tmp_path: Path, tracker: FineTuneJobTracker, repo: Repository) -> None:
+    train_path = tmp_path / "train.jsonl"
+    val_path = tmp_path / "val.jsonl"
+    write_jsonl(train_path, [make_safe_openai_chat_record(i) for i in range(5)])
+    write_jsonl(val_path, [make_safe_openai_chat_record(i+10) for i in range(2)])
+    t_hash = compute_hash(train_path)
+    v_hash = compute_hash(val_path)
+
+    payload = {
+        "upload_ready": True,
+        "manual_only": True,
+        "provider": "openai",
+        "request_id": "req_123",
+        "train_path": str(train_path),
+        "validation_path": str(val_path),
+        "train_hash": t_hash,
+        "validation_hash": v_hash,
+        "start_authorized": False,  # False!
+        "api_upload_performed": False,
+        "fine_tune_job_started": False,
+        "deployment_allowed": False,
+        "review_history": [{"action": "approved", "reviewer": "Braden", "reviewed_at": datetime.now(timezone.utc).isoformat()}]
+    }
+    
+    job_start_id = await repo.save_human_review_item(
+        item_type="fine_tune_job_start_approval",
+        status="approved",
+        payload=payload,
+        reviewer="Braden",
+        reviewed_at=datetime.now(timezone.utc)
+    )
+    
+    config = FineTuneJobTrackerConfig(
+        job_start_review_item_id=job_start_id
+    )
+    
+    res = await tracker.check_start_eligibility(config)
+    assert res.human_start_approved is False
+    assert any("start_authorized" in f.lower() for f in res.critical_failures)
+
+
+# 30. test_record_manual_upload_rejects_approved_item_without_start_authorized
+@pytest.mark.asyncio
+async def test_record_manual_upload_rejects_approved_item_without_start_authorized(tmp_path: Path, tracker: FineTuneJobTracker, repo: Repository) -> None:
+    train_path = tmp_path / "train.jsonl"
+    val_path = tmp_path / "val.jsonl"
+    write_jsonl(train_path, [make_safe_openai_chat_record(i) for i in range(5)])
+    write_jsonl(val_path, [make_safe_openai_chat_record(i+10) for i in range(2)])
+    t_hash = compute_hash(train_path)
+    v_hash = compute_hash(val_path)
+
+    payload = {
+        "upload_ready": True,
+        "manual_only": True,
+        "provider": "openai",
+        "request_id": "req_123",
+        "train_path": str(train_path),
+        "validation_path": str(val_path),
+        "train_hash": t_hash,
+        "validation_hash": v_hash,
+        "start_authorized": False,  # False!
+        "api_upload_performed": False,
+        "fine_tune_job_started": False,
+        "deployment_allowed": False,
+        "review_history": [{"action": "approved", "reviewer": "Braden", "reviewed_at": datetime.now(timezone.utc).isoformat()}]
+    }
+    
+    job_start_id = await repo.save_human_review_item(
+        item_type="fine_tune_job_start_approval",
+        status="approved",
+        payload=payload,
+        reviewer="Braden",
+        reviewed_at=datetime.now(timezone.utc)
+    )
+    
+    config = FineTuneJobTrackerConfig(
+        job_start_review_item_id=job_start_id,
+        provider_file_id="file-123",
+        provider_validation_file_id="file-456"
+    )
+    
+    res = await tracker.record_manual_upload(config)
+    assert res.success is False
+    assert any("start_authorized" in f.lower() for f in res.warnings or [res.message])
+
+
+# 31. test_record_manual_job_rejects_approved_item_without_start_authorized
+@pytest.mark.asyncio
+async def test_record_manual_job_rejects_approved_item_without_start_authorized(tmp_path: Path, tracker: FineTuneJobTracker, repo: Repository) -> None:
+    train_path = tmp_path / "train.jsonl"
+    val_path = tmp_path / "val.jsonl"
+    write_jsonl(train_path, [make_safe_openai_chat_record(i) for i in range(5)])
+    write_jsonl(val_path, [make_safe_openai_chat_record(i+10) for i in range(2)])
+    t_hash = compute_hash(train_path)
+    v_hash = compute_hash(val_path)
+
+    payload = {
+        "upload_ready": True,
+        "manual_only": True,
+        "provider": "openai",
+        "request_id": "req_123",
+        "train_path": str(train_path),
+        "validation_path": str(val_path),
+        "train_hash": t_hash,
+        "validation_hash": v_hash,
+        "start_authorized": False,  # False!
+        "api_upload_performed": False,
+        "fine_tune_job_started": False,
+        "deployment_allowed": False,
+        "review_history": [{"action": "approved", "reviewer": "Braden", "reviewed_at": datetime.now(timezone.utc).isoformat()}]
+    }
+    
+    job_start_id = await repo.save_human_review_item(
+        item_type="fine_tune_job_start_approval",
+        status="approved",
+        payload=payload,
+        reviewer="Braden",
+        reviewed_at=datetime.now(timezone.utc)
+    )
+    
+    config = FineTuneJobTrackerConfig(
+        job_start_review_item_id=job_start_id,
+        provider_job_id="ftjob-123"
+    )
+    
+    res = await tracker.record_manual_job_start(config)
+    assert res.success is False
+    assert any("start_authorized" in f.lower() for f in res.warnings or [res.message])
+
+
+# 32. test_approved_start_item_with_start_authorized_true_passes
+@pytest.mark.asyncio
+async def test_approved_start_item_with_start_authorized_true_passes(tmp_path: Path, tracker: FineTuneJobTracker, repo: Repository) -> None:
+    train_path = tmp_path / "train.jsonl"
+    val_path = tmp_path / "val.jsonl"
+    write_jsonl(train_path, [make_safe_openai_chat_record(i) for i in range(5)])
+    write_jsonl(val_path, [make_safe_openai_chat_record(i+10) for i in range(2)])
+    t_hash = compute_hash(train_path)
+    v_hash = compute_hash(val_path)
+
+    payload = {
+        "upload_ready": True,
+        "manual_only": True,
+        "provider": "openai",
+        "request_id": "req_123",
+        "train_path": str(train_path),
+        "validation_path": str(val_path),
+        "train_hash": t_hash,
+        "validation_hash": v_hash,
+        "start_authorized": True,  # True!
+        "api_upload_performed": False,
+        "fine_tune_job_started": False,
+        "deployment_allowed": False,
+        "review_history": [{"action": "approved", "reviewer": "Braden", "reviewed_at": datetime.now(timezone.utc).isoformat()}]
+    }
+    
+    job_start_id = await repo.save_human_review_item(
+        item_type="fine_tune_job_start_approval",
+        status="approved",
+        payload=payload,
+        reviewer="Braden",
+        reviewed_at=datetime.now(timezone.utc)
+    )
+    
+    config = FineTuneJobTrackerConfig(
+        job_start_review_item_id=job_start_id
+    )
+    
+    res = await tracker.check_start_eligibility(config)
+    assert res.human_start_approved is True
+    assert len(res.critical_failures) == 0
+

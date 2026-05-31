@@ -325,20 +325,39 @@ class FineTuneJobTracker:
                 
                 status_ok = start_review_item.get("status") == "approved"
                 reviewer = start_review_item.get("reviewer")
-                reviewed_at = start_review_item.get("reviewed_at")
-                
                 payload = start_review_item.get("payload") or {}
+                reviewed_at = start_review_item.get("reviewed_at") or payload.get("approved_at")
+                
                 history = payload.get("review_history") or []
                 has_history_action = any(h.get("action") == "approved" for h in history)
                 has_approved_metadata = bool(reviewer and reviewed_at)
                 has_approval_signal = has_history_action or (status_ok and has_approved_metadata)
                 
-                start_authorized = payload.get("start_authorized") is True or status_ok
+                start_authorized = payload.get("start_authorized") is True
                 
-                if status_ok and reviewer and reviewed_at and has_approval_signal and start_authorized:
+                is_start_item_type = start_review_item.get("item_type") == "fine_tune_job_start_approval"
+                is_human_approved = bool(
+                    is_start_item_type and
+                    status_ok and
+                    reviewer and
+                    reviewed_at and
+                    has_approval_signal and
+                    start_authorized and
+                    payload.get("upload_ready", False) is True and
+                    payload.get("manual_only", False) is True and
+                    payload.get("api_upload_performed", False) is False and
+                    payload.get("fine_tune_job_started", False) is False and
+                    payload.get("deployment_allowed", False) is False
+                )
+                
+                if is_human_approved:
                     human_start_approved = True
                 else:
-                    critical_failures.append("Job start review item is not human-approved or start_authorized is not true.")
+                    human_start_approved = False
+                    if status_ok and not start_authorized:
+                        critical_failures.append("Job start review item is approved but payload.start_authorized is not true.")
+                    else:
+                        critical_failures.append("Job start review item is not human-approved or start_authorized is not true.")
                     
                 if payload.get("upload_ready") is not True:
                     critical_failures.append("Job start review item upload_ready is not true.")
