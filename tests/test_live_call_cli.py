@@ -87,3 +87,29 @@ async def test_run_outbound_dialer_live_mode_requires_confirmation(tmp_path):
             exit_code = await dialer_main_async()
             assert exit_code == 1
             mock_dial.assert_not_called()
+
+
+def test_worker_check_only_cli_outputs_json(capsys):
+    from scripts.run_livekit_agent_worker import main as cli_main
+    from unittest.mock import patch
+    import json
+    with patch("sys.argv", ["run_livekit_agent_worker.py", "--check-only"]), \
+         patch("scripts.run_livekit_agent_worker.audit_worker_status") as mock_audit:
+        from telephony.livekit_agent_worker import WorkerDependencyStatus
+        mock_audit.return_value = WorkerDependencyStatus(
+            ready=True,
+            status="ready",
+            livekit_agents_installed=True,
+            livekit_plugins_namespace_available=True,
+            openai_plugin_available=True,
+            silero_vad_plugin_available=True,
+            agent_runtime_available=True,
+            required_env_present=True
+        )
+        with pytest.raises(SystemExit) as excinfo:
+            cli_main()
+        assert excinfo.value.code == 0
+        captured = capsys.readouterr()
+        data = json.loads(captured.out.strip())
+        assert isinstance(data, dict)
+        assert data["ready"] is True

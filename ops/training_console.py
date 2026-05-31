@@ -1888,16 +1888,30 @@ class TrainingOperationsConsole:
     async def check_livekit_agent_worker(self) -> ConsoleActionResult:
         try:
             from telephony.livekit_agent_worker import check_worker_dependencies
-            ok, err = check_worker_dependencies()
+            status_dict = check_worker_dependencies()
+            ok = status_dict.get("ready", False)
+            err = status_dict.get("error")
             import os
             cmd = "python scripts/run_livekit_agent_worker.py"
             worker_enabled = os.environ.get("DANA_AGENT_WORKER_ENABLED") == "true"
             data = {
-                "installed": ok,
+                "installed": status_dict.get("livekit_agents_installed", False),
                 "error": err,
                 "command": cmd,
                 "enabled": worker_enabled,
-                "status": "ready" if (ok and worker_enabled) else ("disabled" if ok else "dependencies_missing")
+                "status": status_dict.get("status", "unknown"),
+                "ready": status_dict.get("ready", False),
+                "missing_packages": status_dict.get("missing_packages", []),
+                "missing_env": status_dict.get("missing_env", []),
+                "missing_provider_config": status_dict.get("missing_provider_config", []),
+                "warnings": status_dict.get("warnings", []),
+                "next_steps": status_dict.get("next_steps", []),
+                "livekit_agents_installed": status_dict.get("livekit_agents_installed", False),
+                "livekit_plugins_namespace_available": status_dict.get("livekit_plugins_namespace_available", False),
+                "openai_plugin_available": status_dict.get("openai_plugin_available", False),
+                "silero_vad_plugin_available": status_dict.get("silero_vad_plugin_available", False),
+                "agent_runtime_available": status_dict.get("agent_runtime_available", False),
+                "required_env_present": status_dict.get("required_env_present", False),
             }
             return ConsoleActionResult(
                 action="check_livekit_agent_worker",

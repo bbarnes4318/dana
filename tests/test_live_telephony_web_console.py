@@ -145,7 +145,47 @@ def test_ui_requires_live_call_confirmation_text():
     assert "LIVE CALL" in content
 
 def test_no_live_prompt_file_modified():
-    # Strict rule check: no master prompt or live agent instructions files can be touched
-    # Read README or search files to confirm no prompts modified
     pass
+
+
+@pytest.mark.asyncio
+async def test_agent_worker_status_endpoint_returns_detailed_status(server, mock_console):
+    mock_console.check_livekit_agent_worker = AsyncMock(return_value=ConsoleActionResult(
+        action="check_livekit_agent_worker",
+        success=True,
+        message="Ok",
+        data={
+            "status": "ready",
+            "ready": True,
+            "missing_packages": [],
+            "livekit_agents_installed": True,
+            "agent_runtime_available": True
+        }
+    ))
+
+    code, body = await server.handle_api(
+        method="GET",
+        path="/api/telephony/live/agent-worker",
+        body=None
+    )
+    assert code == 200
+    assert body["success"] is True
+    assert body["data"]["status"] == "ready"
+    assert body["data"]["ready"] is True
+    assert "missing_packages" in body["data"]
+    assert body["data"]["livekit_agents_installed"] is True
+
+
+def test_ui_shows_worker_status_card():
+    html_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "static", "training_console", "index.html")
+    with open(html_path, "r", encoding="utf-8") as f:
+        content = f.read()
+    assert "id=\"worker-status-card\"" in content
+
+
+def test_ui_shows_phone_path_vs_agent_voice_status():
+    html_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "static", "training_console", "index.html")
+    with open(html_path, "r", encoding="utf-8") as f:
+        content = f.read()
+    assert "id=\"smoke-test-checklist\"" in content
 

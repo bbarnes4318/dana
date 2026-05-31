@@ -130,7 +130,8 @@ async def test_smoke_test_calls_live_tester_when_ready(mock_repo, mock_adapter, 
             warnings=[],
             next_steps=[]
         )
-        with patch("telephony.live_call_tester.LiveCallTester.place_test_call") as mock_call:
+        with patch("telephony.livekit_agent_worker.check_worker_dependencies", return_value={"ready": True, "livekit_agents_installed": True, "error": None}), \
+             patch("telephony.live_call_tester.LiveCallTester.place_test_call") as mock_call:
             mock_call.return_value = LiveCallTestResult(
                 success=True,
                 attempted_live_call=True,
@@ -432,3 +433,131 @@ async def test_stdout_clean_json_for_live_test_cli(tmp_path, capsys):
     
     # Captured stderr should contain the progress/status logging
     assert "Running outbound telephony smoke test" in captured.err
+
+
+# 19. test_smoke_test_reports_partial_success_when_phone_rings_but_worker_missing
+@pytest.mark.asyncio
+async def test_smoke_test_reports_partial_success_when_phone_rings_but_worker_missing(mock_repo, mock_adapter, tmp_path):
+    tester = LiveTelephonySmokeTester(repository=mock_repo, adapter=mock_adapter)
+    config = LiveSmokeTestConfig(
+        operator="Jimmy",
+        phone_number="+15513326220",
+        confirm="LIVE CALL",
+        place_call=True,
+        dry_run=False,
+        start_worker_check=True,
+        output_dir=str(tmp_path)
+    )
+    
+    with patch("telephony.live_telephony_readiness.LiveTelephonyReadinessChecker.run") as mock_run:
+        mock_run.return_value = LiveTelephonyReadinessResult(
+            ready=True,
+            live_mode_enabled=True,
+            required_env={},
+            provider_config_ok=True,
+            outbound_trunk_id_present=True,
+            caller_id_present=True,
+            livekit_sdk_available=True,
+            agent_worker_ready=True,
+            failures=[],
+            warnings=[],
+            next_steps=[]
+        )
+        with patch("telephony.livekit_agent_worker.check_worker_dependencies", return_value={"ready": False, "livekit_agents_installed": True, "error": "env_missing"}), \
+             patch("telephony.live_call_tester.LiveCallTester.place_test_call") as mock_call:
+            mock_call.return_value = LiveCallTestResult(
+                success=True,
+                attempted_live_call=True,
+                room_name="test-room",
+                livekit_participant_id="part-1",
+                livekit_sip_call_id="sip-1",
+                call_attempt_id="att-1",
+                answered=True,
+                message="Call placed"
+            )
+            res = await tester.run(config)
+            assert res.success is False
+            assert res.partial_success is True
+            assert res.worker_ready is False
+            assert any("Phone call path works, but Dana voice worker is not ready" in f for f in res.failures)
+
+
+# 20. test_smoke_test_success_requires_worker_ready_when_place_call_true
+@pytest.mark.asyncio
+async def test_smoke_test_success_requires_worker_ready_when_place_call_true(mock_repo, mock_adapter, tmp_path):
+    tester = LiveTelephonySmokeTester(repository=mock_repo, adapter=mock_adapter)
+    config = LiveSmokeTestConfig(
+        operator="Jimmy",
+        phone_number="+15513326220",
+        confirm="LIVE CALL",
+        place_call=True,
+        dry_run=False,
+        start_worker_check=True,
+        output_dir=str(tmp_path)
+    )
+    
+    with patch("telephony.live_telephony_readiness.LiveTelephonyReadinessChecker.run") as mock_run:
+        mock_run.return_value = LiveTelephonyReadinessResult(
+            ready=True,
+            live_mode_enabled=True,
+            required_env={},
+            provider_config_ok=True,
+            outbound_trunk_id_present=True,
+            caller_id_present=True,
+            livekit_sdk_available=True,
+            agent_worker_ready=True,
+            failures=[],
+            warnings=[],
+            next_steps=[]
+        )
+        with patch("telephony.livekit_agent_worker.check_worker_dependencies", return_value={"ready": True, "livekit_agents_installed": True, "error": None}), \
+             patch("telephony.live_call_tester.LiveCallTester.place_test_call") as mock_call:
+            mock_call.return_value = LiveCallTestResult(
+                success=True,
+                attempted_live_call=True,
+                room_name="test-room",
+                livekit_participant_id="part-1",
+                livekit_sip_call_id="sip-1",
+                call_attempt_id="att-1",
+                answered=True,
+                message="Call placed"
+            )
+            res = await tester.run(config)
+            assert res.success is True
+            assert res.partial_success is False
+            assert res.worker_ready is True
+
+
+# 21. test_smoke_test_dry_run_reports_worker_status
+@pytest.mark.asyncio
+async def test_smoke_test_dry_run_reports_worker_status(mock_repo, mock_adapter, tmp_path):
+    tester = LiveTelephonySmokeTester(repository=mock_repo, adapter=mock_adapter)
+    config = LiveSmokeTestConfig(
+        operator="Jimmy",
+        phone_number="+15513326220",
+        confirm="LIVE CALL",
+        place_call=True,
+        dry_run=True,
+        start_worker_check=True,
+        output_dir=str(tmp_path)
+    )
+    
+    with patch("telephony.live_telephony_readiness.LiveTelephonyReadinessChecker.run") as mock_run:
+        mock_run.return_value = LiveTelephonyReadinessResult(
+            ready=True,
+            live_mode_enabled=True,
+            required_env={},
+            provider_config_ok=True,
+            outbound_trunk_id_present=True,
+            caller_id_present=True,
+            livekit_sdk_available=True,
+            agent_worker_ready=True,
+            failures=[],
+            warnings=[],
+            next_steps=[]
+        )
+        with patch("telephony.livekit_agent_worker.check_worker_dependencies", return_value={"ready": True, "livekit_agents_installed": True, "error": None}):
+            res = await tester.run(config)
+            assert res.worker_ready is True
+            assert res.worker_can_start is True
+            assert res.dry_run is True

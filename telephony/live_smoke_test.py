@@ -47,6 +47,13 @@ class LiveSmokeTestResult(BaseModel):
     warnings: List[str] = Field(default_factory=list)
     next_steps: List[str] = Field(default_factory=list)
 
+    # New validation fields
+    worker_ready: bool = False
+    worker_can_start: bool = False
+    expected_agent_join: bool = False
+    expected_agent_speech: bool = False
+    partial_success: bool = False
+
 
 class LiveTelephonySmokeTester:
     """Orchestrates live outbound telephony smoke tests and logs results securely."""
@@ -226,27 +233,55 @@ class LiveTelephonySmokeTester:
             next_steps.extend(readiness_res.next_steps)
 
         # 5. Check worker status
+        worker_ready = False
         worker_status = {}
+        worker_can_start = False
+        expected_agent_join = False
+        expected_agent_speech = False
+
         if config.start_worker_check:
             try:
                 from telephony.livekit_agent_worker import check_worker_dependencies
-                worker_ok, worker_err = check_worker_dependencies()
+                status_dict = check_worker_dependencies()
+                if isinstance(status_dict, (tuple, list)):
+                    worker_ok = status_dict[0]
+                    worker_err = status_dict[1]
+                    worker_ready = worker_ok
+                    worker_can_start = worker_ok
+                else:
+                    worker_ready = status_dict.get("ready", False)
+                    worker_ok = status_dict.get("livekit_agents_installed", False)
+                    worker_err = status_dict.get("error")
+                    worker_can_start = (
+                        status_dict.get("livekit_agents_installed", False) and
+                        status_dict.get("agent_runtime_available", True)
+                    )
             except Exception as e:
-                worker_ok, worker_err = False, str(e)
+                worker_ok = False
+                worker_err = str(e)
+                worker_ready = False
+                worker_can_start = False
 
             worker_enabled = os.environ.get("DANA_AGENT_WORKER_ENABLED") == "true"
             worker_status = {
                 "installed": worker_ok,
                 "error": worker_err,
                 "enabled": worker_enabled,
-                "status": "ready" if (worker_ok and worker_enabled) else ("disabled" if worker_ok else "dependencies_missing")
+                "status": "ready" if (worker_ready and worker_enabled) else ("disabled" if worker_ok else "dependencies_missing")
             }
+
+            expected_agent_join = worker_ready and worker_enabled
+            expected_agent_speech = expected_agent_join
+
             if not worker_ok:
                 warnings.append(f"Worker dependencies are missing: {worker_err}")
                 next_steps.append("Install required agent packages: pip install livekit-api livekit-agents")
             elif not worker_enabled:
                 warnings.append("DANA_AGENT_WORKER_ENABLED is not set to 'true'. Agent worker will not join rooms.")
                 next_steps.append("Set DANA_AGENT_WORKER_ENABLED=true and start worker process.")
+            elif not worker_ready:
+                warnings.append(f"Worker check failed: {worker_status.get('status')}. Error: {worker_err}")
+                next_steps.append("Verify all required environment variables and provider keys are set.")
 
         # If readiness failed, we stop here and do not dial
         if not readiness_ready:
@@ -260,7 +295,12 @@ class LiveTelephonySmokeTester:
                 phone_number_redacted=phone_redacted,
                 failures=failures,
                 warnings=warnings,
-                next_steps=next_steps
+                next_steps=next_steps,
+                worker_ready=worker_ready,
+                worker_can_start=worker_can_start,
+                expected_agent_join=expected_agent_join,
+                expected_agent_speech=expected_agent_speech,
+                partial_success=False
             )
             self.write_reports(config, result)
             return result
@@ -277,7 +317,12 @@ class LiveTelephonySmokeTester:
                 phone_number_redacted=phone_redacted,
                 failures=failures,
                 warnings=warnings,
-                next_steps=next_steps
+                next_steps=next_steps,
+                worker_ready=worker_ready,
+                worker_can_start=worker_can_start,
+                expected_agent_join=expected_agent_join,
+                expected_agent_speech=expected_agent_speech,
+                partial_success=False
             )
             self.write_reports(config, result)
             return result
@@ -301,7 +346,15 @@ class LiveTelephonySmokeTester:
         test_call_dict = test_res.model_dump(mode="json")
         
         success = test_res.success
-        if not success:
+        partial_success = False
+
+        if success:
+            if not worker_ready:
+                success = False
+                partial_success = True
+                failures.append("Phone call path works, but Dana voice worker is not ready.")
+                next_steps.append("Install/start worker before expecting Dana to speak.")
+        else:
             failures.append(test_res.message)
             if test_res.error:
                 failures.append(f"Error Code: {test_res.error}")
@@ -322,7 +375,12 @@ class LiveTelephonySmokeTester:
             answered=test_res.answered,
             failures=failures,
             warnings=warnings,
-            next_steps=next_steps
+            next_steps=next_steps,
+            worker_ready=worker_ready,
+            worker_can_start=worker_can_start,
+            expected_agent_join=expected_agent_join,
+            expected_agent_speech=expected_agent_speech,
+            partial_success=partial_success
         )
         self.write_reports(config, result)
         return result

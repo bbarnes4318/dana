@@ -2199,19 +2199,42 @@ document.addEventListener("DOMContentLoaded", () => {
         const status = data.data;
         let html = "";
 
-        if (status.status === "ready") {
-          html += `<div style="color: var(--success); font-weight: bold; margin-bottom: 0.25rem;">● Active & Ready (Dana worker dependencies validated)</div>`;
-        } else if (status.status === "disabled") {
-          html += `<div style="color: var(--warning); font-weight: bold; margin-bottom: 0.25rem;">● Dependencies Present, but Worker Disabled (DANA_AGENT_WORKER_ENABLED!=true)</div>`;
+        // Status header
+        if (status.ready && status.enabled) {
+          html += `<div style="color: var(--success); font-weight: bold; margin-bottom: 0.5rem; font-size: 0.8rem;">● Active & Ready (Dana worker dependencies validated)</div>`;
+        } else if (status.status === "not_enabled" || (status.installed && !status.enabled)) {
+          html += `<div style="color: var(--warning); font-weight: bold; margin-bottom: 0.5rem; font-size: 0.8rem;">● Dependencies Present, but Worker Disabled (DANA_AGENT_WORKER_ENABLED!=true)</div>`;
         } else {
-          html += `<div style="color: var(--danger); font-weight: bold; margin-bottom: 0.25rem;">● Missing Required Audio Dependencies</div>`;
-          if (status.error) {
-            html += `<div style="color: var(--danger); margin-bottom: 0.25rem; font-family: monospace; background: rgba(0,0,0,0.1); padding: 0.25rem; border-radius: 4px;">${status.error}</div>`;
-          }
+          html += `<div style="color: var(--danger); font-weight: bold; margin-bottom: 0.5rem; font-size: 0.8rem;">● Worker Not Ready (Status: ${status.status})</div>`;
         }
 
-        html += `<p style="margin: 0.25rem 0 0 0;">Run command to start the background worker daemon:</p>`;
-        html += `<pre style="background: var(--bg-surface); padding: 0.5rem; border-radius: 4px; font-family: monospace; margin: 0.25rem 0 0 0; color: var(--text-primary); border: 1px solid var(--border);">${status.command}</pre>`;
+        if (status.error) {
+          html += `<div style="color: var(--danger); margin-bottom: 0.5rem; font-family: monospace; background: rgba(220,53,69,0.1); padding: 0.25rem; border-radius: 4px; border: 1px solid rgba(220,53,69,0.2);">${status.error}</div>`;
+        }
+
+        // Details checklist
+        html += `<ul style="margin: 0 0 0.5rem 1rem; padding: 0; list-style-type: disc; font-size: 0.75rem;">`;
+        html += `<li>Dependencies Installed: ${status.livekit_agents_installed ? "✅ Yes" : "❌ No"}</li>`;
+        html += `<li>LiveKit Plugins Namespace: ${status.livekit_plugins_namespace_available ? "✅ Yes" : "❌ No"}</li>`;
+        html += `<li>OpenAI Plugin Available: ${status.openai_plugin_available ? "✅ Yes" : "❌ No"}</li>`;
+        html += `<li>Silero/VAD Plugin Available: ${status.silero_vad_plugin_available ? "✅ Yes" : "❌ No"}</li>`;
+        html += `<li>AgentRuntime Ready: ${status.agent_runtime_available ? "✅ Yes" : "❌ No"}</li>`;
+        html += `<li>Environment Variables Configured: ${status.required_env_present ? "✅ Yes" : "❌ No"}</li>`;
+        html += `<li>Worker Enabled: ${status.enabled ? "✅ Yes" : "❌ No"}</li>`;
+        html += `</ul>`;
+
+        if (status.next_steps && status.next_steps.length > 0) {
+          html += `<div style="margin-bottom: 0.5rem; font-size: 0.75rem;">`;
+          html += `<strong style="color: var(--text-primary);">Next Steps:</strong>`;
+          html += `<ul style="margin: 0.25rem 0 0 1rem; padding: 0; list-style-type: circle;">`;
+          status.next_steps.forEach(step => {
+            html += `<li>${step}</li>`;
+          });
+          html += `</ul></div>`;
+        }
+
+        html += `<p style="margin: 0.5rem 0 0.25rem 0; font-weight: bold; font-size: 0.75rem;">Run command to start worker daemon:</p>`;
+        html += `<pre style="background: var(--bg-surface); padding: 0.5rem; border-radius: 4px; font-family: monospace; margin: 0; color: var(--text-primary); border: 1px solid var(--border); overflow-x: auto; font-size: 0.7rem;">${status.command}</pre>`;
 
         detailsDiv.innerHTML = html;
         log("Query agent worker status completed.", "success");
@@ -2353,17 +2376,55 @@ document.addEventListener("DOMContentLoaded", () => {
         // Show results box
         const resultsBox = document.getElementById("smoke-test-results");
         const jsonBox = document.getElementById("smoke-test-output-json");
+        const checklistBox = document.getElementById("smoke-test-checklist");
+        
         if (resultsBox && jsonBox) {
           resultsBox.style.display = "block";
           jsonBox.innerText = JSON.stringify(data, null, 2);
+        }
+
+        // Parse result object (console wraps action result)
+        const result = data.data || data;
+
+        if (checklistBox) {
+          let html = "<ul style='list-style-type: none; padding: 0; margin: 0; line-height: 1.8; font-size: 0.75rem;'>";
+          
+          // Phone Ring Path
+          const phoneRing = result.answered || (result.test_call_result && result.test_call_result.answered);
+          html += `<li>${phoneRing ? "🟢" : "🔴"} <strong>Phone Ring Path:</strong> ${phoneRing ? "Phone rang & answered" : "Failed to connect or not answered"}</li>`;
+          
+          // Worker Ready
+          const workerReady = result.worker_ready;
+          html += `<li>${workerReady ? "🟢" : "🔴"} <strong>Worker Ready:</strong> ${workerReady ? "Voice worker dependencies and configuration ready" : "Worker not ready or dependencies missing"}</li>`;
+          
+          // Agent Joined
+          const agentJoined = result.expected_agent_join;
+          html += `<li>${agentJoined ? "🟢" : "🔴"} <strong>Agent Joined:</strong> ${agentJoined ? "Expected to join Room" : "Not expected to join (worker not ready/disabled)"}</li>`;
+          
+          // Agent Spoke
+          const agentSpoke = result.expected_agent_speech;
+          html += `<li>${agentSpoke ? "🟢" : "🔴"} <strong>Agent Spoke:</strong> ${agentSpoke ? "Expected to speak greeting" : "Not expected to speak"}</li>`;
+          
+          html += "</ul>";
+          
+          // Check for partial success message
+          if (result.partial_success || (phoneRing && !workerReady)) {
+            html += `<div style="margin-top: 0.75rem; color: #856404; font-weight: bold; background-color: #fff3cd; padding: 0.5rem; border-radius: 4px; border: 1px solid #ffeeba; font-size: 0.75rem;">`;
+            html += `⚠️ Phone path works. Install/start worker before expecting Dana to speak.`;
+            html += `</div>`;
+          }
+          
+          checklistBox.innerHTML = html;
         }
 
         if (response.ok && data.success) {
           showStatus("Smoke Test Passed", data.message || "Outbound smoke test run completed successfully.");
           log(`Smoke test succeeded! Report paths: JSON: ${data.report_json_path}, MD: ${data.report_markdown_path}`, "success");
         } else {
-          showStatus("Smoke Test Failed", data.error || data.message || "Failed to complete smoke test.", true);
-          log(`Smoke test failed: ${data.error || data.message}`, "error");
+          // If it was partial success, show as warning-like message
+          const msg = data.error || data.message || "Failed to complete smoke test.";
+          showStatus("Smoke Test Result", msg, !result.partial_success);
+          log(`Smoke test result: ${msg}`, result.partial_success ? "warning" : "error");
         }
       } catch (err) {
         showStatus("Network Error", err.message, true);
