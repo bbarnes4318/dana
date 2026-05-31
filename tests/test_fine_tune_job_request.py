@@ -769,7 +769,7 @@ def test_cli_build_from_approval_package_outputs_json(tmp_path: Path) -> None:
     assert res.returncode == 0
     data = json.loads(res.stdout.strip())
     assert data["passed"] is True
-    assert data["upload_ready"] is True
+    assert data["upload_ready"] is False
 
 
 # 18. test_cli_failing_hash_exits_1
@@ -1081,3 +1081,127 @@ async def test_no_require_human_approval_still_not_upload_ready(tmp_path: Path, 
     res = await builder.build_request_package(config)
     assert res.passed is True  # passed is True since human review isn't required and no compliance failure
     assert res.upload_ready is False  # but upload_ready is False because there is no explicit human approval item
+
+
+# 27. test_approval_package_alone_not_upload_ready
+@pytest.mark.asyncio
+async def test_approval_package_alone_not_upload_ready(tmp_path: Path, builder: FineTuneJobRequestBuilder) -> None:
+    train_path = tmp_path / "train.jsonl"
+    val_path = tmp_path / "val.jsonl"
+    write_jsonl(train_path, [make_safe_openai_chat_record(i) for i in range(10)])
+    write_jsonl(val_path, [make_safe_openai_chat_record(i+10) for i in range(2)])
+    
+    t_hash = compute_hash(train_path)
+    v_hash = compute_hash(val_path)
+    
+    pkg_data = {
+        "gate_id": "gate_123",
+        "dataset_name": "test_dataset",
+        "passed": True,
+        "train_path": str(train_path),
+        "validation_path": str(val_path),
+        "file_hashes": {
+            "train": t_hash,
+            "validation": v_hash
+        }
+    }
+    pkg_path = tmp_path / "approval_package.json"
+    with open(pkg_path, "w", encoding="utf-8") as f:
+        json.dump(pkg_data, f)
+        
+    config = FineTuneJobRequestConfig(
+        approval_package_path=str(pkg_path),
+        require_human_approval=False,
+        output_dir=str(tmp_path / "requests")
+    )
+    res = await builder.build_request_package(config)
+    assert res.passed is True
+    assert res.upload_ready is False
+
+
+# 28. test_no_require_human_approval_with_approval_package_still_not_upload_ready
+@pytest.mark.asyncio
+async def test_no_require_human_approval_with_approval_package_still_not_upload_ready(tmp_path: Path, builder: FineTuneJobRequestBuilder) -> None:
+    train_path = tmp_path / "train.jsonl"
+    val_path = tmp_path / "val.jsonl"
+    write_jsonl(train_path, [make_safe_openai_chat_record(i) for i in range(10)])
+    write_jsonl(val_path, [make_safe_openai_chat_record(i+10) for i in range(2)])
+    
+    t_hash = compute_hash(train_path)
+    v_hash = compute_hash(val_path)
+    
+    pkg_data = {
+        "gate_id": "gate_123",
+        "dataset_name": "test_dataset",
+        "passed": True,
+        "train_path": str(train_path),
+        "validation_path": str(val_path),
+        "file_hashes": {
+            "train": t_hash,
+            "validation": v_hash
+        }
+    }
+    pkg_path = tmp_path / "approval_package.json"
+    with open(pkg_path, "w", encoding="utf-8") as f:
+        json.dump(pkg_data, f)
+        
+    config = FineTuneJobRequestConfig(
+        approval_package_path=str(pkg_path),
+        require_human_approval=False,
+        output_dir=str(tmp_path / "requests")
+    )
+    res = await builder.build_request_package(config)
+    assert res.upload_ready is False
+    assert any(
+        "Approved fine_tune_dataset_approval review item is required for upload_ready=true." in w
+        for w in res.validation_result.medium_warnings
+    )
+
+
+# 29. test_upload_ready_requires_approved_dataset_review_item
+@pytest.mark.asyncio
+async def test_upload_ready_requires_approved_dataset_review_item(tmp_path: Path, builder: FineTuneJobRequestBuilder, repo: Repository) -> None:
+    train_path = tmp_path / "train.jsonl"
+    val_path = tmp_path / "val.jsonl"
+    write_jsonl(train_path, [make_safe_openai_chat_record(i) for i in range(10)])
+    write_jsonl(val_path, [make_safe_openai_chat_record(i+10) for i in range(2)])
+    
+    t_hash = compute_hash(train_path)
+    v_hash = compute_hash(val_path)
+    
+    payload = {
+        "passed": True,
+        "human_review_required": True,
+        "train_path": str(train_path),
+        "validation_path": str(val_path),
+        "file_hashes": {
+            "train": t_hash,
+            "validation": v_hash
+        },
+        "approved_by": "Braden",
+        "approved_at": datetime.now(timezone.utc).isoformat(),
+        "review_history": [
+            {
+                "action": "approved",
+                "reviewer": "Braden",
+                "reviewed_at": datetime.now(timezone.utc).isoformat()
+            }
+        ]
+    }
+    
+    review_item_id = await repo.save_human_review_item(
+        item_type="fine_tune_dataset_approval",
+        status="approved",
+        payload=payload,
+        reviewer="Braden",
+        reviewed_at=datetime.now(timezone.utc)
+    )
+    
+    config = FineTuneJobRequestConfig(
+        review_item_id=review_item_id,
+        output_dir=str(tmp_path / "requests")
+    )
+    
+    res = await builder.build_request_package(config)
+    assert res.passed is True
+    assert res.upload_ready is True

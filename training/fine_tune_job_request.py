@@ -367,15 +367,30 @@ class FineTuneJobRequestBuilder:
         passed = len(critical_failures) == 0 and len(high_failures) == 0
 
         # Upload Ready determination:
-        # If human approval is not required, we require that some approved/gated source was provided
-        # (either an approved review item, or an approval package containing a passed gate).
-        # Otherwise, if require_human_approval is True, we strictly require human_approved to be True.
-        has_approval_source = (review_item is not None and human_approved) or (approval_package is not None and gate_passed)
-        is_approved = human_approved or (not config.require_human_approval and has_approval_source)
+        # upload_ready must be true only if:
+        # - validation passed (passed is True)
+        # - review_item is present
+        # - review_item.item_type == "fine_tune_dataset_approval"
+        # - review_item.status == "approved"
+        # - human_approved is true
+        # - gate_passed is true
+        # - files_exist is true
+        # - hashes_match is true or hash match is not required
+        # - no_prior_upload is true
+        # - no_prior_job is true
+        # - no_deployment_allowed is true
+        # - dry_run is false
+        # Approval package alone or direct train/validation mode must never make upload_ready true.
+        is_approved_review_item = (
+            review_item is not None and
+            review_item.get("item_type") == "fine_tune_dataset_approval" and
+            review_item.get("status") == "approved" and
+            human_approved is True
+        )
 
         upload_ready = (
             passed and
-            is_approved and
+            is_approved_review_item and
             gate_passed and
             files_exist and
             (hashes_match or not config.require_hash_match) and
@@ -384,6 +399,9 @@ class FineTuneJobRequestBuilder:
             no_deployment_allowed and
             not config.dry_run
         )
+
+        if passed and not upload_ready:
+            medium_warnings.append("Approved fine_tune_dataset_approval review item is required for upload_ready=true.")
 
         if config.dry_run:
             medium_warnings.append("Dry run only; upload_ready forced false.")
