@@ -552,3 +552,87 @@ async def test_exported_examples_counts_after_dedupe(repo: Repository, builder: 
     assert res.exported_examples == 1
     assert res.skipped_reasons["duplicate"] == 1
 
+
+# 29. test_tightened_approval_and_use_case_checks
+@pytest.mark.asyncio
+async def test_tightened_approval_and_use_case_checks(repo: Repository, builder: FineTuneExportBuilder) -> None:
+    # We mock load_all_training_examples_for_export to return custom raw dictionaries
+    mock_candidates = [
+        # 1. Partial approval: approved_by but no approved_at -> unapproved skip
+        {
+            "id": "ex-partial-approval-1",
+            "approved_by": "Jimmy",
+            "approved_at": None,
+            "labels": {"fine_tune_eligible": True},
+            "use_for": ["fine_tune"],
+            "user_text": "Is this a real person?",
+            "ideal_response": "I am an automated assistant."
+        },
+        # 2. Approved via metadata.human_review_item_id -> approved
+        {
+            "id": "ex-meta-approval",
+            "approved_by": None,
+            "approved_at": None,
+            "labels": {"fine_tune_eligible": True},
+            "metadata": {"human_review_item_id": "review_999"},
+            "use_for": ["fine_tune"],
+            "user_text": "Is this a real person?",
+            "ideal_response": "I am an automated assistant."
+        },
+        # 3. Eligible via metadata.recommended_use_for -> fine-tune eligible
+        {
+            "id": "ex-meta-usecase",
+            "approved_by": "Jimmy",
+            "approved_at": "2026-05-30T23:59:32Z",
+            "labels": {"fine_tune_eligible": True},
+            "use_for": [],
+            "metadata": {"recommended_use_for": ["fine_tune"]},
+            "user_text": "Is this a real person?",
+            "ideal_response": "I am an automated assistant."
+        },
+        # 4. No fine_tune in use case fields -> ineligible skip
+        {
+            "id": "ex-no-usecase",
+            "approved_by": "Jimmy",
+            "approved_at": "2026-05-30T23:59:32Z",
+            "labels": {"fine_tune_eligible": True, "recommended_use_for": ["prompt"]},
+            "use_for": ["prompt"],
+            "metadata": {"recommended_use_for": ["prompt"]},
+            "user_text": "Is this a real person?",
+            "ideal_response": "I am an automated assistant."
+        }
+    ]
+    
+    async def mock_load(config):
+        return mock_candidates
+    builder.load_all_training_examples_for_export = mock_load
+
+    config = FineTuneExportConfig(
+        export_name="test_tightened_checks",
+        min_examples=1,
+        dry_run=True
+    )
+    res = await builder.build_export(config)
+    assert res.skipped_reasons["unapproved"] == 1  # ex-partial-approval-1
+    assert res.skipped_reasons["not_fine_tune_eligible"] == 1  # ex-no-usecase
+    assert res.eligible_examples == 2  # ex-meta-approval and ex-meta-usecase should pass
+
+
+# 30. test_validation_failed_reason_increments
+@pytest.mark.asyncio
+async def test_validation_failed_reason_increments(repo: Repository, builder: FineTuneExportBuilder) -> None:
+    # Safe eligible example
+    await save_valid_approved_example(repo, id="ex-safe")
+    # Unsafe example ("you qualify" critical failure)
+    await save_valid_approved_example(repo, id="ex-unsafe", ideal_response="Yes, you qualify.")
+
+    config = FineTuneExportConfig(
+        export_name="test_val_failed_reasons",
+        min_examples=1,
+        dry_run=True
+    )
+    res = await builder.build_export(config)
+    assert res.skipped_reasons["validation_failed"] == 1
+    assert res.skipped_reasons["unsafe_example"] == 1
+
+

@@ -146,15 +146,27 @@ class FineTuneExportBuilder:
             "filter_objection": 0,
             "critical_failure": 0,
             "high_failure": 0,
+            "validation_failed": 0,
+            "unsafe_example": 0,
             "duplicate": 0
         }
         
         for cand in candidates:
             labels = cand.get("labels") or {}
+            metadata = cand.get("metadata") or {}
             
             # Eligibility checks (only when require_fine_tune_eligible is True)
             if config.require_fine_tune_eligible:
-                approved = bool(cand.get("approved_by") or cand.get("approved_at") or labels.get("human_review_item_id"))
+                approved_by = cand.get("approved_by")
+                approved_at = cand.get("approved_at")
+                human_review_labels = labels.get("human_review_item_id")
+                human_review_meta = metadata.get("human_review_item_id")
+                
+                approved = bool(
+                    (approved_by and approved_at) or
+                    human_review_labels or
+                    human_review_meta
+                )
                 if not approved:
                     skipped_reasons["unapproved"] += 1
                     continue
@@ -164,12 +176,30 @@ class FineTuneExportBuilder:
                     skipped_reasons["not_fine_tune_eligible"] += 1
                     continue
                     
-                use_for = cand.get("use_for") or []
-                rec_use = labels.get("recommended_use_for") or []
-                use_ft = ("fine_tune" in use_for or "fine_tune" in rec_use)
+                use_for = cand.get("use_for")
+                rec_use = cand.get("recommended_use_for")
+                labels_rec_use = labels.get("recommended_use_for")
+                meta_rec_use = metadata.get("recommended_use_for")
+                
+                def has_fine_tune(val) -> bool:
+                    if not val:
+                        return False
+                    if isinstance(val, str):
+                        return "fine_tune" in val
+                    if isinstance(val, (list, set, tuple)):
+                        return any(isinstance(x, str) and "fine_tune" in x for x in val)
+                    return False
+                
+                use_ft = (
+                    has_fine_tune(use_for) or
+                    has_fine_tune(rec_use) or
+                    has_fine_tune(labels_rec_use) or
+                    has_fine_tune(meta_rec_use)
+                )
                 if not use_ft:
                     skipped_reasons["not_fine_tune_eligible"] += 1
                     continue
+
 
 
             # Stage / Objection filters before validation
@@ -191,6 +221,8 @@ class FineTuneExportBuilder:
                 
             val_res = self.validate_training_example(cand, config)
             if not val_res.passed:
+                skipped_reasons["validation_failed"] += 1
+                skipped_reasons["unsafe_example"] += 1
                 if val_res.critical_failures:
                     skipped_reasons["critical_failure"] += len(val_res.critical_failures)
                 elif val_res.high_failures:
