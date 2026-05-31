@@ -64,6 +64,12 @@ from storage.schemas import (
     HumanReviewItem,
     DeploymentExperiment,
     CallOutcomeLabel,
+    TelephonyProviderConfig,
+    OutboundCampaign,
+    CampaignLead,
+    CallAttempt,
+    LiveCallSession,
+    CampaignControlEvent,
 )
 
 # Collection name constants
@@ -89,6 +95,12 @@ _PROMPT_VERSIONS = "prompt_versions"
 _HUMAN_REVIEW_ITEMS = "human_review_items"
 _DEPLOYMENT_EXPERIMENTS = "deployment_experiments"
 _CALL_OUTCOME_LABELS = "call_outcome_labels"
+_TELEPHONY_PROVIDER_CONFIGS = "telephony_provider_configs"
+_OUTBOUND_CAMPAIGNS = "outbound_campaigns"
+_CAMPAIGN_LEADS = "campaign_leads"
+_CALL_ATTEMPTS = "call_attempts"
+_LIVE_CALL_SESSIONS = "live_call_sessions"
+_CAMPAIGN_CONTROL_EVENTS = "campaign_control_events"
 
 
 class Repository:
@@ -306,6 +318,48 @@ class Repository:
         data = label.model_dump(mode="json")
         data.setdefault("id", str(uuid.uuid4()))
         return await self._store.save(_CALL_OUTCOME_LABELS, data)
+
+    async def save_telephony_provider_config(self, **kwargs: Any) -> str:
+        """Validate and persist a TelephonyProviderConfig."""
+        config = TelephonyProviderConfig(**kwargs)
+        data = config.model_dump(mode="json")
+        data.setdefault("id", str(uuid.uuid4()))
+        return await self._store.save(_TELEPHONY_PROVIDER_CONFIGS, data)
+
+    async def save_outbound_campaign(self, **kwargs: Any) -> str:
+        """Validate and persist an OutboundCampaign."""
+        campaign = OutboundCampaign(**kwargs)
+        data = campaign.model_dump(mode="json")
+        data.setdefault("id", str(uuid.uuid4()))
+        return await self._store.save(_OUTBOUND_CAMPAIGNS, data)
+
+    async def save_campaign_lead(self, **kwargs: Any) -> str:
+        """Validate and persist a CampaignLead."""
+        lead = CampaignLead(**kwargs)
+        data = lead.model_dump(mode="json")
+        data.setdefault("id", str(uuid.uuid4()))
+        return await self._store.save(_CAMPAIGN_LEADS, data)
+
+    async def save_call_attempt(self, **kwargs: Any) -> str:
+        """Validate and persist a CallAttempt."""
+        attempt = CallAttempt(**kwargs)
+        data = attempt.model_dump(mode="json")
+        data.setdefault("id", str(uuid.uuid4()))
+        return await self._store.save(_CALL_ATTEMPTS, data)
+
+    async def save_live_call_session(self, **kwargs: Any) -> str:
+        """Validate and persist a LiveCallSession."""
+        session = LiveCallSession(**kwargs)
+        data = session.model_dump(mode="json")
+        data.setdefault("id", str(uuid.uuid4()))
+        return await self._store.save(_LIVE_CALL_SESSIONS, data)
+
+    async def save_campaign_control_event(self, **kwargs: Any) -> str:
+        """Validate and persist a CampaignControlEvent."""
+        event = CampaignControlEvent(**kwargs)
+        data = event.model_dump(mode="json")
+        data.setdefault("id", str(uuid.uuid4()))
+        return await self._store.save(_CAMPAIGN_CONTROL_EVENTS, data)
 
     async def save_call(self, **kwargs: Any) -> str:
         """Validate and persist a :class:`Call`.
@@ -1674,4 +1728,84 @@ class Repository:
                         await self.save_webhook_event(**r)
                         claimed.append(r)
                 return claimed
+
+    # ------------------------------------------------------------------
+    # Telephony Campaign Helpers
+    # ------------------------------------------------------------------
+    async def get_telephony_provider_config(self, config_id: str) -> Optional[dict]:
+        """Retrieve a TelephonyProviderConfig by ID."""
+        return await self._store.get(_TELEPHONY_PROVIDER_CONFIGS, config_id)
+
+    async def query_telephony_provider_configs(self, filters: dict) -> list[dict]:
+        """Query TelephonyProviderConfigs."""
+        return await self._store.query(_TELEPHONY_PROVIDER_CONFIGS, filters)
+
+    async def list_recent_telephony_provider_configs(self, limit: int = 50) -> list[dict]:
+        """List recent TelephonyProviderConfigs."""
+        return await self._store.list_recent(_TELEPHONY_PROVIDER_CONFIGS, limit=limit)
+
+    async def get_outbound_campaign(self, campaign_id: str) -> Optional[dict]:
+        """Retrieve an OutboundCampaign by campaign_id or id."""
+        res = await self._store.get(_OUTBOUND_CAMPAIGNS, campaign_id)
+        if not res:
+            results = await self._store.query(_OUTBOUND_CAMPAIGNS, {"id": campaign_id})
+            if results:
+                res = results[0]
+        return res
+
+    async def query_outbound_campaigns(self, filters: dict) -> list[dict]:
+        """Query OutboundCampaigns."""
+        return await self._store.query(_OUTBOUND_CAMPAIGNS, filters)
+
+    async def list_recent_outbound_campaigns(self, limit: int = 50) -> list[dict]:
+        """List recent OutboundCampaigns."""
+        return await self._store.list_recent(_OUTBOUND_CAMPAIGNS, limit=limit)
+
+    async def get_campaign_lead(self, lead_id: str) -> Optional[dict]:
+        """Retrieve a CampaignLead by ID."""
+        return await self._store.get(_CAMPAIGN_LEADS, lead_id)
+
+    async def query_campaign_leads(self, filters: dict) -> list[dict]:
+        """Query CampaignLeads."""
+        return await self._store.query(_CAMPAIGN_LEADS, filters)
+
+    async def list_recent_campaign_leads(self, limit: int = 50) -> list[dict]:
+        """List recent CampaignLeads."""
+        return await self._store.list_recent(_CAMPAIGN_LEADS, limit=limit)
+
+    async def get_call_attempt(self, attempt_id: str) -> Optional[dict]:
+        """Retrieve a CallAttempt by ID."""
+        return await self._store.get(_CALL_ATTEMPTS, attempt_id)
+
+    async def query_call_attempts(self, filters: dict) -> list[dict]:
+        """Query CallAttempts."""
+        return await self._store.query(_CALL_ATTEMPTS, filters)
+
+    async def list_recent_call_attempts(self, limit: int = 50) -> list[dict]:
+        """List recent CallAttempts."""
+        return await self._store.list_recent(_CALL_ATTEMPTS, limit=limit)
+
+    async def get_live_call_session(self, session_id: str) -> Optional[dict]:
+        """Retrieve a LiveCallSession by ID."""
+        return await self._store.get(_LIVE_CALL_SESSIONS, session_id)
+
+    async def query_live_call_sessions(self, filters: dict) -> list[dict]:
+        """Query LiveCallSessions."""
+        return await self._store.query(_LIVE_CALL_SESSIONS, filters)
+
+    async def list_recent_live_call_sessions(self, limit: int = 50) -> list[dict]:
+        """List recent LiveCallSessions."""
+        return await self._store.list_recent(_LIVE_CALL_SESSIONS, limit=limit)
+
+    async def get_campaign_control_event(self, event_id: str) -> Optional[dict]:
+        """Retrieve a CampaignControlEvent by ID."""
+        return await self._store.get(_CAMPAIGN_CONTROL_EVENTS, event_id)
+
+    async def query_campaign_control_events(self, filters: dict) -> list[dict]:
+        """Query CampaignControlEvents."""
+        return await self._store.query(_CAMPAIGN_CONTROL_EVENTS, filters)
+
+    async def list_recent_campaign_control_events(self, limit: int = 50) -> list[dict]:
+        """List recent CampaignControlEvents."""
+        return await self._store.list_recent(_CAMPAIGN_CONTROL_EVENTS, limit=limit)
 

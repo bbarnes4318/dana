@@ -50,6 +50,41 @@ TABLE_COLUMNS: dict[str, set[str]] = {
         "id", "content", "embedding", "metadata", "source", "source_id", "source_type",
         "topic", "call_stage", "doc_type", "approved", "quality_score", "compliance_priority",
         "version", "created_at", "updated_at"
+    },
+    "telephony_provider_configs": {
+        "id", "provider", "name", "status", "telnyx_connection_id", "telnyx_sip_trunk_name",
+        "telnyx_phone_numbers", "livekit_url", "livekit_sip_outbound_trunk_id",
+        "livekit_sip_inbound_trunk_id", "livekit_dispatch_rule_id", "room_name_template",
+        "metadata", "created_at", "updated_at"
+    },
+    "outbound_campaigns": {
+        "id", "name", "description", "status", "campaign_type", "provider_config_id",
+        "prompt_name", "max_concurrent_calls", "daily_call_cap", "calls_started_today",
+        "timezone", "calling_window_start", "calling_window_end", "allowed_days",
+        "retry_policy", "transfer_phone_number", "caller_id", "compliance_mode",
+        "dnc_scrub_required", "require_live_mode", "metadata", "created_at", "updated_at",
+        "started_at", "paused_at", "stopped_at"
+    },
+    "campaign_leads": {
+        "id", "campaign_id", "first_name", "last_name", "phone_number", "state",
+        "timezone", "status", "priority", "attempt_count", "max_attempts", "next_attempt_at",
+        "last_attempt_at", "outcome", "suppression_reason", "metadata", "created_at", "updated_at"
+    },
+    "call_attempts": {
+        "id", "campaign_id", "lead_id", "provider_config_id", "status", "phone_number_redacted",
+        "phone_number_hash", "livekit_room_name", "livekit_participant_id", "livekit_sip_call_id",
+        "provider_call_id", "started_at", "answered_at", "ended_at", "duration_seconds",
+        "outcome", "failure_reason", "transfer_consent", "transfer_attempted", "transfer_successful",
+        "post_call_export_path", "metadata", "created_at", "updated_at"
+    },
+    "live_call_sessions": {
+        "id", "campaign_id", "lead_id", "attempt_id", "call_id", "status", "current_stage",
+        "latest_transcript", "compliance_warnings", "livekit_room_name", "participant_identity",
+        "started_at", "updated_at", "ended_at", "outcome", "metadata"
+    },
+    "campaign_control_events": {
+        "id", "campaign_id", "event_type", "operator", "reason", "previous_status",
+        "new_status", "metadata", "created_at"
     }
 }
 

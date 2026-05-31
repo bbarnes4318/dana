@@ -269,6 +269,14 @@ class ContinuousTrainingReadinessAuditor:
             "static_index": "static/training_console/index.html",
             "static_js": "static/training_console/app.js",
             "static_css": "static/training_console/styles.css",
+            "telephony_init": "telephony/__init__.py",
+            "telephony_campaign_models": "telephony/campaign_models.py",
+            "telephony_campaign_service": "telephony/campaign_service.py",
+            "telephony_lead_importer": "telephony/lead_importer.py",
+            "telephony_dialer_queue": "telephony/dialer_queue.py",
+            "telephony_livekit_adapter": "telephony/livekit_adapter.py",
+            "telephony_call_control": "telephony/call_control.py",
+            "telephony_reports": "telephony/telephony_reports.py",
         }
 
         for check_id, rel_path in pipeline_modules.items():
@@ -468,6 +476,9 @@ class ContinuousTrainingReadinessAuditor:
             "scripts/run_training_intake_scheduler.py",
             "scripts/training_console.py",
             "scripts/run_training_web_console.py",
+            "scripts/manage_telephony_campaigns.py",
+            "scripts/import_campaign_leads.py",
+            "scripts/run_outbound_dialer_once.py",
         ]
 
         for script in cli_scripts:
@@ -514,6 +525,9 @@ class ContinuousTrainingReadinessAuditor:
             "docs/training_operations_console.md",
             "docs/training_web_console_operating_procedure.md",
             "docs/training_web_console_advanced_workflows.md",
+            "docs/telephony_campaign_operations.md",
+            "docs/telnyx_livekit_setup.md",
+            "docs/outbound_dialer_safety_controls.md",
         ]
 
         for doc in required_docs:
@@ -559,6 +573,65 @@ class ContinuousTrainingReadinessAuditor:
             severity="critical",
             message="Canary resolver requires DANA_ENABLE_PROMPT_CANARY environment flag." if requires_env_flag else "Canary resolver might run without explicit activation flag.",
             remediation=None if requires_env_flag else "Ensure deployment/canary.py checks that os.environ.get('DANA_ENABLE_PROMPT_CANARY') is exactly 'true' before routing."
+        ))
+
+        # Telephony dialer safety checks
+        adapter_content = self.read_text_safe("telephony/livekit_adapter.py")
+        dialer_content = self.read_text_safe("telephony/dialer_queue.py")
+
+        has_env_flags = "TELEPHONY_LIVE_MODE" in adapter_content and "DANA_ENABLE_OUTBOUND_DIALER" in adapter_content
+        checks.append(ReadinessCheckResult(
+            check_id="telephony_dialer_disabled_by_default",
+            name="Verify telephony dialer disabled by default",
+            category=category,
+            passed=has_env_flags,
+            severity="critical",
+            message="Telephony adapter checks TELEPHONY_LIVE_MODE and DANA_ENABLE_OUTBOUND_DIALER." if has_env_flags else "Telephony adapter does not enforce environment activation flags.",
+            remediation=None if has_env_flags else "Modify telephony/livekit_adapter.py to check activation flags before outbound dialing."
+        ))
+
+        has_calling_window = "calling_window_start" in dialer_content and "calling_window_end" in dialer_content
+        checks.append(ReadinessCheckResult(
+            check_id="telephony_respects_calling_window",
+            name="Verify dialer respects calling window limits",
+            category=category,
+            passed=has_calling_window,
+            severity="critical",
+            message="Dialer checks calling window constraints." if has_calling_window else "Dialer is missing calling window checks.",
+            remediation=None if has_calling_window else "Implement calling window checks in telephony/dialer_queue.py."
+        ))
+
+        has_daily_cap = "daily_call_cap" in dialer_content
+        checks.append(ReadinessCheckResult(
+            check_id="telephony_respects_daily_cap",
+            name="Verify dialer respects daily call caps",
+            category=category,
+            passed=has_daily_cap,
+            severity="critical",
+            message="Dialer enforces daily call caps." if has_daily_cap else "Dialer is missing daily call cap checks.",
+            remediation=None if has_daily_cap else "Implement daily cap validation in telephony/dialer_queue.py."
+        ))
+
+        has_concurrency = "max_concurrent_calls" in dialer_content
+        checks.append(ReadinessCheckResult(
+            check_id="telephony_respects_concurrency",
+            name="Verify dialer respects concurrency limits",
+            category=category,
+            passed=has_concurrency,
+            severity="critical",
+            message="Dialer respects maximum concurrent calls limit." if has_concurrency else "Dialer is missing concurrency limit checks.",
+            remediation=None if has_concurrency else "Implement concurrency validation in telephony/dialer_queue.py."
+        ))
+
+        has_dnc_scrub = "dnc" in dialer_content or "do_not_call" in dialer_content
+        checks.append(ReadinessCheckResult(
+            check_id="telephony_blocks_dnc_leads",
+            name="Verify dialer scrubs leads against DNC list",
+            category=category,
+            passed=has_dnc_scrub,
+            severity="critical",
+            message="Dialer filters out leads on the DNC list." if has_dnc_scrub else "Dialer does not scrub leads against DNC registry.",
+            remediation=None if has_dnc_scrub else "Add DNC registry scrubbing checks in telephony/dialer_queue.py."
         ))
 
         return checks
@@ -668,6 +741,11 @@ class ContinuousTrainingReadinessAuditor:
             "tests/test_training_console.py",
             "tests/test_training_web_console.py",
             "tests/test_training_web_console_advanced.py",
+            "tests/test_telephony_campaign_service.py",
+            "tests/test_campaign_lead_importer.py",
+            "tests/test_dialer_queue.py",
+            "tests/test_livekit_adapter.py",
+            "tests/test_telephony_web_console.py",
         ]
 
         for test in required_tests:

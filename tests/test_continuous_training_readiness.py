@@ -73,6 +73,19 @@ TABLE_COLUMNS = {
     migrations_dir = base_dir / "migrations"
     migrations_dir.mkdir(parents=True, exist_ok=True)
     (migrations_dir / "005_continuous_training.sql").write_text("CREATE TABLE test;", encoding="utf-8")
+    (migrations_dir / "006_telephony_campaigns.sql").write_text("CREATE TABLE test;", encoding="utf-8")
+
+    # Telephony modules
+    telephony_dir = base_dir / "telephony"
+    telephony_dir.mkdir(parents=True, exist_ok=True)
+    (telephony_dir / "__init__.py").write_text("", encoding="utf-8")
+    (telephony_dir / "campaign_models.py").write_text("", encoding="utf-8")
+    (telephony_dir / "campaign_service.py").write_text("", encoding="utf-8")
+    (telephony_dir / "lead_importer.py").write_text("", encoding="utf-8")
+    (telephony_dir / "dialer_queue.py").write_text("calling_window_start calling_window_end daily_call_cap max_concurrent_calls dnc do_not_call", encoding="utf-8")
+    (telephony_dir / "livekit_adapter.py").write_text("TELEPHONY_LIVE_MODE DANA_ENABLE_OUTBOUND_DIALER", encoding="utf-8")
+    (telephony_dir / "call_control.py").write_text("", encoding="utf-8")
+    (telephony_dir / "telephony_reports.py").write_text("", encoding="utf-8")
 
     # Training modules
     training_dir = base_dir / "training"
@@ -135,7 +148,8 @@ TABLE_COLUMNS = {
         "export_fine_tune_dataset.py", "gate_fine_tune_dataset.py", "prepare_fine_tune_job_request.py",
         "track_fine_tune_job.py", "run_continuous_training_readiness.py", "rebuild_training_rag.py",
         "run_training_intake.py", "export_completed_call.py", "import_youtube_transcripts.py",
-        "run_training_intake_scheduler.py", "training_console.py", "run_training_web_console.py"
+        "run_training_intake_scheduler.py", "training_console.py", "run_training_web_console.py",
+        "manage_telephony_campaigns.py", "import_campaign_leads.py", "run_outbound_dialer_once.py"
     ]
     for script in cli_scripts:
         (cli_dir / script).write_text("import json\n# clean json output", encoding="utf-8")
@@ -143,7 +157,7 @@ TABLE_COLUMNS = {
     # Docs
     docs_dir = base_dir / "docs"
     docs_dir.mkdir(parents=True, exist_ok=True)
-    for doc in ["continuous_training_runbook.md", "dana_training_safety_gates.md", "fine_tuning_operating_procedure.md", "prompt_canary_operating_procedure.md", "training_intake_operating_procedure.md", "post_call_training_export_operating_procedure.md", "youtube_training_import_operating_procedure.md", "training_intake_scheduler_operating_procedure.md", "training_operations_console.md", "training_web_console_operating_procedure.md", "training_web_console_advanced_workflows.md"]:
+    for doc in ["continuous_training_runbook.md", "dana_training_safety_gates.md", "fine_tuning_operating_procedure.md", "prompt_canary_operating_procedure.md", "training_intake_operating_procedure.md", "post_call_training_export_operating_procedure.md", "youtube_training_import_operating_procedure.md", "training_intake_scheduler_operating_procedure.md", "training_operations_console.md", "training_web_console_operating_procedure.md", "training_web_console_advanced_workflows.md", "telephony_campaign_operations.md", "telnyx_livekit_setup.md", "outbound_dialer_safety_controls.md"]:
         (docs_dir / doc).write_text("# Doc\nRed lines include:\n- no transfer without consent\n- no licensed claim\n- no price quotes\n- no approval/qualification promises\n- no DNC/wrong-number continuation\n- no PII collection\n must never do manually", encoding="utf-8")
 
     # Runtime Safety
@@ -162,7 +176,8 @@ TABLE_COLUMNS = {
         "test_canary_rollout.py", "test_canary_monitoring.py", "test_fine_tune_export.py",
         "test_fine_tune_gate.py", "test_fine_tune_job_request.py", "test_fine_tune_job_tracker.py",
         "test_continuous_training_readiness.py", "test_training_rag_builder.py", "test_training_intake_orchestrator.py",
-        "test_post_call_exporter.py", "test_youtube_importer.py", "test_training_intake_scheduler.py", "test_training_console.py", "test_training_web_console.py", "test_training_web_console_advanced.py"
+        "test_post_call_exporter.py", "test_youtube_importer.py", "test_training_intake_scheduler.py", "test_training_console.py", "test_training_web_console.py", "test_training_web_console_advanced.py",
+        "test_telephony_campaign_service.py", "test_campaign_lead_importer.py", "test_dialer_queue.py", "test_livekit_adapter.py", "test_telephony_web_console.py"
     ]
     for test in test_files:
         (tests_dir / test).write_text("def test_dummy(): pass", encoding="utf-8")

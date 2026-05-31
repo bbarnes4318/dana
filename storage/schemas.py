@@ -314,3 +314,141 @@ class CallOutcomeLabel(BaseModel):
     labels: dict[str, Any] = Field(default_factory=dict)
     created_at: datetime = Field(default_factory=_utcnow)
 
+
+class TelephonyProviderConfig(BaseModel):
+    """Configuration for a telephony provider (Telnyx + LiveKit)."""
+
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    provider: str = "telnyx_livekit"
+    name: str
+    status: str = "draft"  # draft|active|disabled
+    telnyx_connection_id: Optional[str] = None
+    telnyx_sip_trunk_name: Optional[str] = None
+    telnyx_phone_numbers: list[str] = Field(default_factory=list)
+    livekit_url: Optional[str] = None
+    livekit_sip_outbound_trunk_id: Optional[str] = None
+    livekit_sip_inbound_trunk_id: Optional[str] = None
+    livekit_dispatch_rule_id: Optional[str] = None
+    room_name_template: str = "dana-{campaign_id}-{lead_id}-{attempt_id}"
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    created_at: datetime = Field(default_factory=_utcnow)
+    updated_at: datetime = Field(default_factory=_utcnow)
+
+
+class OutboundCampaign(BaseModel):
+    """Configuration for outbound campaign dialing."""
+
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    name: str
+    description: Optional[str] = None
+    status: str = "draft"  # draft|ready|running|paused|stopped|completed|archived
+    campaign_type: str = "final_expense_outbound"
+    provider_config_id: Optional[str] = None
+    prompt_name: str = "final_expense_alex"
+    max_concurrent_calls: int = 1
+    daily_call_cap: int = 100
+    calls_started_today: int = 0
+    timezone: str = "America/New_York"
+    calling_window_start: str = "09:30"
+    calling_window_end: str = "18:00"
+    allowed_days: list[str] = Field(default_factory=lambda: ["mon", "tue", "wed", "thu", "fri"])
+    retry_policy: dict[str, Any] = Field(default_factory=dict)
+    transfer_phone_number: Optional[str] = None
+    caller_id: Optional[str] = None
+    compliance_mode: str = "strict"
+    dnc_scrub_required: bool = True
+    require_live_mode: bool = True
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    created_at: datetime = Field(default_factory=_utcnow)
+    updated_at: datetime = Field(default_factory=_utcnow)
+    started_at: Optional[str] = None
+    paused_at: Optional[str] = None
+    stopped_at: Optional[str] = None
+
+
+class CampaignLead(BaseModel):
+    """A lead loaded into a specific campaign."""
+
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    campaign_id: str
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+    phone_number: str
+    state: Optional[str] = None
+    timezone: Optional[str] = None
+    status: str = "new"  # new|queued|dialing|in_call|completed|callback|dnc|wrong_number|failed|suppressed|do_not_call
+    priority: int = 0
+    attempt_count: int = 0
+    max_attempts: int = 3
+    next_attempt_at: Optional[str] = None
+    last_attempt_at: Optional[str] = None
+    outcome: Optional[str] = None
+    suppression_reason: Optional[str] = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    created_at: datetime = Field(default_factory=_utcnow)
+    updated_at: datetime = Field(default_factory=_utcnow)
+
+
+class CallAttempt(BaseModel):
+    """Outcome and detail of an individual outbound call attempt."""
+
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    campaign_id: str
+    lead_id: str
+    provider_config_id: Optional[str] = None
+    status: str = "queued"  # queued|dialing|ringing|answered|in_progress|completed|failed|cancelled|blocked
+    phone_number_redacted: Optional[str] = None
+    phone_number_hash: Optional[str] = None
+    livekit_room_name: Optional[str] = None
+    livekit_participant_id: Optional[str] = None
+    livekit_sip_call_id: Optional[str] = None
+    provider_call_id: Optional[str] = None
+    started_at: Optional[str] = None
+    answered_at: Optional[str] = None
+    ended_at: Optional[str] = None
+    duration_seconds: Optional[int] = None
+    outcome: Optional[str] = None
+    failure_reason: Optional[str] = None
+    transfer_consent: bool = False
+    transfer_attempted: bool = False
+    transfer_successful: bool = False
+    post_call_export_path: Optional[str] = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    created_at: datetime = Field(default_factory=_utcnow)
+    updated_at: datetime = Field(default_factory=_utcnow)
+
+
+class LiveCallSession(BaseModel):
+    """Realtime state session of a call in progress."""
+
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    campaign_id: str
+    lead_id: str
+    attempt_id: str
+    call_id: str
+    status: str = "starting"  # starting|ringing|active|transferring|ended|failed
+    current_stage: Optional[str] = None
+    latest_transcript: Optional[str] = None
+    compliance_warnings: list[str] = Field(default_factory=list)
+    livekit_room_name: Optional[str] = None
+    participant_identity: Optional[str] = None
+    started_at: datetime = Field(default_factory=_utcnow)
+    updated_at: datetime = Field(default_factory=_utcnow)
+    ended_at: Optional[str] = None
+    outcome: Optional[str] = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class CampaignControlEvent(BaseModel):
+    """Auditable state transition event for a campaign."""
+
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    campaign_id: str
+    event_type: str  # created|ready|started|paused|resumed|stopped|completed|lead_imported|dialer_tick|call_started|call_ended|blocked|error
+    operator: Optional[str] = None
+    reason: Optional[str] = None
+    previous_status: Optional[str] = None
+    new_status: Optional[str] = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    created_at: datetime = Field(default_factory=_utcnow)
+

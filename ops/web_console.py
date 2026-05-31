@@ -461,6 +461,143 @@ class TrainingWebConsoleServer(ThreadingHTTPServer):
                 })
 
             # =================================================================
+            # Telephony Operations APIs
+            # =================================================================
+            elif route == "/api/telephony/providers" and method == "GET":
+                limit = int(query_params.get("limit", [50])[0])
+                res = await self.console.list_telephony_provider_configs(limit=limit)
+                return (200 if res.success else 400, res.model_dump(mode="json"))
+
+            elif route == "/api/telephony/providers" and method == "POST":
+                if not body:
+                    return (400, {"success": False, "error": "JSON body is required."})
+                res = await self.console.create_telephony_provider_config(**body)
+                return (200 if res.success else 400, res.model_dump(mode="json"))
+
+            elif route.startswith("/api/telephony/providers/"):
+                provider_id = route.split("/")[-1]
+                res = await self.console.show_telephony_provider_config(provider_id)
+                return (200 if res.success else 400, res.model_dump(mode="json"))
+
+            elif route == "/api/telephony/campaigns" and method == "GET":
+                status = query_params.get("status", [None])[0]
+                limit = int(query_params.get("limit", [50])[0])
+                res = await self.console.list_telephony_campaigns(status=status, limit=limit)
+                return (200 if res.success else 400, res.model_dump(mode="json"))
+
+            elif route == "/api/telephony/campaigns" and method == "POST":
+                if not body:
+                    return (400, {"success": False, "error": "JSON body is required."})
+                res = await self.console.create_telephony_campaign(**body)
+                return (200 if res.success else 400, res.model_dump(mode="json"))
+
+            elif route.startswith("/api/telephony/campaigns/"):
+                parts = route.split("/")
+                if len(parts) == 5:
+                    campaign_id = parts[4]
+                    res = await self.console.show_telephony_campaign(campaign_id)
+                    return (200 if res.success else 400, res.model_dump(mode="json"))
+                elif len(parts) == 6:
+                    campaign_id = parts[4]
+                    action = parts[5]
+                    
+                    if action == "summary":
+                        res = await self.console.get_telephony_campaign_summary(campaign_id)
+                        return (200 if res.success else 400, res.model_dump(mode="json"))
+                    elif action == "analytics":
+                        res = await self.console.get_telephony_campaign_analytics(campaign_id)
+                        return (200 if res.success else 400, res.model_dump(mode="json"))
+                    elif action == "leads":
+                        limit = int(query_params.get("limit", [50])[0])
+                        res = await self.console.list_campaign_leads(campaign_id, limit=limit)
+                        return (200 if res.success else 400, res.model_dump(mode="json"))
+                    
+                    if not body:
+                        return (400, {"success": False, "error": "JSON body is required."})
+                    operator = body.get("operator")
+                    reason = body.get("reason")
+                    
+                    if not operator:
+                        return (400, {"success": False, "error": "operator parameter is required."})
+                        
+                    if action == "ready":
+                        res = await self.console.mark_campaign_ready(campaign_id, operator, reason)
+                    elif action == "start":
+                        res = await self.console.start_telephony_campaign(campaign_id, operator, reason)
+                    elif action == "pause":
+                        res = await self.console.pause_telephony_campaign(campaign_id, operator, reason)
+                    elif action == "resume":
+                        res = await self.console.resume_telephony_campaign(campaign_id, operator, reason)
+                    elif action == "stop":
+                        res = await self.console.stop_telephony_campaign(campaign_id, operator, reason)
+                    elif action == "complete":
+                        res = await self.console.complete_telephony_campaign(campaign_id, operator, reason)
+                    else:
+                        return (404, {"success": False, "error": f"Invalid campaign action: {action}"})
+                    
+                    return (200 if res.success else 400, res.model_dump(mode="json"))
+                elif len(parts) == 7:
+                    campaign_id = parts[4]
+                    sub_resource = parts[5]
+                    action = parts[6]
+                    if sub_resource == "leads" and action == "import":
+                        if not body or not body.get("path"):
+                            return (400, {"success": False, "error": "JSON body with 'path' is required."})
+                        res = await self.console.import_campaign_leads(campaign_id, body["path"])
+                        return (200 if res.success else 400, res.model_dump(mode="json"))
+                    elif sub_resource == "dialer" and action == "tick":
+                        live_mode = bool(body.get("live_mode", False)) if body else False
+                        dry_run = bool(body.get("dry_run", True)) if body else True
+                        max_calls = body.get("max_calls") if body else None
+                        operator = body.get("operator") if body else "system"
+                        force = bool(body.get("force", False)) if body else False
+                        res = await self.console.run_dialer_once(
+                            campaign_id, live_mode=live_mode, dry_run=dry_run, max_calls=max_calls, operator=operator, force=force
+                        )
+                        return (200 if res.success else 400, res.model_dump(mode="json"))
+                    else:
+                        return (404, {"success": False, "error": f"Route not found: {route}"})
+
+            elif route == "/api/telephony/calls/live" and method == "GET":
+                campaign_id = query_params.get("campaign_id", [None])[0]
+                limit = int(query_params.get("limit", [100])[0])
+                res = await self.console.list_live_telephony_calls(campaign_id=campaign_id, limit=limit)
+                return (200 if res.success else 400, res.model_dump(mode="json"))
+
+            elif route == "/api/telephony/calls/attempts" and method == "GET":
+                campaign_id = query_params.get("campaign_id", [None])[0]
+                lead_id = query_params.get("lead_id", [None])[0]
+                limit = int(query_params.get("limit", [100])[0])
+                res = await self.console.list_call_attempts(campaign_id=campaign_id, lead_id=lead_id, limit=limit)
+                return (200 if res.success else 400, res.model_dump(mode="json"))
+
+            elif route.startswith("/api/telephony/calls/"):
+                parts = route.split("/")
+                if len(parts) == 6:
+                    attempt_id = parts[4]
+                    action = parts[5]
+                    
+                    if not body or not body.get("operator"):
+                        return (400, {"success": False, "error": "operator parameter is required in JSON body."})
+                    operator = body["operator"]
+                    
+                    if action == "outcome":
+                        outcome = body.get("outcome")
+                        if not outcome:
+                            return (400, {"success": False, "error": "outcome parameter is required in JSON body."})
+                        metadata = body.get("metadata")
+                        res = await self.console.mark_call_outcome(attempt_id, outcome, operator, metadata=metadata)
+                    elif action == "end":
+                        reason = body.get("reason", "Operator control action")
+                        res = await self.console.end_live_call(attempt_id, operator, reason)
+                    elif action == "export-training":
+                        res = await self.console.export_call_attempt_to_training(attempt_id, operator)
+                    else:
+                        return (404, {"success": False, "error": f"Invalid calls action: {action}"})
+                        
+                    return (200 if res.success else 400, res.model_dump(mode="json"))
+
+            # =================================================================
             # Advanced Training Workflow APIs (Prompt 27)
             # =================================================================
 

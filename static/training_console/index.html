@@ -77,6 +77,7 @@
           <button class="tab-btn" data-tab="finetune-tab" style="text-align: left; border-bottom: none; border-left: 2px solid transparent;">⚙️ Fine-Tune Operations</button>
           <button class="tab-btn" data-tab="postcall-tab" style="text-align: left; border-bottom: none; border-left: 2px solid transparent;">📞 Post-Call Export Test</button>
           <button class="tab-btn" data-tab="reports-tab" style="text-align: left; border-bottom: none; border-left: 2px solid transparent;">📊 Operator Reports</button>
+          <button class="tab-btn" data-tab="telephony-tab" style="text-align: left; border-bottom: none; border-left: 2px solid transparent;">📞 Telephony & Campaigns</button>
         </nav>
       </section>
 
@@ -876,6 +877,305 @@
                 <pre id="report-content-text" style="max-height: 450px; white-space: pre-wrap; word-break: break-all; color: var(--text-primary);"></pre>
               </div>
             </div>
+          </div>
+        </section>
+      </div>
+
+      <!-- TAB: Telephony -->
+      <div id="telephony-tab" class="tab-content">
+        <!-- Safety Alert -->
+        <div class="card" style="border-left: 3px solid var(--warning); background-color: rgba(245, 158, 11, 0.03); margin-bottom: 1.5rem;">
+          <div class="card-title" style="color: var(--warning); font-size: 0.85rem; margin-bottom: 0.25rem;">⚠️ Telephony Compliance Boundary</div>
+          <p style="font-size: 0.75rem; color: var(--text-secondary); margin: 0;">
+            <strong>Outbound dialer is strictly disabled by default.</strong> The system runs in dry-run/mock mode unless <code>TELEPHONY_LIVE_MODE=true</code> and <code>DANA_ENABLE_OUTBOUND_DIALER=true</code> are explicitly enabled. Live calls respect calling window limits (09:30 - 18:00 local time), allowed days (Mon-Fri), daily cap limits, and scrub against DNC lists.
+          </p>
+        </div>
+
+        <!-- 1. Grid: Provider Config & Campaign Creation -->
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; margin-bottom: 1.5rem;">
+          
+          <!-- A. Provider Config Card -->
+          <section class="card">
+            <div class="card-title">Telephony Provider Configuration</div>
+            <form id="provider-config-form">
+              <div class="form-group">
+                <label for="provider-name">Provider Config Name *</label>
+                <input type="text" id="provider-name" class="form-control" placeholder="e.g. Telnyx + LiveKit Trunk" required>
+              </div>
+              <div class="form-group">
+                <label for="telnyx-connection-id">Telnyx Connection ID</label>
+                <input type="text" id="telnyx-connection-id" class="form-control" placeholder="Optional Connection ID">
+              </div>
+              <div class="form-group">
+                <label for="telnyx-numbers">Telnyx Phone Numbers (Comma-separated)</label>
+                <input type="text" id="telnyx-numbers" class="form-control" placeholder="+15555555555, +16666666666">
+              </div>
+              <div class="form-group">
+                <label for="livekit-url">LiveKit URL</label>
+                <input type="text" id="livekit-url" class="form-control" placeholder="wss://your-project.livekit.cloud">
+              </div>
+              <div class="form-group">
+                <label for="livekit-outbound-trunk">LiveKit Outbound Trunk ID</label>
+                <input type="text" id="livekit-outbound-trunk" class="form-control" placeholder="SIP Outbound Trunk ID">
+              </div>
+              <button type="submit" id="btn-save-provider" class="btn btn-primary">💾 Save Configuration</button>
+            </form>
+            <div style="margin-top: 1rem;">
+              <button id="btn-list-providers" class="btn btn-secondary">🔄 Load Provider Configs</button>
+              <div class="table-wrapper" style="margin-top: 0.5rem; max-height: 120px;">
+                <table style="font-size: 0.75rem;">
+                  <thead>
+                    <tr><th>Name</th><th>ID</th><th>Status</th></tr>
+                  </thead>
+                  <tbody id="providers-tbody">
+                    <tr><td colspan="3" style="text-align: center; color: var(--text-muted);">No configs loaded.</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </section>
+
+          <!-- B. Campaign Creation Card -->
+          <section class="card">
+            <div class="card-title">Create Outbound Campaign</div>
+            <form id="campaign-create-form-telephony">
+              <div class="form-group">
+                <label for="camp-name">Campaign Name *</label>
+                <input type="text" id="camp-name" class="form-control" placeholder="e.g. Final Expense Outbound" required>
+              </div>
+              <div class="form-group">
+                <label for="camp-caller-id">Caller ID Phone Number</label>
+                <input type="text" id="camp-caller-id" class="form-control" placeholder="+15555555555">
+              </div>
+              <div class="form-group">
+                <label for="camp-transfer-phone">Transfer Phone Number</label>
+                <input type="text" id="camp-transfer-phone" class="form-control" placeholder="+18005550199">
+              </div>
+              <div style="display: flex; gap: 0.5rem;">
+                <div class="form-group" style="flex: 1;">
+                  <label for="camp-concurrent">Max Concurrent</label>
+                  <input type="number" id="camp-concurrent" class="form-control" value="1" min="1">
+                </div>
+                <div class="form-group" style="flex: 1;">
+                  <label for="camp-cap">Daily Cap</label>
+                  <input type="number" id="camp-cap" class="form-control" value="100" min="1">
+                </div>
+              </div>
+              <div style="display: flex; gap: 0.5rem;">
+                <div class="form-group" style="flex: 1;">
+                  <label for="camp-window-start">Calling Start</label>
+                  <input type="text" id="camp-window-start" class="form-control" value="09:30" placeholder="09:30">
+                </div>
+                <div class="form-group" style="flex: 1;">
+                  <label for="camp-window-end">Calling End</label>
+                  <input type="text" id="camp-window-end" class="form-control" value="18:00" placeholder="18:00">
+                </div>
+              </div>
+              <div class="form-group">
+                <label for="camp-operator">Operator *</label>
+                <input type="text" id="camp-operator" class="form-control" placeholder="Your name" required>
+              </div>
+              <button type="submit" id="btn-save-campaign-tel" class="btn btn-primary">🚀 Create Campaign</button>
+            </form>
+          </section>
+        </div>
+
+        <!-- 2. Grid: Campaign Management & Lead Ingestion -->
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; margin-bottom: 1.5rem;">
+          
+          <!-- A. Campaign table and controls -->
+          <section class="card">
+            <div class="card-title">
+              <span>Active Outbound Campaigns</span>
+              <button id="btn-list-campaigns-tel" class="btn btn-secondary" style="width: auto; padding: 0.25rem 0.5rem; font-size: 0.75rem;">🔄 Refresh Campaigns</button>
+            </div>
+            <div class="table-wrapper" style="max-height: 250px;">
+              <table style="font-size: 0.75rem;">
+                <thead>
+                  <tr>
+                    <th>Campaign ID</th>
+                    <th>Name</th>
+                    <th>Status</th>
+                    <th>Daily Cap</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="campaigns-tbody-tel">
+                  <tr><td colspan="5" style="text-align: center; color: var(--text-muted);">No campaigns loaded.</td></tr>
+                </tbody>
+              </table>
+            </div>
+
+            <!-- Campaign Transition Form -->
+            <div style="border-top: 1px solid var(--border-color); padding-top: 0.75rem; margin-top: 0.75rem;">
+              <div style="font-weight: bold; font-size: 0.8rem; margin-bottom: 0.5rem;">Campaign Controls</div>
+              <div style="display: flex; gap: 0.5rem; margin-bottom: 0.5rem;">
+                <div style="flex: 2;">
+                  <input type="text" id="ctrl-campaign-id" class="form-control" style="font-size: 0.75rem;" placeholder="Selected Campaign ID" readonly>
+                </div>
+                <div style="flex: 1;">
+                  <input type="text" id="ctrl-operator" class="form-control" style="font-size: 0.75rem;" placeholder="Operator">
+                </div>
+              </div>
+              <div style="display: flex; gap: 0.25rem; flex-wrap: wrap;">
+                <button type="button" onclick="triggerCampaignLifecycleAction('ready')" class="btn btn-secondary" style="font-size: 0.7rem; padding: 0.3rem 0.5rem; width: auto;">Ready</button>
+                <button type="button" onclick="triggerCampaignLifecycleAction('start')" class="btn btn-primary" style="font-size: 0.7rem; padding: 0.3rem 0.5rem; width: auto;">Start</button>
+                <button type="button" onclick="triggerCampaignLifecycleAction('pause')" class="btn btn-warning" style="font-size: 0.7rem; padding: 0.3rem 0.5rem; width: auto;">Pause</button>
+                <button type="button" onclick="triggerCampaignLifecycleAction('resume')" class="btn btn-primary" style="font-size: 0.7rem; padding: 0.3rem 0.5rem; width: auto;">Resume</button>
+                <button type="button" onclick="triggerCampaignLifecycleAction('stop')" class="btn btn-danger" style="font-size: 0.7rem; padding: 0.3rem 0.5rem; width: auto;">Stop</button>
+                <button type="button" onclick="triggerCampaignLifecycleAction('complete')" class="btn btn-success" style="font-size: 0.7rem; padding: 0.3rem 0.5rem; width: auto;">Complete</button>
+              </div>
+            </div>
+          </section>
+
+          <!-- B. Lead Management & Upload -->
+          <section class="card">
+            <div class="card-title">Campaign Lead Management</div>
+            <form id="leads-import-form">
+              <div class="form-group">
+                <label for="import-camp-id">Target Campaign ID *</label>
+                <input type="text" id="import-camp-id" class="form-control" placeholder="Selected Campaign ID" required readonly>
+              </div>
+              <div class="form-group">
+                <label for="leads-file-path">File Path inside repo (e.g. data/leads/test.csv) *</label>
+                <input type="text" id="leads-file-path" class="form-control" placeholder="data/leads/..." required>
+              </div>
+              <button type="submit" id="btn-import-leads" class="btn btn-primary">📥 Import Leads</button>
+            </form>
+
+            <div style="border-top: 1px solid var(--border-color); padding-top: 0.75rem; margin-top: 0.75rem;">
+              <button id="btn-list-leads" class="btn btn-secondary">🔄 Load Campaign Leads</button>
+              <div class="table-wrapper" style="margin-top: 0.5rem; max-height: 120px;">
+                <table style="font-size: 0.75rem;">
+                  <thead>
+                    <tr><th>Name</th><th>Phone (Redacted)</th><th>Status</th><th>Priority</th></tr>
+                  </thead>
+                  <tbody id="leads-tbody-tel">
+                    <tr><td colspan="4" style="text-align: center; color: var(--text-muted);">No leads loaded.</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </section>
+        </div>
+
+        <!-- 3. Grid: Dialer Trigger & Analytics -->
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; margin-bottom: 1.5rem;">
+          
+          <!-- A. Dialer Trigger Card -->
+          <section class="card">
+            <div class="card-title">Run Dialer Pacing Tick</div>
+            <p style="font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 0.5rem;">
+              Triggering the dialer pacing queue logic scans the campaign status, allowed calling window, timezone of leads, and selects candidates to place outbound calls.
+            </p>
+            <form id="dialer-tick-form">
+              <div class="form-group">
+                <label for="dialer-camp-id">Campaign ID *</label>
+                <input type="text" id="dialer-camp-id" class="form-control" placeholder="Selected Campaign ID" required readonly>
+              </div>
+              <div class="form-group">
+                <label for="dialer-max-calls">Max Calls to Trigger</label>
+                <input type="number" id="dialer-max-calls" class="form-control" placeholder="Default campaign concurrent limit">
+              </div>
+              <div class="checkbox-group">
+                <input type="checkbox" id="dialer-dry-run" checked>
+                <label for="dialer-dry-run">Dry Run Mode (Simulate eligibility checks only)</label>
+              </div>
+              <div class="checkbox-group">
+                <input type="checkbox" id="dialer-live-mode">
+                <label for="dialer-live-mode">Live Dial (Requires TELEPHONY_LIVE_MODE env flags)</label>
+              </div>
+              <button type="submit" id="btn-run-dialer-tick" class="btn btn-primary">⚡ Execute Dialer Tick</button>
+            </form>
+          </section>
+
+          <!-- B. Analytics & Summary Cards -->
+          <section class="card">
+            <div class="card-title">
+              <span>Campaign Summary Metrics</span>
+              <button id="btn-load-summary-tel" class="btn btn-secondary" style="width: auto; padding: 0.25rem 0.5rem; font-size: 0.75rem;">🔄 Load Stats</button>
+            </div>
+            <div class="stats-grid" id="campaign-summary-metrics" style="grid-template-columns: repeat(3, 1fr);">
+              <div class="stat-box">
+                <div class="stat-label">Total Leads</div>
+                <div id="metric-total-leads" class="stat-val">—</div>
+              </div>
+              <div class="stat-box">
+                <div class="stat-label">Queued Leads</div>
+                <div id="metric-queued-leads" class="stat-val">—</div>
+              </div>
+              <div class="stat-box">
+                <div class="stat-label">Active Calls</div>
+                <div id="metric-active-calls" class="stat-val">—</div>
+              </div>
+              <div class="stat-box">
+                <div class="stat-label">Completed</div>
+                <div id="metric-completed-calls" class="stat-val">—</div>
+              </div>
+              <div class="stat-box">
+                <div class="stat-label">Transfers</div>
+                <div id="metric-transfers" class="stat-val">—</div>
+              </div>
+              <div class="stat-box">
+                <div class="stat-label">DNC Scrubbed</div>
+                <div id="metric-dnc-count" class="stat-val">—</div>
+              </div>
+              <div class="stat-box" style="grid-column: span 3;">
+                <div style="font-size: 0.7rem; color: var(--text-secondary);">
+                  Calls started today: <span id="metric-calls-today" style="font-weight: bold;">—</span> / Daily Cap: <span id="metric-daily-cap" style="font-weight: bold;">—</span>
+                </div>
+              </div>
+            </div>
+          </section>
+        </div>
+
+        <!-- 4. Live Calls Monitor & Attempts Table -->
+        <section class="card" style="margin-bottom: 1.5rem;">
+          <div class="card-title">
+            <span>Real-time Live Calls Monitor</span>
+            <button id="btn-refresh-live-calls" class="btn btn-secondary" style="width: auto; padding: 0.25rem 0.5rem; font-size: 0.75rem;">🔄 Refresh Live Calls</button>
+          </div>
+          <div class="table-wrapper" style="max-height: 150px; margin-bottom: 1rem;">
+            <table style="font-size: 0.75rem;">
+              <thead>
+                <tr>
+                  <th>Session ID</th>
+                  <th>Campaign ID</th>
+                  <th>Lead ID</th>
+                  <th>Room Name</th>
+                  <th>Status</th>
+                  <th>Stage</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="live-calls-tbody">
+                <tr><td colspan="7" style="text-align: center; color: var(--text-muted);">No active live calls.</td></tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div class="card-title">
+            <span>Call Attempts Log</span>
+            <button id="btn-refresh-attempts" class="btn btn-secondary" style="width: auto; padding: 0.25rem 0.5rem; font-size: 0.75rem;">🔄 Refresh Attempts</button>
+          </div>
+          <div class="table-wrapper" style="max-height: 200px;">
+            <table style="font-size: 0.75rem;">
+              <thead>
+                <tr>
+                  <th>Attempt ID</th>
+                  <th>Lead ID</th>
+                  <th>Phone (Redacted)</th>
+                  <th>Status</th>
+                  <th>Outcome</th>
+                  <th>Duration</th>
+                  <th>Consent</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="attempts-tbody">
+                <tr><td colspan="8" style="text-align: center; color: var(--text-muted);">No attempts logged.</td></tr>
+              </tbody>
+            </table>
           </div>
         </section>
       </div>

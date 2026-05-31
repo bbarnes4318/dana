@@ -1519,6 +1519,337 @@ class TrainingOperationsConsole:
                 error=str(e),
             )
 
+    # =========================================================================
+    # Telephony Operations Methods
+    # =========================================================================
+
+    async def create_telephony_provider_config(self, **kwargs: Any) -> ConsoleActionResult:
+        """Create a new TelephonyProviderConfig."""
+        try:
+            from telephony.campaign_service import TelephonyCampaignService
+            service = TelephonyCampaignService(repository=self.repository)
+            config_id = await service.create_provider_config(**kwargs)
+            return ConsoleActionResult(
+                action="create_telephony_provider_config",
+                success=True,
+                message="Provider config created successfully.",
+                data={"provider_config_id": config_id},
+            )
+        except Exception as e:
+            return ConsoleActionResult(
+                action="create_telephony_provider_config",
+                success=False,
+                message="Failed to create provider config.",
+                error=str(e),
+            )
+
+    async def list_telephony_provider_configs(self, limit: int = 50) -> ConsoleActionResult:
+        """List provider configs."""
+        try:
+            from telephony.campaign_service import TelephonyCampaignService
+            service = TelephonyCampaignService(repository=self.repository)
+            configs = await service.list_provider_configs(limit=limit)
+            return ConsoleActionResult(
+                action="list_telephony_provider_configs",
+                success=True,
+                message=f"Retrieved {len(configs)} provider configs.",
+                data={"configs": configs},
+            )
+        except Exception as e:
+            return ConsoleActionResult(
+                action="list_telephony_provider_configs",
+                success=False,
+                message="Failed to list provider configs.",
+                error=str(e),
+            )
+
+    async def show_telephony_provider_config(self, provider_config_id: str) -> ConsoleActionResult:
+        """Show detail for a provider config."""
+        try:
+            from telephony.campaign_service import TelephonyCampaignService
+            service = TelephonyCampaignService(repository=self.repository)
+            config = await service.get_provider_config(provider_config_id)
+            if not config:
+                return ConsoleActionResult(
+                    action="show_telephony_provider_config",
+                    success=False,
+                    message=f"Provider config {provider_config_id} not found.",
+                    error="NOT_FOUND",
+                )
+            return ConsoleActionResult(
+                action="show_telephony_provider_config",
+                success=True,
+                message="Provider config retrieved.",
+                data={"config": config},
+            )
+        except Exception as e:
+            return ConsoleActionResult(
+                action="show_telephony_provider_config",
+                success=False,
+                message="Failed to retrieve provider config.",
+                error=str(e),
+            )
+
+    async def create_telephony_campaign(self, **kwargs: Any) -> ConsoleActionResult:
+        """Create a outbound campaign."""
+        try:
+            from telephony.campaign_service import TelephonyCampaignService
+            service = TelephonyCampaignService(repository=self.repository)
+            campaign_id = await service.create_campaign(**kwargs)
+            return ConsoleActionResult(
+                action="create_telephony_campaign",
+                success=True,
+                message="Campaign created successfully.",
+                data={"campaign_id": campaign_id},
+            )
+        except Exception as e:
+            return ConsoleActionResult(
+                action="create_telephony_campaign",
+                success=False,
+                message="Failed to create campaign.",
+                error=str(e),
+            )
+
+    async def list_telephony_campaigns(self, status: str | None = None, limit: int = 50) -> ConsoleActionResult:
+        """List campaigns."""
+        try:
+            from telephony.campaign_service import TelephonyCampaignService
+            service = TelephonyCampaignService(repository=self.repository)
+            campaigns = await service.list_campaigns(status=status, limit=limit)
+            return ConsoleActionResult(
+                action="list_telephony_campaigns",
+                success=True,
+                message=f"Retrieved {len(campaigns)} campaigns.",
+                data={"campaigns": campaigns},
+            )
+        except Exception as e:
+            return ConsoleActionResult(
+                action="list_telephony_campaigns",
+                success=False,
+                message="Failed to list campaigns.",
+                error=str(e),
+            )
+
+    async def show_telephony_campaign(self, campaign_id: str) -> ConsoleActionResult:
+        """Show detail for a campaign."""
+        try:
+            from telephony.campaign_service import TelephonyCampaignService
+            service = TelephonyCampaignService(repository=self.repository)
+            campaign = await service.get_campaign(campaign_id)
+            if not campaign:
+                return ConsoleActionResult(
+                    action="show_telephony_campaign",
+                    success=False,
+                    message=f"Campaign {campaign_id} not found.",
+                    error="NOT_FOUND",
+                )
+            return ConsoleActionResult(
+                action="show_telephony_campaign",
+                success=True,
+                message="Campaign retrieved.",
+                data={"campaign": campaign},
+            )
+        except Exception as e:
+            return ConsoleActionResult(
+                action="show_telephony_campaign",
+                success=False,
+                message="Failed to retrieve campaign.",
+                error=str(e),
+            )
+
+    async def mark_campaign_ready(self, campaign_id: str, operator: str, reason: str | None = None) -> ConsoleActionResult:
+        try:
+            from telephony.campaign_service import TelephonyCampaignService
+            service = TelephonyCampaignService(repository=self.repository)
+            res = await service.mark_ready(campaign_id, operator, reason)
+            return self.result_from_model("mark_campaign_ready", res, res.message)
+        except Exception as e:
+            return ConsoleActionResult(action="mark_campaign_ready", success=False, message="Failed to mark campaign ready.", error=str(e))
+
+    async def start_telephony_campaign(self, campaign_id: str, operator: str, reason: str | None = None) -> ConsoleActionResult:
+        try:
+            from telephony.campaign_service import TelephonyCampaignService
+            service = TelephonyCampaignService(repository=self.repository)
+            res = await service.start_campaign(campaign_id, operator, reason)
+            return self.result_from_model("start_telephony_campaign", res, res.message)
+        except Exception as e:
+            return ConsoleActionResult(action="start_telephony_campaign", success=False, message="Failed to start campaign.", error=str(e))
+
+    async def pause_telephony_campaign(self, campaign_id: str, operator: str, reason: str | None = None) -> ConsoleActionResult:
+        try:
+            from telephony.campaign_service import TelephonyCampaignService
+            service = TelephonyCampaignService(repository=self.repository)
+            res = await service.pause_campaign(campaign_id, operator, reason)
+            return self.result_from_model("pause_telephony_campaign", res, res.message)
+        except Exception as e:
+            return ConsoleActionResult(action="pause_telephony_campaign", success=False, message="Failed to pause campaign.", error=str(e))
+
+    async def resume_telephony_campaign(self, campaign_id: str, operator: str, reason: str | None = None) -> ConsoleActionResult:
+        try:
+            from telephony.campaign_service import TelephonyCampaignService
+            service = TelephonyCampaignService(repository=self.repository)
+            res = await service.resume_campaign(campaign_id, operator, reason)
+            return self.result_from_model("resume_telephony_campaign", res, res.message)
+        except Exception as e:
+            return ConsoleActionResult(action="resume_telephony_campaign", success=False, message="Failed to resume campaign.", error=str(e))
+
+    async def stop_telephony_campaign(self, campaign_id: str, operator: str, reason: str | None = None) -> ConsoleActionResult:
+        try:
+            from telephony.campaign_service import TelephonyCampaignService
+            service = TelephonyCampaignService(repository=self.repository)
+            res = await service.stop_campaign(campaign_id, operator, reason)
+            return self.result_from_model("stop_telephony_campaign", res, res.message)
+        except Exception as e:
+            return ConsoleActionResult(action="stop_telephony_campaign", success=False, message="Failed to stop campaign.", error=str(e))
+
+    async def complete_telephony_campaign(self, campaign_id: str, operator: str, reason: str | None = None) -> ConsoleActionResult:
+        try:
+            from telephony.campaign_service import TelephonyCampaignService
+            service = TelephonyCampaignService(repository=self.repository)
+            res = await service.complete_campaign(campaign_id, operator, reason)
+            return self.result_from_model("complete_telephony_campaign", res, res.message)
+        except Exception as e:
+            return ConsoleActionResult(action="complete_telephony_campaign", success=False, message="Failed to complete campaign.", error=str(e))
+
+    async def get_telephony_campaign_summary(self, campaign_id: str) -> ConsoleActionResult:
+        try:
+            from telephony.campaign_service import TelephonyCampaignService
+            service = TelephonyCampaignService(repository=self.repository)
+            res = await service.get_campaign_summary(campaign_id)
+            return self.result_from_model("get_telephony_campaign_summary", res, "Campaign summary calculated.")
+        except Exception as e:
+            return ConsoleActionResult(action="get_telephony_campaign_summary", success=False, message="Failed to calculate campaign summary.", error=str(e))
+
+    async def import_campaign_leads(self, campaign_id: str, path: str) -> ConsoleActionResult:
+        try:
+            from telephony.lead_importer import CampaignLeadImporter
+            importer = CampaignLeadImporter(repository=self.repository)
+            # Resolve safe path
+            resolved_path = self.safe_path(path)
+            res = await importer.import_file(campaign_id, resolved_path)
+            return self.result_from_model("import_campaign_leads", res, "Leads import completed.")
+        except Exception as e:
+            return ConsoleActionResult(action="import_campaign_leads", success=False, message="Failed to import campaign leads.", error=str(e))
+
+    async def list_campaign_leads(self, campaign_id: str, limit: int = 50) -> ConsoleActionResult:
+        try:
+            leads = await self.repository.query_campaign_leads({"campaign_id": campaign_id})
+            return ConsoleActionResult(
+                action="list_campaign_leads",
+                success=True,
+                message=f"Retrieved {len(leads)} leads.",
+                data={"leads": leads[:limit]},
+            )
+        except Exception as e:
+            return ConsoleActionResult(action="list_campaign_leads", success=False, message="Failed to list campaign leads.", error=str(e))
+
+    async def run_dialer_once(
+        self,
+        campaign_id: str,
+        live_mode: bool = False,
+        dry_run: bool = True,
+        max_calls: int | None = None,
+        operator: str | None = None,
+        force: bool = False,
+    ) -> ConsoleActionResult:
+        try:
+            from telephony.dialer_queue import DialerQueue, DialerTickConfig
+            from telephony.livekit_adapter import LiveKitOutboundAdapter
+            adapter = LiveKitOutboundAdapter()
+            if live_mode and not adapter.live_mode_enabled():
+                return ConsoleActionResult(
+                    action="run_dialer_once",
+                    success=False,
+                    message="Live mode is not enabled. Ensure TELEPHONY_LIVE_MODE=true and DANA_ENABLE_OUTBOUND_DIALER=true are set.",
+                    error="Live mode is not enabled. Ensure TELEPHONY_LIVE_MODE=true and DANA_ENABLE_OUTBOUND_DIALER=true are set."
+                )
+            dialer = DialerQueue(repository=self.repository, adapter=adapter)
+            config = DialerTickConfig(
+                campaign_id=campaign_id,
+                live_mode=live_mode,
+                dry_run=dry_run,
+                max_calls=max_calls,
+                operator=operator or "system",
+                force=force,
+            )
+            res = await dialer.run_tick(config)
+            return self.result_from_model("run_dialer_once", res, "Dialer tick completed.")
+        except Exception as e:
+            return ConsoleActionResult(action="run_dialer_once", success=False, message="Failed to run dialer tick.", error=str(e))
+
+    async def list_live_telephony_calls(self, campaign_id: str | None = None, limit: int = 100) -> ConsoleActionResult:
+        try:
+            from telephony.campaign_service import TelephonyCampaignService
+            service = TelephonyCampaignService(repository=self.repository)
+            calls = await service.list_live_calls(campaign_id=campaign_id, limit=limit)
+            return ConsoleActionResult(
+                action="list_live_telephony_calls",
+                success=True,
+                message=f"Retrieved {len(calls)} live calls.",
+                data={"calls": calls},
+            )
+        except Exception as e:
+            return ConsoleActionResult(action="list_live_telephony_calls", success=False, message="Failed to list live calls.", error=str(e))
+
+    async def list_call_attempts(
+        self, campaign_id: str | None = None, lead_id: str | None = None, limit: int = 100
+    ) -> ConsoleActionResult:
+        try:
+            from telephony.campaign_service import TelephonyCampaignService
+            service = TelephonyCampaignService(repository=self.repository)
+            attempts = await service.list_call_attempts(campaign_id=campaign_id, lead_id=lead_id, limit=limit)
+            return ConsoleActionResult(
+                action="list_call_attempts",
+                success=True,
+                message=f"Retrieved {len(attempts)} call attempts.",
+                data={"attempts": attempts},
+            )
+        except Exception as e:
+            return ConsoleActionResult(action="list_call_attempts", success=False, message="Failed to list call attempts.", error=str(e))
+
+    async def mark_call_outcome(
+        self, attempt_id: str, outcome: str, operator: str, metadata: dict | None = None
+    ) -> ConsoleActionResult:
+        try:
+            from telephony.call_control import TelephonyCallControl
+            control = TelephonyCallControl(repository=self.repository)
+            res = await control.mark_call_outcome(attempt_id, outcome, operator, metadata=metadata)
+            return self.result_from_model("mark_call_outcome", res, res.message)
+        except Exception as e:
+            return ConsoleActionResult(action="mark_call_outcome", success=False, message="Failed to mark call outcome.", error=str(e))
+
+    async def end_live_call(self, call_session_id: str, operator: str, reason: str) -> ConsoleActionResult:
+        try:
+            from telephony.call_control import TelephonyCallControl
+            control = TelephonyCallControl(repository=self.repository)
+            res = await control.end_call(call_session_id, operator, reason)
+            return self.result_from_model("end_live_call", res, res.message)
+        except Exception as e:
+            return ConsoleActionResult(action="end_live_call", success=False, message="Failed to end live call.", error=str(e))
+
+    async def export_call_attempt_to_training(self, attempt_id: str, operator: str) -> ConsoleActionResult:
+        try:
+            from telephony.call_control import TelephonyCallControl
+            control = TelephonyCallControl(repository=self.repository)
+            res = await control.export_call_to_training(attempt_id, operator)
+            return self.result_from_model("export_call_attempt_to_training", res, res.message)
+        except Exception as e:
+            return ConsoleActionResult(action="export_call_attempt_to_training", success=False, message="Failed to export call to training.", error=str(e))
+
+    async def get_telephony_campaign_analytics(self, campaign_id: str) -> ConsoleActionResult:
+        try:
+            from telephony.telephony_reports import TelephonyReports
+            reports = TelephonyReports(repository=self.repository)
+            res = await reports.get_campaign_analytics(campaign_id)
+            return ConsoleActionResult(
+                action="get_telephony_campaign_analytics",
+                success=True,
+                message="Campaign analytics generated.",
+                data={"analytics": res},
+            )
+        except Exception as e:
+            return ConsoleActionResult(action="get_telephony_campaign_analytics", success=False, message="Failed to generate campaign analytics.", error=str(e))
+
 
 def json_serializable(obj: Any) -> Any:
     """Recursively convert custom objects/dataclasses to JSON-serializable formats."""

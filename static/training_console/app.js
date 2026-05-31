@@ -1450,4 +1450,636 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
+  // =========================================================================
+  // Telephony & Campaigns Event Listeners & Functions
+  // =========================================================================
+
+  // Provider config form submission
+  const providerForm = document.getElementById("provider-config-form");
+  if (providerForm) {
+    providerForm.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const name = document.getElementById("provider-name").value.trim();
+      const telnyx_connection_id = document.getElementById("telnyx-connection-id").value.trim();
+      const telnyx_numbers_raw = document.getElementById("telnyx-numbers").value.trim();
+      const livekit_url = document.getElementById("livekit-url").value.trim();
+      const livekit_sip_outbound_trunk_id = document.getElementById("livekit-outbound-trunk").value.trim();
+      const btn = document.getElementById("btn-save-provider");
+      const text = btn.innerText;
+
+      const telnyx_phone_numbers = telnyx_numbers_raw ? telnyx_numbers_raw.split(",").map(n => n.trim()) : [];
+
+      log(`Saving provider configuration "${name}"...`);
+      setButtonState(btn, true, text);
+
+      const payload = {
+        name,
+        provider: "telnyx_livekit",
+        status: "active",
+        telnyx_connection_id: telnyx_connection_id || null,
+        telnyx_phone_numbers,
+        livekit_url: livekit_url || null,
+        livekit_sip_outbound_trunk_id: livekit_sip_outbound_trunk_id || null,
+      };
+
+      try {
+        const response = await fetch("/api/telephony/providers", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+        const data = await response.json();
+        if (response.ok && data.success) {
+          showStatus("Provider Config Saved", data.message);
+          log(`Saved provider config with ID: ${data.data.provider_config_id}`, "success");
+          providerForm.reset();
+          listProviders();
+        } else {
+          showStatus("Save Failed", data.error || data.message, true);
+          log(`Failed to save provider config: ${data.error || data.message}`, "error");
+        }
+      } catch (error) {
+        showStatus("Connection Error", error.message, true);
+        log(`Network error saving provider config: ${error.message}`, "error");
+      } finally {
+        setButtonState(btn, false, text);
+      }
+    });
+  }
+
+  // List Provider Configs
+  const btnListProviders = document.getElementById("btn-list-providers");
+  const providersTbody = document.getElementById("providers-tbody");
+  async function listProviders() {
+    if (!providersTbody) return;
+    const btn = btnListProviders;
+    const text = btn ? btn.innerText : "";
+    if (btn) setButtonState(btn, true, text);
+
+    try {
+      const response = await fetch("/api/telephony/providers?limit=50");
+      const data = await response.json();
+      if (response.ok && data.success) {
+        const configs = data.data.configs || [];
+        if (configs.length === 0) {
+          providersTbody.innerHTML = `<tr><td colspan="3" style="text-align: center; color: var(--text-muted);">No provider configs found.</td></tr>`;
+        } else {
+          providersTbody.innerHTML = "";
+          configs.forEach(c => {
+            const tr = document.createElement("tr");
+            tr.innerHTML = `
+              <td><strong>${c.name}</strong></td>
+              <td style="font-family: monospace; font-size: 0.7rem;">${c.id}</td>
+              <td><span class="badge badge-safety">${c.status}</span></td>
+            `;
+            providersTbody.appendChild(tr);
+          });
+        }
+      } else {
+        log(`Failed to load providers: ${data.error || data.message}`, "error");
+      }
+    } catch (error) {
+      log(`Network error loading providers: ${error.message}`, "error");
+    } finally {
+      if (btn) setButtonState(btn, false, text);
+    }
+  }
+  if (btnListProviders) {
+    btnListProviders.addEventListener("click", listProviders);
+  }
+
+  // Campaign creation form submission
+  const campaignFormTel = document.getElementById("campaign-create-form-telephony");
+  if (campaignFormTel) {
+    campaignFormTel.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const name = document.getElementById("camp-name").value.trim();
+      const caller_id = document.getElementById("camp-caller-id").value.trim();
+      const transfer_phone_number = document.getElementById("camp-transfer-phone").value.trim();
+      const max_concurrent_calls = document.getElementById("camp-concurrent").value;
+      const daily_call_cap = document.getElementById("camp-cap").value;
+      const calling_window_start = document.getElementById("camp-window-start").value.trim();
+      const calling_window_end = document.getElementById("camp-window-end").value.trim();
+      const operator = document.getElementById("camp-operator").value.trim();
+      const btn = document.getElementById("btn-save-campaign-tel");
+      const text = btn.innerText;
+
+      log(`Creating campaign "${name}"...`);
+      setButtonState(btn, true, text);
+
+      const payload = {
+        name,
+        caller_id: caller_id || null,
+        transfer_phone_number: transfer_phone_number || null,
+        max_concurrent_calls: parseInt(max_concurrent_calls),
+        daily_call_cap: parseInt(daily_call_cap),
+        calling_window_start,
+        calling_window_end,
+        operator,
+        allowed_days: ["mon", "tue", "wed", "thu", "fri"],
+        require_live_mode: true
+      };
+
+      try {
+        const response = await fetch("/api/telephony/campaigns", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+        const data = await response.json();
+        if (response.ok && data.success) {
+          showStatus("Campaign Created", data.message);
+          log(`Created campaign with ID: ${data.data.campaign_id}`, "success");
+          campaignFormTel.reset();
+          listCampaignsTel();
+        } else {
+          showStatus("Creation Failed", data.error || data.message, true);
+          log(`Failed to create campaign: ${data.error || data.message}`, "error");
+        }
+      } catch (error) {
+        showStatus("Connection Error", error.message, true);
+        log(`Network error creating campaign: ${error.message}`, "error");
+      } finally {
+        setButtonState(btn, false, text);
+      }
+    });
+  }
+
+  // List Outbound Campaigns
+  const btnListCampaignsTel = document.getElementById("btn-list-campaigns-tel");
+  const campaignsTbodyTel = document.getElementById("campaigns-tbody-tel");
+  async function listCampaignsTel() {
+    if (!campaignsTbodyTel) return;
+    const btn = btnListCampaignsTel;
+    const text = btn ? btn.innerText : "";
+    if (btn) setButtonState(btn, true, text);
+
+    try {
+      const response = await fetch("/api/telephony/campaigns");
+      const data = await response.json();
+      if (response.ok && data.success) {
+        const campaigns = data.data.campaigns || [];
+        if (campaigns.length === 0) {
+          campaignsTbodyTel.innerHTML = `<tr><td colspan="5" style="text-align: center; color: var(--text-muted);">No campaigns found.</td></tr>`;
+        } else {
+          campaignsTbodyTel.innerHTML = "";
+          campaigns.forEach(c => {
+            const tr = document.createElement("tr");
+            tr.innerHTML = `
+              <td style="font-family: monospace; font-size: 0.7rem;">${c.id}</td>
+              <td><strong>${c.name}</strong></td>
+              <td><span class="badge ${c.status === 'running' ? 'badge-safety' : 'badge-alert'}">${c.status}</span></td>
+              <td>${c.daily_call_cap} calls</td>
+              <td>
+                <button class="btn btn-secondary btn-select-camp" data-id="${c.id}" style="padding: 0.15rem 0.4rem; font-size:0.7rem; width:auto;">Select</button>
+              </td>
+            `;
+            campaignsTbodyTel.appendChild(tr);
+          });
+
+          // Bind Select buttons
+          document.querySelectorAll(".btn-select-camp").forEach(btn => {
+            btn.addEventListener("click", () => {
+              const cid = btn.getAttribute("data-id");
+              selectCampaign(cid);
+            });
+          });
+        }
+      } else {
+        log(`Failed to load campaigns: ${data.error || data.message}`, "error");
+      }
+    } catch (error) {
+      log(`Network error loading campaigns: ${error.message}`, "error");
+    } finally {
+      if (btn) setButtonState(btn, false, text);
+    }
+  }
+  if (btnListCampaignsTel) {
+    btnListCampaignsTel.addEventListener("click", listCampaignsTel);
+  }
+
+  function selectCampaign(cid) {
+    const ctrlCampaignId = document.getElementById("ctrl-campaign-id");
+    const importCampId = document.getElementById("import-camp-id");
+    const dialerCampId = document.getElementById("dialer-camp-id");
+    if (ctrlCampaignId) ctrlCampaignId.value = cid;
+    if (importCampId) importCampId.value = cid;
+    if (dialerCampId) dialerCampId.value = cid;
+
+    log(`Selected campaign: ${cid}`);
+    loadCampaignSummary(cid);
+    listCampaignLeads(cid);
+  }
+
+  // Campaign Lifecycle Action Trigger
+  window.triggerCampaignLifecycleAction = async function(action) {
+    const campaignId = document.getElementById("ctrl-campaign-id").value;
+    const operator = document.getElementById("ctrl-operator").value.trim();
+    if (!campaignId) {
+      alert("Please select a campaign first!");
+      return;
+    }
+    if (!operator) {
+      alert("Operator name is required to perform control actions!");
+      document.getElementById("ctrl-operator").focus();
+      return;
+    }
+
+    log(`Triggering action "${action}" on campaign ${campaignId} by ${operator}...`);
+
+    try {
+      const response = await fetch(`/api/telephony/campaigns/${campaignId}/${action}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ operator, reason: `Console action: ${action}` })
+      });
+      const data = await response.json();
+      if (response.ok && data.success) {
+        showStatus("Campaign Action Executed", data.message);
+        log(`Campaign ${campaignId} transitioned to: ${data.data.campaign.status}`, "success");
+        listCampaignsTel();
+        loadCampaignSummary(campaignId);
+      } else {
+        showStatus("Action Failed", data.error || data.message, true);
+        log(`Action failed: ${data.error || data.message}`, "error");
+      }
+    } catch (error) {
+      showStatus("Connection Error", error.message, true);
+      log(`Network error: ${error.message}`, "error");
+    }
+  };
+
+  // Import Leads Form
+  const leadsImportForm = document.getElementById("leads-import-form");
+  if (leadsImportForm) {
+    leadsImportForm.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const campaignId = document.getElementById("import-camp-id").value;
+      const path = document.getElementById("leads-file-path").value.trim();
+      const btn = document.getElementById("btn-import-leads");
+      const text = btn.innerText;
+
+      if (!campaignId) {
+        alert("Please select a campaign first!");
+        return;
+      }
+
+      log(`Importing leads file "${path}" into campaign ${campaignId}...`);
+      setButtonState(btn, true, text);
+
+      try {
+        const response = await fetch(`/api/telephony/campaigns/${campaignId}/leads/import`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ path })
+        });
+        const data = await response.json();
+        if (response.ok && data.success) {
+          showStatus("Leads Imported Successfully", data.message);
+          log(`Leads imported. Details: ${JSON.stringify(data.data)}`, "success");
+          leadsImportForm.reset();
+          listCampaignLeads(campaignId);
+          loadCampaignSummary(campaignId);
+        } else {
+          showStatus("Import Failed", data.error || data.message, true);
+          log(`Import failed: ${data.error || data.message}`, "error");
+        }
+      } catch (error) {
+        showStatus("Connection Error", error.message, true);
+        log(`Network error importing leads: ${error.message}`, "error");
+      } finally {
+        setButtonState(btn, false, text);
+      }
+    });
+  }
+
+  // List Campaign Leads
+  const btnListLeads = document.getElementById("btn-list-leads");
+  const leadsTbodyTel = document.getElementById("leads-tbody-tel");
+  async function listCampaignLeads(campaignId) {
+    if (!leadsTbodyTel) return;
+    const cid = campaignId || document.getElementById("import-camp-id").value;
+    if (!cid) return;
+
+    const btn = btnListLeads;
+    const text = btn ? btn.innerText : "";
+    if (btn) setButtonState(btn, true, text);
+
+    try {
+      const response = await fetch(`/api/telephony/campaigns/${cid}/leads?limit=50`);
+      const data = await response.json();
+      if (response.ok && data.success) {
+        const leads = data.data.leads || [];
+        if (leads.length === 0) {
+          leadsTbodyTel.innerHTML = `<tr><td colspan="4" style="text-align: center; color: var(--text-muted);">No leads found for campaign.</td></tr>`;
+        } else {
+          leadsTbodyTel.innerHTML = "";
+          leads.forEach(l => {
+            const tr = document.createElement("tr");
+            tr.innerHTML = `
+              <td>${l.first_name || ''} ${l.last_name || ''}</td>
+              <td style="font-family: monospace;">****${l.phone_number.substring(l.phone_number.length - 4)}</td>
+              <td><span class="badge badge-safety">${l.status}</span></td>
+              <td>${l.priority}</td>
+            `;
+            leadsTbodyTel.appendChild(tr);
+          });
+        }
+      } else {
+        log(`Failed to load leads: ${data.error || data.message}`, "error");
+      }
+    } catch (error) {
+      log(`Network error loading leads: ${error.message}`, "error");
+    } finally {
+      if (btn) setButtonState(btn, false, text);
+    }
+  }
+  if (btnListLeads) {
+    btnListLeads.addEventListener("click", () => listCampaignLeads());
+  }
+
+  // Dialer Tick Form
+  const dialerTickForm = document.getElementById("dialer-tick-form");
+  if (dialerTickForm) {
+    dialerTickForm.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const campaignId = document.getElementById("dialer-camp-id").value;
+      const maxCalls = document.getElementById("dialer-max-calls").value;
+      const dryRun = document.getElementById("dialer-dry-run").checked;
+      const liveMode = document.getElementById("dialer-live-mode").checked;
+      const operator = document.getElementById("ctrl-operator").value.trim();
+      const btn = document.getElementById("btn-run-dialer-tick");
+      const text = btn.innerText;
+
+      if (!campaignId) {
+        alert("Please select a campaign first!");
+        return;
+      }
+      if (!operator) {
+        alert("Operator identity is required to run dialer ticks!");
+        document.getElementById("ctrl-operator").focus();
+        return;
+      }
+
+      log(`Executing dialer pacing tick on campaign ${campaignId}...`);
+      setButtonState(btn, true, text);
+
+      const payload = {
+        dry_run: dryRun,
+        live_mode: liveMode,
+        max_calls: maxCalls ? parseInt(maxCalls) : null,
+        operator,
+        force: false
+      };
+
+      try {
+        const response = await fetch(`/api/telephony/campaigns/${campaignId}/dialer/tick`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+        const data = await response.json();
+        if (response.ok && data.success) {
+          showStatus("Dialer Pacing Completed", data.message);
+          log(`Dialer tick finished: ${JSON.stringify(data.data)}`, "success");
+          loadCampaignSummary(campaignId);
+          refreshLiveCalls();
+          refreshAttempts();
+        } else {
+          showStatus("Dialer Tick Failed", data.error || data.message, true);
+          log(`Dialer tick failed: ${data.error || data.message}`, "error");
+        }
+      } catch (error) {
+        showStatus("Connection Error", error.message, true);
+        log(`Network error executing dialer tick: ${error.message}`, "error");
+      } finally {
+        setButtonState(btn, false, text);
+      }
+    });
+  }
+
+  // Load Campaign Summary
+  const btnLoadSummaryTel = document.getElementById("btn-load-summary-tel");
+  async function loadCampaignSummary(campaignId) {
+    const cid = campaignId || document.getElementById("ctrl-campaign-id").value;
+    if (!cid) return;
+
+    try {
+      const response = await fetch(`/api/telephony/campaigns/${cid}/summary`);
+      const data = await response.json();
+      if (response.ok && data.success) {
+        const s = data.data;
+        document.getElementById("metric-total-leads").innerText = s.total_leads;
+        document.getElementById("metric-queued-leads").innerText = s.queued_leads;
+        document.getElementById("metric-active-calls").innerText = s.active_calls;
+        document.getElementById("metric-completed-calls").innerText = s.completed_calls;
+        document.getElementById("metric-transfers").innerText = s.transfer_count;
+        document.getElementById("metric-dnc-count").innerText = s.dnc_count;
+        document.getElementById("metric-calls-today").innerText = s.calls_started_today;
+        document.getElementById("metric-daily-cap").innerText = s.daily_call_cap;
+      }
+    } catch (error) {
+      log(`Error loading summary: ${error.message}`, "error");
+    }
+  }
+  if (btnLoadSummaryTel) {
+    btnLoadSummaryTel.addEventListener("click", () => loadCampaignSummary());
+  }
+
+  // Refresh Live Calls
+  const btnRefreshLiveCalls = document.getElementById("btn-refresh-live-calls");
+  const liveCallsTbody = document.getElementById("live-calls-tbody");
+  async function refreshLiveCalls() {
+    if (!liveCallsTbody) return;
+    const campaignId = document.getElementById("ctrl-campaign-id").value;
+
+    try {
+      let url = "/api/telephony/calls/live";
+      if (campaignId) {
+        url += `?campaign_id=${campaignId}`;
+      }
+      const response = await fetch(url);
+      const data = await response.json();
+      if (response.ok && data.success) {
+        const calls = data.data.calls || [];
+        if (calls.length === 0) {
+          liveCallsTbody.innerHTML = `<tr><td colspan="7" style="text-align: center; color: var(--text-muted);">No active live calls.</td></tr>`;
+        } else {
+          liveCallsTbody.innerHTML = "";
+          calls.forEach(c => {
+            const tr = document.createElement("tr");
+            tr.innerHTML = `
+              <td style="font-family: monospace; font-size: 0.7rem;">${c.id.substring(0, 8)}...</td>
+              <td style="font-family: monospace; font-size: 0.7rem;">${c.campaign_id.substring(0, 8)}...</td>
+              <td style="font-family: monospace; font-size: 0.7rem;">${c.lead_id.substring(0, 8)}...</td>
+              <td>${c.livekit_room_name || '—'}</td>
+              <td><span class="badge badge-safety">${c.status}</span></td>
+              <td>${c.current_stage || '—'}</td>
+              <td>
+                <button type="button" onclick="endLiveCallSession('${c.id}')" class="btn btn-danger" style="padding: 0.15rem 0.4rem; font-size: 0.7rem; width: auto;">Hangup</button>
+              </td>
+            `;
+            liveCallsTbody.appendChild(tr);
+          });
+        }
+      }
+    } catch (error) {
+      log(`Error loading live calls: ${error.message}`, "error");
+    }
+  }
+  if (btnRefreshLiveCalls) {
+    btnRefreshLiveCalls.addEventListener("click", refreshLiveCalls);
+  }
+
+  // Refresh Attempts
+  const btnRefreshAttempts = document.getElementById("btn-refresh-attempts");
+  const attemptsTbody = document.getElementById("attempts-tbody");
+  async function refreshAttempts() {
+    if (!attemptsTbody) return;
+    const campaignId = document.getElementById("ctrl-campaign-id").value;
+
+    try {
+      let url = "/api/telephony/calls/attempts";
+      if (campaignId) {
+        url += `?campaign_id=${campaignId}`;
+      }
+      const response = await fetch(url);
+      const data = await response.json();
+      if (response.ok && data.success) {
+        const attempts = data.data.attempts || [];
+        if (attempts.length === 0) {
+          attemptsTbody.innerHTML = `<tr><td colspan="8" style="text-align: center; color: var(--text-muted);">No attempts logged.</td></tr>`;
+        } else {
+          attemptsTbody.innerHTML = "";
+          attempts.forEach(a => {
+            const tr = document.createElement("tr");
+            tr.innerHTML = `
+              <td style="font-family: monospace; font-size: 0.7rem;">${a.id.substring(0, 8)}...</td>
+              <td style="font-family: monospace; font-size: 0.7rem;">${a.lead_id.substring(0, 8)}...</td>
+              <td style="font-family: monospace;">****${a.phone_number.substring(a.phone_number.length - 4)}</td>
+              <td><span class="badge badge-safety">${a.status}</span></td>
+              <td><span class="badge badge-alert">${a.outcome || 'unknown'}</span></td>
+              <td>${a.duration_seconds || 0}s</td>
+              <td>${a.transfer_consent ? '✅' : '❌'}</td>
+              <td>
+                <div style="display: flex; gap: 0.25rem;">
+                  <button type="button" onclick="showOutcomeModal('${a.id}')" class="btn btn-secondary" style="padding: 0.15rem 0.4rem; font-size: 0.7rem; width: auto;">Outcome</button>
+                  <button type="button" onclick="exportAttemptToTraining('${a.id}')" class="btn btn-primary" style="padding: 0.15rem 0.4rem; font-size: 0.7rem; width: auto;">Export</button>
+                </div>
+              </td>
+            `;
+            attemptsTbody.appendChild(tr);
+          });
+        }
+      }
+    } catch (error) {
+      log(`Error loading attempts: ${error.message}`, "error");
+    }
+  }
+  if (btnRefreshAttempts) {
+    btnRefreshAttempts.addEventListener("click", refreshAttempts);
+  }
+
+  // End Call
+  window.endLiveCallSession = async function(sessionId) {
+    const operator = document.getElementById("ctrl-operator").value.trim();
+    if (!operator) {
+      alert("Operator name is required to perform control actions!");
+      document.getElementById("ctrl-operator").focus();
+      return;
+    }
+    if (!confirm("Are you sure you want to hang up this live call?")) return;
+
+    log(`Ending live call session ${sessionId}...`);
+    try {
+      const response = await fetch(`/api/telephony/calls/${sessionId}/end`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ operator, reason: "Operator ended call via console" })
+      });
+      const data = await response.json();
+      if (response.ok && data.success) {
+        showStatus("Call Ended", data.message);
+        log(`Call session ${sessionId} ended.`, "success");
+        refreshLiveCalls();
+        refreshAttempts();
+        const cid = document.getElementById("ctrl-campaign-id").value;
+        if (cid) loadCampaignSummary(cid);
+      } else {
+        showStatus("Action Failed", data.error || data.message, true);
+      }
+    } catch (error) {
+      log(`Error ending call: ${error.message}`, "error");
+    }
+  };
+
+  // Export attempt to training
+  window.exportAttemptToTraining = async function(attemptId) {
+    const operator = document.getElementById("ctrl-operator").value.trim();
+    if (!operator) {
+      alert("Operator name is required to perform control actions!");
+      document.getElementById("ctrl-operator").focus();
+      return;
+    }
+
+    log(`Exporting attempt ${attemptId} to training...`);
+    try {
+      const response = await fetch(`/api/telephony/calls/${attemptId}/export-training`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ operator })
+      });
+      const data = await response.json();
+      if (response.ok && data.success) {
+        showStatus("Call Exported to Training", data.message);
+        log(`Call attempt ${attemptId} successfully exported to training.`, "success");
+        refreshAttempts();
+      } else {
+        showStatus("Export Failed", data.error || data.message, true);
+        log(`Export failed: ${data.error || data.message}`, "error");
+      }
+    } catch (error) {
+      log(`Error exporting call: ${error.message}`, "error");
+    }
+  };
+
+  // Simple prompt-based Outcome selection modal
+  window.showOutcomeModal = async function(attemptId) {
+    const operator = document.getElementById("ctrl-operator").value.trim();
+    if (!operator) {
+      alert("Operator name is required to perform control actions!");
+      document.getElementById("ctrl-operator").focus();
+      return;
+    }
+
+    const outcome = prompt("Enter final call outcome (no_answer, voicemail, busy, failed, answered, callback, not_interested, dnc, wrong_number, transferred, sale):");
+    if (!outcome) return;
+
+    log(`Setting outcome for attempt ${attemptId} to "${outcome}"...`);
+    try {
+      const response = await fetch(`/api/telephony/calls/${attemptId}/outcome`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ operator, outcome })
+      });
+      const data = await response.json();
+      if (response.ok && data.success) {
+        showStatus("Outcome Marked Successfully", data.message);
+        log(`Outcome resolved: ${data.data.new_status}`, "success");
+        refreshAttempts();
+        const cid = document.getElementById("ctrl-campaign-id").value;
+        if (cid) loadCampaignSummary(cid);
+      } else {
+        showStatus("Action Failed", data.error || data.message, true);
+      }
+    } catch (error) {
+      log(`Error updating outcome: ${error.message}`, "error");
+    }
+  };
+
+  // Initial load
+  listProviders();
+  listCampaignsTel();
+
 });
+
