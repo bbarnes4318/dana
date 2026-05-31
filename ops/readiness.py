@@ -264,6 +264,7 @@ class ContinuousTrainingReadinessAuditor:
             "training_post_call_exporter": "training/post_call_exporter.py",
             "training_youtube_importer": "training/youtube_importer.py",
             "training_intake_scheduler": "training/intake_scheduler.py",
+            "ops_training_console": "ops/training_console.py",
         }
 
         for check_id, rel_path in pipeline_modules.items():
@@ -461,6 +462,7 @@ class ContinuousTrainingReadinessAuditor:
             "scripts/export_completed_call.py",
             "scripts/import_youtube_transcripts.py",
             "scripts/run_training_intake_scheduler.py",
+            "scripts/training_console.py",
         ]
 
         for script in cli_scripts:
@@ -504,6 +506,7 @@ class ContinuousTrainingReadinessAuditor:
             "docs/post_call_training_export_operating_procedure.md",
             "docs/youtube_training_import_operating_procedure.md",
             "docs/training_intake_scheduler_operating_procedure.md",
+            "docs/training_operations_console.md",
         ]
 
         for doc in required_docs:
@@ -655,6 +658,7 @@ class ContinuousTrainingReadinessAuditor:
             "tests/test_post_call_exporter.py",
             "tests/test_youtube_importer.py",
             "tests/test_training_intake_scheduler.py",
+            "tests/test_training_console.py",
         ]
 
         for test in required_tests:
