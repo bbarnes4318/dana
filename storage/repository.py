@@ -113,7 +113,8 @@ class Repository:
         elif os.environ.get("DATABASE_URL"):
             self._store = PostgresStore()
         else:
-            self._store = JsonlStore(data_dir=data_dir)
+            env_dir = os.environ.get("DANA_DATA_DIR")
+            self._store = JsonlStore(data_dir=env_dir or data_dir)
         self._claim_lock = asyncio.Lock()
 
     @property
@@ -170,6 +171,8 @@ class Repository:
         Returns:
             The ``id`` of the saved record.
         """
+        if "created_at" in kwargs and "timestamp" not in kwargs:
+            kwargs["timestamp"] = kwargs["created_at"]
         turn = CallTurn(**kwargs)
         data = turn.model_dump(mode="json")
         data.setdefault("id", str(uuid.uuid4()))
@@ -186,6 +189,8 @@ class Repository:
         Returns:
             The ``id`` of the saved record.
         """
+        if "created_at" in kwargs and "timestamp" not in kwargs:
+            kwargs["timestamp"] = kwargs["created_at"]
         event = ToolEvent(**kwargs)
         data = event.model_dump(mode="json")
         data.setdefault("id", str(uuid.uuid4()))
@@ -202,6 +207,8 @@ class Repository:
         Returns:
             The ``id`` of the saved record.
         """
+        if "created_at" in kwargs and "timestamp" not in kwargs:
+            kwargs["timestamp"] = kwargs["created_at"]
         report = QAReport(**kwargs)
         data = report.model_dump(mode="json")
         data.setdefault("id", str(uuid.uuid4()))
@@ -460,6 +467,10 @@ class Repository:
         """Query prompt versions matching the specified filters."""
         return await self._store.query(_PROMPT_VERSIONS, filters)
 
+    async def list_recent_prompt_versions(self, limit: int = 50) -> list[dict]:
+        """List recent prompt versions."""
+        return await self._store.list_recent(_PROMPT_VERSIONS, limit=limit)
+
     async def get_human_review_item(self, item_id: str) -> Optional[dict]:
         """Retrieve a human review item by primary key."""
         return await self._store.get(_HUMAN_REVIEW_ITEMS, item_id)
@@ -483,6 +494,27 @@ class Repository:
     async def query_call_outcome_labels(self, filters: dict) -> list[dict]:
         """Query call outcome labels matching the specified filters."""
         return await self._store.query(_CALL_OUTCOME_LABELS, filters)
+
+    async def query_calls(self, filters: dict) -> list[dict]:
+        """Query calls matching the specified filters."""
+        return await self._store.query(_CALLS, filters)
+
+    async def query_call_turns(self, filters: dict) -> list[dict]:
+        """Query call turns matching the specified filters."""
+        return await self._store.query(_CALL_TURNS, filters)
+
+    async def query_qa_reports(self, filters: dict) -> list[dict]:
+        """Query QA reports matching the specified filters."""
+        return await self._store.query(_QA_REPORTS, filters)
+
+    async def query_tool_events(self, filters: dict) -> list[dict]:
+        """Query tool events matching the specified filters."""
+        return await self._store.query(_TOOL_EVENTS, filters)
+
+    async def list_recent_calls_records(self, limit: int = 50) -> list[dict]:
+        """List recent call records from calls collection."""
+        return await self._store.list_recent(_CALLS, limit=limit)
+
 
     async def get_campaign(self, campaign_id: str) -> Optional[dict]:
         """Retrieve a campaign by campaign_id or id, merging config into top-level."""

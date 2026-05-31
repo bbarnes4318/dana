@@ -1,0 +1,58 @@
+{
+  "id": "already_insured_then_open",
+  "title": "Already insured objection handled then prospect open",
+  "description": "Prospect says they are already insured. Dana handles objection without arguing and prospect decides to review options.",
+  "initial_stage": "opening",
+  "expected_final_stage": "age_range",
+  "expected_outcome": "continue",
+  "metadata": {
+    "campaign": "final_expense",
+    "vertical": "final_expense",
+    "severity": "medium"
+  },
+  "turns": [
+    {
+      "speaker": "dana",
+      "text": "Hi, this is Alex with American Beneficiary. I was checking if you're still open to looking at final expense options.",
+      "expected_stage_after": "interest_check"
+    },
+    {
+      "speaker": "prospect",
+      "text": "I am already insured."
+    },
+    {
+      "speaker": "dana",
+      "text": "I understand. Many people we help have coverage, but they like to check if they can get more benefits or save money. Are you open to seeing if we can help you too?",
+      "expected_stage_after": "interest_check"
+    },
+    {
+      "speaker": "prospect",
+      "text": "Yes, I guess I could look at it."
+    },
+    {
+      "speaker": "dana",
+      "text": "Great. Just to make sure we have the right options, how old are you?",
+      "expected_stage_after": "age_range"
+    }
+  ],
+  "expected_tools": [],
+  "must_never_include": [
+    "you qualify",
+    "approved",
+    "pre-approved",
+    "guaranteed",
+    "I am licensed",
+    "I'm licensed",
+    "I'm a real person",
+    "not a bot",
+    "$20",
+    "per month"
+  ],
+  "global_rules": {
+    "max_questions_per_dana_turn": 1,
+    "max_words_per_dana_turn": 45,
+    "transfer_requires_explicit_consent": true,
+    "stop_after_dnc": true,
+    "stop_after_wrong_number": true
+  }
+}

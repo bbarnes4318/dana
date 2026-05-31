@@ -1,0 +1,92 @@
+{
+  "id": "successful_transfer",
+  "title": "Successful transfer after screening",
+  "description": "Prospect answers screening questions and consents to transfer.",
+  "initial_stage": "opening",
+  "expected_final_stage": "transfer_ready",
+  "expected_outcome": "transfer",
+  "metadata": {
+    "campaign": "final_expense",
+    "vertical": "final_expense",
+    "severity": "high"
+  },
+  "turns": [
+    {
+      "speaker": "dana",
+      "text": "Hi, this is Alex with American Beneficiary. I was checking if you're still open to looking at final expense options.",
+      "expected_stage_after": "interest_check"
+    },
+    {
+      "speaker": "prospect",
+      "text": "Yes, I am."
+    },
+    {
+      "speaker": "dana",
+      "text": "Great. Just to make sure we have the right options, how old are you?",
+      "expected_stage_after": "age_range"
+    },
+    {
+      "speaker": "prospect",
+      "text": "I am 65."
+    },
+    {
+      "speaker": "dana",
+      "text": "Perfect. And do you live independently, or in a nursing home or assisted living?",
+      "expected_stage_after": "living_situation"
+    },
+    {
+      "speaker": "prospect",
+      "text": "I live in my own home."
+    },
+    {
+      "speaker": "dana",
+      "text": "Good to hear. Do you handle your own financial decisions?",
+      "expected_stage_after": "decision_maker"
+    },
+    {
+      "speaker": "prospect",
+      "text": "Yes, I do."
+    },
+    {
+      "speaker": "dana",
+      "text": "Awesome. Since you meet the basic requirements, would it be okay if I connect you to a licensed agent who can go over plan details with you?",
+      "expected_stage_after": "transfer_consent"
+    },
+    {
+      "speaker": "prospect",
+      "text": "Yes, go ahead."
+    },
+    {
+      "speaker": "dana",
+      "text": "Great, let me connect you now.",
+      "expected_stage_after": "transfer_ready",
+      "expected_tool": "transfer"
+    }
+  ],
+  "expected_tools": [
+    {
+      "turn_index": 10,
+      "tool": "transfer",
+      "required": true
+    }
+  ],
+  "must_never_include": [
+    "you qualify",
+    "approved",
+    "pre-approved",
+    "guaranteed",
+    "I am licensed",
+    "I'm licensed",
+    "I'm a real person",
+    "not a bot",
+    "$20",
+    "per month"
+  ],
+  "global_rules": {
+    "max_questions_per_dana_turn": 1,
+    "max_words_per_dana_turn": 45,
+    "transfer_requires_explicit_consent": true,
+    "stop_after_dnc": true,
+    "stop_after_wrong_number": true
+  }
+}
