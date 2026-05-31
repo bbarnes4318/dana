@@ -77,7 +77,7 @@ TABLE_COLUMNS = {
     # Training modules
     training_dir = base_dir / "training"
     training_dir.mkdir(parents=True, exist_ok=True)
-    for mod in ["__init__.py", "ingestion.py", "labeler.py", "example_miner.py", "review_service.py", "rag_builder.py", "daily_qa_miner.py", "fine_tune_export.py", "fine_tune_gate.py", "fine_tune_job_request.py", "fine_tune_job_tracker.py", "intake_orchestrator.py"]:
+    for mod in ["__init__.py", "ingestion.py", "labeler.py", "example_miner.py", "review_service.py", "rag_builder.py", "daily_qa_miner.py", "fine_tune_export.py", "fine_tune_gate.py", "fine_tune_job_request.py", "fine_tune_job_tracker.py", "intake_orchestrator.py", "post_call_exporter.py", "youtube_importer.py", "intake_scheduler.py"]:
         if mod == "fine_tune_job_tracker.py":
             (training_dir / mod).write_text("start_authorized = True\napi_upload_performed = False", encoding="utf-8")
         elif mod == "fine_tune_export.py":
@@ -121,7 +121,8 @@ TABLE_COLUMNS = {
         "preview_prompt_patch.py", "manage_canary_rollout.py", "monitor_canary_rollout.py",
         "export_fine_tune_dataset.py", "gate_fine_tune_dataset.py", "prepare_fine_tune_job_request.py",
         "track_fine_tune_job.py", "run_continuous_training_readiness.py", "rebuild_training_rag.py",
-        "run_training_intake.py"
+        "run_training_intake.py", "export_completed_call.py", "import_youtube_transcripts.py",
+        "run_training_intake_scheduler.py"
     ]
     for script in cli_scripts:
         (cli_dir / script).write_text("import json\n# clean json output", encoding="utf-8")
@@ -129,13 +130,13 @@ TABLE_COLUMNS = {
     # Docs
     docs_dir = base_dir / "docs"
     docs_dir.mkdir(parents=True, exist_ok=True)
-    for doc in ["continuous_training_runbook.md", "dana_training_safety_gates.md", "fine_tuning_operating_procedure.md", "prompt_canary_operating_procedure.md", "training_intake_operating_procedure.md"]:
+    for doc in ["continuous_training_runbook.md", "dana_training_safety_gates.md", "fine_tuning_operating_procedure.md", "prompt_canary_operating_procedure.md", "training_intake_operating_procedure.md", "post_call_training_export_operating_procedure.md", "youtube_training_import_operating_procedure.md", "training_intake_scheduler_operating_procedure.md"]:
         (docs_dir / doc).write_text("# Doc\nRed lines include:\n- no transfer without consent\n- no licensed claim\n- no price quotes\n- no approval/qualification promises\n- no DNC/wrong-number continuation\n- no PII collection\n must never do manually", encoding="utf-8")
 
     # Runtime Safety
     core_dir = base_dir / "core"
     core_dir.mkdir(parents=True, exist_ok=True)
-    (core_dir / "agent_runtime.py").write_text("try: resolve_prompt() except: fallback()", encoding="utf-8")
+    (core_dir / "agent_runtime.py").write_text("try: resolve_prompt() except: fallback()\n# DANA_ENABLE_POST_CALL_TRAINING_EXPORT", encoding="utf-8")
 
     # Tests
     tests_dir = base_dir / "tests"
@@ -147,7 +148,8 @@ TABLE_COLUMNS = {
         "test_prompt_versioning.py", "test_prompt_patch_generator.py", "test_prompt_patch_preview.py",
         "test_canary_rollout.py", "test_canary_monitoring.py", "test_fine_tune_export.py",
         "test_fine_tune_gate.py", "test_fine_tune_job_request.py", "test_fine_tune_job_tracker.py",
-        "test_continuous_training_readiness.py", "test_training_rag_builder.py", "test_training_intake_orchestrator.py"
+        "test_continuous_training_readiness.py", "test_training_rag_builder.py", "test_training_intake_orchestrator.py",
+        "test_post_call_exporter.py", "test_youtube_importer.py", "test_training_intake_scheduler.py"
     ]
     for test in test_files:
         (tests_dir / test).write_text("def test_dummy(): pass", encoding="utf-8")

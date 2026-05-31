@@ -719,33 +719,33 @@ class AgentRuntime:
             self._last_emitted_dnc = True
 
     async def record_completed_call_for_training(self, call_payload: dict) -> None:
-        """Helper hook to record completed call payload.
+        """Helper hook to safely export completed call payload for training intake.
         
         This hook is disabled by default and will be a no-op unless the environment variable
-        DANA_ENABLE_POST_CALL_TRAINING_INTAKE is set to 'true'.
+        DANA_ENABLE_POST_CALL_TRAINING_EXPORT is set to 'true'.
         """
-        if os.environ.get("DANA_ENABLE_POST_CALL_TRAINING_INTAKE") != "true":
+        if os.environ.get("DANA_ENABLE_POST_CALL_TRAINING_EXPORT") != "true":
             return
 
         try:
-            import asyncio
-            from training.intake_orchestrator import TrainingIntakeOrchestrator, TrainingIntakeConfig
+            from training.post_call_exporter import PostCallExporter, PostCallExportConfig
             
-            # Run intake pipeline
-            config = TrainingIntakeConfig(
-                mode="post_call",
-                label_after_ingest=True,
-                mine_after_label=True,
-                dry_run=False,
+            run_sync = os.environ.get("DANA_RUN_SYNC_TRAINING_INTAKE") == "true"
+            
+            config = PostCallExportConfig(
+                enabled=True,
+                run_intake_after_export=True,
+                intake_sync=run_sync,
+                fail_silently=True,
             )
             
-            orchestrator = TrainingIntakeOrchestrator(repository=self.repository)
+            exporter = PostCallExporter(repository=self.repository)
             
-            # Run synchronously if requested, else run as a background task
-            if os.environ.get("DANA_RUN_SYNC_TRAINING_INTAKE") == "true":
-                await orchestrator.ingest_post_call_payload(call_payload, config)
+            if run_sync:
+                await exporter.safe_export_completed_call(call_payload, config)
             else:
-                asyncio.create_task(orchestrator.ingest_post_call_payload(call_payload, config))
+                import asyncio
+                asyncio.create_task(exporter.safe_export_completed_call(call_payload, config))
                 
         except Exception:
             # Must catch all exceptions to prevent crashing the live call

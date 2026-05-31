@@ -261,6 +261,9 @@ class ContinuousTrainingReadinessAuditor:
             "training_request": "training/fine_tune_job_request.py",
             "training_tracker": "training/fine_tune_job_tracker.py",
             "training_intake_orch": "training/intake_orchestrator.py",
+            "training_post_call_exporter": "training/post_call_exporter.py",
+            "training_youtube_importer": "training/youtube_importer.py",
+            "training_intake_scheduler": "training/intake_scheduler.py",
         }
 
         for check_id, rel_path in pipeline_modules.items():
@@ -455,6 +458,9 @@ class ContinuousTrainingReadinessAuditor:
             "scripts/track_fine_tune_job.py",
             "scripts/run_continuous_training_readiness.py",
             "scripts/run_training_intake.py",
+            "scripts/export_completed_call.py",
+            "scripts/import_youtube_transcripts.py",
+            "scripts/run_training_intake_scheduler.py",
         ]
 
         for script in cli_scripts:
@@ -495,6 +501,9 @@ class ContinuousTrainingReadinessAuditor:
             "docs/fine_tuning_operating_procedure.md",
             "docs/prompt_canary_operating_procedure.md",
             "docs/training_intake_operating_procedure.md",
+            "docs/post_call_training_export_operating_procedure.md",
+            "docs/youtube_training_import_operating_procedure.md",
+            "docs/training_intake_scheduler_operating_procedure.md",
         ]
 
         for doc in required_docs:
@@ -643,6 +652,9 @@ class ContinuousTrainingReadinessAuditor:
             "tests/test_fine_tune_job_tracker.py",
             "tests/test_continuous_training_readiness.py",
             "tests/test_training_intake_orchestrator.py",
+            "tests/test_post_call_exporter.py",
+            "tests/test_youtube_importer.py",
+            "tests/test_training_intake_scheduler.py",
         ]
 
         for test in required_tests:
@@ -711,6 +723,54 @@ class ContinuousTrainingReadinessAuditor:
 
         return checks
 
+    def check_automation_layer_safety(self) -> list[ReadinessCheckResult]:
+        checks = []
+        category = "Automation Safety"
+
+        # 1. Post-call runtime export disabled by default
+        runtime_content = self.read_text_safe("core/agent_runtime.py")
+        has_post_call_flag = "DANA_ENABLE_POST_CALL_TRAINING_EXPORT" in runtime_content
+        checks.append(ReadinessCheckResult(
+            check_id="post_call_export_requires_env_flag",
+            name="Verify post-call export runtime hook requires env flag",
+            category=category,
+            passed=has_post_call_flag,
+            severity="critical",
+            message="Post-call training export requires DANA_ENABLE_POST_CALL_TRAINING_EXPORT environment flag." if has_post_call_flag else "Post-call export runtime hook might run without explicit activation flag.",
+            remediation=None if has_post_call_flag else "Ensure core/agent_runtime.py checks DANA_ENABLE_POST_CALL_TRAINING_EXPORT is exactly 'true'."
+        ))
+
+        # 2. YouTube importer does not use requests/httpx/youtube APIs
+        youtube_content = self.read_text_safe("training/youtube_importer.py")
+        has_network = ("import " + "requests") in youtube_content or ("import " + "httpx") in youtube_content or "googleapiclient" in youtube_content or "pytube" in youtube_content or "yt_dlp" in youtube_content
+        passed_youtube = not has_network
+        checks.append(ReadinessCheckResult(
+            check_id="youtube_importer_offline_only",
+            name="Verify YouTube importer has no network dependencies",
+            category=category,
+            passed=passed_youtube,
+            severity="critical",
+            message="YouTube importer is verified offline-only (no requests/httpx/youtube imports)." if passed_youtube else "YouTube importer contains network library imports.",
+            remediation=None if passed_youtube else "Remove all requests, httpx, and youtube network client API imports from training/youtube_importer.py."
+        ))
+
+        # 3. Scheduler does not call provider APIs or auto-approve
+        scheduler_content = self.read_text_safe("training/intake_scheduler.py")
+        has_openai = ("import " + "openai") in scheduler_content or ("openai" + ".") in scheduler_content
+        has_auto_approve = "status=\"approved\"" in scheduler_content or "status='approved'" in scheduler_content
+        passed_scheduler = not has_openai and not has_auto_approve
+        checks.append(ReadinessCheckResult(
+            check_id="scheduler_offline_and_non_approving",
+            name="Verify scheduler has no provider calls or auto-approvals",
+            category=category,
+            passed=passed_scheduler,
+            severity="critical",
+            message="Scheduler is verified offline and does not auto-approve review items." if passed_scheduler else "Scheduler contains provider call imports or auto-approval statuses.",
+            remediation=None if passed_scheduler else "Ensure training/intake_scheduler.py does not make external provider calls or set HumanReviewItem statuses to approved."
+        ))
+
+        return checks
+
     def run_all_checks(self, config: ContinuousTrainingReadinessConfig) -> ContinuousTrainingReadinessResult:
         all_checks = []
 
@@ -733,6 +793,7 @@ class ContinuousTrainingReadinessAuditor:
             all_checks.extend(self.check_docs_and_runbooks())
         if config.check_runtime_safety:
             all_checks.extend(self.check_runtime_safety())
+            all_checks.extend(self.check_automation_layer_safety())
         all_checks.extend(self.check_no_forbidden_provider_calls())
         if config.check_tests:
             all_checks.extend(self.check_tests_exist())
