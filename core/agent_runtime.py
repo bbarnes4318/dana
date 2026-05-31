@@ -718,3 +718,36 @@ class AgentRuntime:
             )
             self._last_emitted_dnc = True
 
+    async def record_completed_call_for_training(self, call_payload: dict) -> None:
+        """Helper hook to record completed call payload.
+        
+        This hook is disabled by default and will be a no-op unless the environment variable
+        DANA_ENABLE_POST_CALL_TRAINING_INTAKE is set to 'true'.
+        """
+        if os.environ.get("DANA_ENABLE_POST_CALL_TRAINING_INTAKE") != "true":
+            return
+
+        try:
+            import asyncio
+            from training.intake_orchestrator import TrainingIntakeOrchestrator, TrainingIntakeConfig
+            
+            # Run intake pipeline
+            config = TrainingIntakeConfig(
+                mode="post_call",
+                label_after_ingest=True,
+                mine_after_label=True,
+                dry_run=False,
+            )
+            
+            orchestrator = TrainingIntakeOrchestrator(repository=self.repository)
+            
+            # Run synchronously if requested, else run as a background task
+            if os.environ.get("DANA_RUN_SYNC_TRAINING_INTAKE") == "true":
+                await orchestrator.ingest_post_call_payload(call_payload, config)
+            else:
+                asyncio.create_task(orchestrator.ingest_post_call_payload(call_payload, config))
+                
+        except Exception:
+            # Must catch all exceptions to prevent crashing the live call
+            pass
+

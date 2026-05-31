@@ -260,6 +260,7 @@ class ContinuousTrainingReadinessAuditor:
             "training_gate": "training/fine_tune_gate.py",
             "training_request": "training/fine_tune_job_request.py",
             "training_tracker": "training/fine_tune_job_tracker.py",
+            "training_intake_orch": "training/intake_orchestrator.py",
         }
 
         for check_id, rel_path in pipeline_modules.items():
@@ -453,6 +454,7 @@ class ContinuousTrainingReadinessAuditor:
             "scripts/prepare_fine_tune_job_request.py",
             "scripts/track_fine_tune_job.py",
             "scripts/run_continuous_training_readiness.py",
+            "scripts/run_training_intake.py",
         ]
 
         for script in cli_scripts:
@@ -492,6 +494,7 @@ class ContinuousTrainingReadinessAuditor:
             "docs/dana_training_safety_gates.md",
             "docs/fine_tuning_operating_procedure.md",
             "docs/prompt_canary_operating_procedure.md",
+            "docs/training_intake_operating_procedure.md",
         ]
 
         for doc in required_docs:
@@ -639,6 +642,7 @@ class ContinuousTrainingReadinessAuditor:
             "tests/test_fine_tune_job_request.py",
             "tests/test_fine_tune_job_tracker.py",
             "tests/test_continuous_training_readiness.py",
+            "tests/test_training_intake_orchestrator.py",
         ]
 
         for test in required_tests:
