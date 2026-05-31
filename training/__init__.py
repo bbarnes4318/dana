@@ -39,6 +39,13 @@ from training.fine_tune_gate import (
     FineTuneApprovalPackage,
     FineTuneDatasetGate,
 )
+from training.fine_tune_job_request import (
+    FineTuneJobRequestConfig,
+    FineTuneJobRequestValidationResult,
+    FineTuneJobRequestPackage,
+    FineTuneJobRequestResult,
+    FineTuneJobRequestBuilder,
+)
 
 __all__ = [
     "TrainingIngestionResult",
@@ -69,6 +76,11 @@ __all__ = [
     "FineTuneDatasetGateResult",
     "FineTuneApprovalPackage",
     "FineTuneDatasetGate",
+    "FineTuneJobRequestConfig",
+    "FineTuneJobRequestValidationResult",
+    "FineTuneJobRequestPackage",
+    "FineTuneJobRequestResult",
+    "FineTuneJobRequestBuilder",
 ]
 
 
