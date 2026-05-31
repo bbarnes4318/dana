@@ -735,3 +735,84 @@ async def test_monitor_handles_no_data_gracefully(repo: Repository, monitor: Can
     assert result.experiment_id == exp_id
     assert len(result.safety_signals) > 0
     assert result.promotion_ready is False
+
+
+# 32. test_gather_canary_data_includes_canary_variant_only_calls
+@pytest.mark.asyncio
+async def test_gather_canary_data_includes_canary_variant_only_calls(repo: Repository, monitor: CanaryMonitor) -> None:
+    exp_id = await setup_running_experiment(repo)
+    experiment = await monitor.load_experiment(exp_id)
+
+    # Save calls with canary_variant="candidate" and canary_variant="control"
+    # but no prompt_version_id and no experiment_id.
+    # To survive Call schema stripping, we store them in compliance_flags.
+    await repo.save_call(call_id="var-cand-1", compliance_flags={"canary_variant": "candidate"})
+    await repo.save_call(call_id="var-ctrl-1", compliance_flags={"canary_variant": "control"})
+
+    # Also save one nested under metadata to test the nested check
+    await repo.save_call(call_id="meta-cand-1", compliance_flags={"metadata": {"canary_variant": "candidate"}})
+
+    config = CanaryMonitorConfig(
+        experiment_id=exp_id,
+        min_candidate_calls=1,
+        min_control_calls=1
+    )
+
+    data_bundle = await monitor.gather_canary_data(experiment, config)
+    assert any(c["call_id"] == "var-cand-1" for c in data_bundle["calls"])
+    assert any(c["call_id"] == "var-ctrl-1" for c in data_bundle["calls"])
+    assert any(c["call_id"] == "meta-cand-1" for c in data_bundle["calls"])
+
+    split_data = monitor.split_by_variant(experiment, data_bundle)
+    assert any(c["call_id"] == "var-cand-1" for c in split_data["candidate"]["calls"])
+    assert any(c["call_id"] == "var-ctrl-1" for c in split_data["control"]["calls"])
+    assert any(c["call_id"] == "meta-cand-1" for c in split_data["candidate"]["calls"])
+
+
+# 33. test_gather_canary_data_includes_use_candidate_only_calls
+@pytest.mark.asyncio
+async def test_gather_canary_data_includes_use_candidate_only_calls(repo: Repository, monitor: CanaryMonitor) -> None:
+    exp_id = await setup_running_experiment(repo)
+    experiment = await monitor.load_experiment(exp_id)
+
+    # Save calls with use_candidate=True and use_candidate=False
+    # but no prompt_version_id and no experiment_id
+    await repo.save_call(call_id="use-cand-1", compliance_flags={"use_candidate": True})
+    await repo.save_call(call_id="use-ctrl-1", compliance_flags={"use_candidate": False})
+
+    # Also save one nested under metadata
+    await repo.save_call(call_id="meta-use-cand-1", compliance_flags={"metadata": {"use_candidate": True}})
+
+    config = CanaryMonitorConfig(
+        experiment_id=exp_id,
+        min_candidate_calls=1,
+        min_control_calls=1
+    )
+
+    data_bundle = await monitor.gather_canary_data(experiment, config)
+    assert any(c["call_id"] == "use-cand-1" for c in data_bundle["calls"])
+    assert any(c["call_id"] == "use-ctrl-1" for c in data_bundle["calls"])
+    assert any(c["call_id"] == "meta-use-cand-1" for c in data_bundle["calls"])
+
+    split_data = monitor.split_by_variant(experiment, data_bundle)
+    assert any(c["call_id"] == "use-cand-1" for c in split_data["candidate"]["calls"])
+    assert any(c["call_id"] == "use-ctrl-1" for c in split_data["control"]["calls"])
+    assert any(c["call_id"] == "meta-use-cand-1" for c in split_data["candidate"]["calls"])
+
+
+# 34. test_gather_canary_data_warns_on_variant_only_missing_experiment_id
+@pytest.mark.asyncio
+async def test_gather_canary_data_warns_on_variant_only_missing_experiment_id(repo: Repository, monitor: CanaryMonitor) -> None:
+    exp_id = await setup_running_experiment(repo)
+    experiment = await monitor.load_experiment(exp_id)
+
+    await repo.save_call(call_id="warn-cand-1", compliance_flags={"canary_variant": "candidate"})
+
+    config = CanaryMonitorConfig(
+        experiment_id=exp_id,
+        min_candidate_calls=1,
+        min_control_calls=1
+    )
+
+    data_bundle = await monitor.gather_canary_data(experiment, config)
+    assert "Included call with variant attribution but missing experiment_id; verify routing metadata." in data_bundle["warnings"]

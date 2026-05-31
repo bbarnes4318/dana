@@ -469,19 +469,81 @@ class CanaryMonitor:
                     return c[key]
                 for dict_field in ["metadata", "compliance_flags", "qualification"]:
                     d = c.get(dict_field) or {}
-                    if isinstance(d, dict) and key in d:
+                    if not isinstance(d, dict):
+                        continue
+                    if key in d:
                         return d[key]
+                    # Check nested metadata dict inside compliance_flags/qualification
+                    sub_meta = d.get("metadata") or {}
+                    if isinstance(sub_meta, dict) and key in sub_meta:
+                        return sub_meta[key]
                 return None
 
-            pvid = get_val("prompt_version_id")
-            c_exp_id = get_val("experiment_id")
+            pvid = c.get("prompt_version_id")
+            c_exp_id = c.get("experiment_id")
+            canary_var = c.get("canary_variant")
+            prompt_var = c.get("prompt_variant")
+            use_cand = c.get("use_candidate")
+
+            c_meta = c.get("metadata") or {}
+            meta_exp_id = None
+            meta_canary_var = None
+            meta_prompt_var = None
+            meta_use_cand = None
+            if isinstance(c_meta, dict):
+                meta_exp_id = c_meta.get("experiment_id")
+                meta_canary_var = c_meta.get("canary_variant")
+                meta_prompt_var = c_meta.get("prompt_variant")
+                meta_use_cand = c_meta.get("use_candidate")
+
+            fallback_pvid = get_val("prompt_version_id")
+            fallback_exp_id = get_val("experiment_id")
+            fallback_canary_var = get_val("canary_variant")
+            fallback_prompt_var = get_val("prompt_variant")
+            fallback_use_cand = get_val("use_candidate")
+
+            def is_bool_like(val):
+                if val is True or val is False:
+                    return True
+                if isinstance(val, str) and val.lower() in ["true", "false"]:
+                    return True
+                return False
+
+            cond_pv_cand = (pvid == candidate_version_id and candidate_version_id) or (fallback_pvid == candidate_version_id and candidate_version_id)
+            cond_pv_ctrl = (pvid == control_version_id and control_version_id) or (fallback_pvid == control_version_id and control_version_id)
+            cond_exp = (c_exp_id == exp_id and exp_id) or (fallback_exp_id == exp_id and exp_id)
+            cond_meta_exp = (meta_exp_id == exp_id and exp_id)
+
+            cond_canary_var = (canary_var in ["candidate", "control"]) or (fallback_canary_var in ["candidate", "control"])
+            cond_prompt_var = (prompt_var in ["candidate", "control"]) or (fallback_prompt_var in ["candidate", "control"])
+            cond_use_cand = is_bool_like(use_cand) or is_bool_like(fallback_use_cand)
+
+            cond_meta_canary_var = (meta_canary_var in ["candidate", "control"])
+            cond_meta_prompt_var = (meta_prompt_var in ["candidate", "control"])
+            cond_meta_use_cand = is_bool_like(meta_use_cand)
 
             associated = (
-                (pvid in [candidate_version_id, control_version_id]) or
-                (c_exp_id == exp_id)
+                cond_pv_cand or
+                cond_pv_ctrl or
+                cond_exp or
+                cond_meta_exp or
+                cond_canary_var or
+                cond_prompt_var or
+                cond_use_cand or
+                cond_meta_canary_var or
+                cond_meta_prompt_var or
+                cond_meta_use_cand
             )
+
             if not associated:
                 continue
+
+            # Add warning for variant-only records lacking experiment_id/prompt_version_id
+            has_exp_association = cond_exp or cond_meta_exp or cond_pv_cand or cond_pv_ctrl
+            if not has_exp_association:
+                warn_msg = "Included call with variant attribution but missing experiment_id; verify routing metadata."
+                if warn_msg not in warnings:
+                    warnings.append(warn_msg)
 
             call_time = parse_dt(c.get("started_at") or c.get("created_at"))
             if call_time:
@@ -538,8 +600,14 @@ class CanaryMonitor:
                 return call[key]
             for dict_field in ["metadata", "compliance_flags", "qualification"]:
                 d = call.get(dict_field) or {}
-                if isinstance(d, dict) and key in d:
+                if not isinstance(d, dict):
+                    continue
+                if key in d:
                     return d[key]
+                # Check nested metadata dict inside compliance_flags/qualification
+                sub_meta = d.get("metadata") or {}
+                if isinstance(sub_meta, dict) and key in sub_meta:
+                    return sub_meta[key]
             return None
 
         # Check prompt_version_id
