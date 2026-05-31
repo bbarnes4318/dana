@@ -2,6 +2,8 @@
 
 The Training Operations Console provides a safe operator service layer and CLI utility for administering Dana’s outbound Final Expense continuous training lifecycle offline.
 
+For the browser-based dashboard interface, refer to the [Web Console Operating Procedure](file:///C:/Users/jimbo/.gemini/antigravity/worktrees/ultimate-voice/dana-training-ops-console/docs/training_web_console_operating_procedure.md).
+
 ---
 
 ## 🚨 Critical Safety Warnings (Strict Enforcement)

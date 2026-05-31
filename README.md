@@ -48,4 +48,6 @@ For detailed setup, monitoring, backups, and restores, read the following files 
 *   [docs/dana_training_safety_gates.md](file:///C:/Users/jimbo/.gemini/antigravity/worktrees/ultimate-voice/implement-canary-rollout-system/docs/dana_training_safety_gates.md)
 *   [docs/fine_tuning_operating_procedure.md](file:///C:/Users/jimbo/.gemini/antigravity/worktrees/ultimate-voice/implement-canary-rollout-system/docs/fine_tuning_operating_procedure.md)
 *   [docs/prompt_canary_operating_procedure.md](file:///C:/Users/jimbo/.gemini/antigravity/worktrees/ultimate-voice/implement-canary-rollout-system/docs/prompt_canary_operating_procedure.md)
+*   [docs/training_operations_console.md](file:///C:/Users/jimbo/.gemini/antigravity/worktrees/ultimate-voice/dana-training-ops-console/docs/training_operations_console.md)
+*   [docs/training_web_console_operating_procedure.md](file:///C:/Users/jimbo/.gemini/antigravity/worktrees/ultimate-voice/dana-training-ops-console/docs/training_web_console_operating_procedure.md)
 

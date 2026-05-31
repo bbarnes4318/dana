@@ -265,6 +265,10 @@ class ContinuousTrainingReadinessAuditor:
             "training_youtube_importer": "training/youtube_importer.py",
             "training_intake_scheduler": "training/intake_scheduler.py",
             "ops_training_console": "ops/training_console.py",
+            "ops_web_console": "ops/web_console.py",
+            "static_index": "static/training_console/index.html",
+            "static_js": "static/training_console/app.js",
+            "static_css": "static/training_console/styles.css",
         }
 
         for check_id, rel_path in pipeline_modules.items():
@@ -463,6 +467,7 @@ class ContinuousTrainingReadinessAuditor:
             "scripts/import_youtube_transcripts.py",
             "scripts/run_training_intake_scheduler.py",
             "scripts/training_console.py",
+            "scripts/run_training_web_console.py",
         ]
 
         for script in cli_scripts:
@@ -507,6 +512,7 @@ class ContinuousTrainingReadinessAuditor:
             "docs/youtube_training_import_operating_procedure.md",
             "docs/training_intake_scheduler_operating_procedure.md",
             "docs/training_operations_console.md",
+            "docs/training_web_console_operating_procedure.md",
         ]
 
         for doc in required_docs:
@@ -659,6 +665,7 @@ class ContinuousTrainingReadinessAuditor:
             "tests/test_youtube_importer.py",
             "tests/test_training_intake_scheduler.py",
             "tests/test_training_console.py",
+            "tests/test_training_web_console.py",
         ]
 
         for test in required_tests:
@@ -775,6 +782,91 @@ class ContinuousTrainingReadinessAuditor:
 
         return checks
 
+    def check_web_console_safety(self) -> list[ReadinessCheckResult]:
+        checks = []
+        category = "Web Console Safety"
+
+        web_console_exists = self.file_exists("ops/web_console.py")
+        html_exists = self.file_exists("static/training_console/index.html")
+
+        web_content = self.read_text_safe("ops/web_console.py")
+
+        # 1. Defaults check (localhost)
+        default_localhost = 'host: str = "127.0.0.1"' in web_content or 'host="127.0.0.1"' in web_content or "host: str = '127.0.0.1'" in web_content
+        checks.append(ReadinessCheckResult(
+            check_id="web_console_localhost_default",
+            name="Verify web console defaults to localhost",
+            category=category,
+            passed=default_localhost if web_console_exists else False,
+            severity="critical",
+            message="Web console server binds to 127.0.0.1 by default." if default_localhost else "Web console server might not default to localhost.",
+            remediation="Ensure host parameter in TrainingWebConsoleConfig defaults to '127.0.0.1'."
+        ))
+
+        # 2. allow_remote must be explicit
+        allow_remote_check = "allow_remote: bool = False" in web_content or "allow_remote=False" in web_content
+        checks.append(ReadinessCheckResult(
+            check_id="web_console_allow_remote_explicit",
+            name="Verify allow_remote is false by default",
+            category=category,
+            passed=allow_remote_check if web_console_exists else False,
+            severity="critical",
+            message="allow_remote is False by default." if allow_remote_check else "allow_remote might default to True.",
+            remediation="Ensure allow_remote parameter in TrainingWebConsoleConfig defaults to False."
+        ))
+
+        # 3. no external CDN in static files
+        html_content = self.read_text_safe("static/training_console/index.html")
+        has_external_assets = bool(re.search(r'src=["\']http', html_content)) or bool(re.search(r'href=["\']http', html_content))
+        checks.append(ReadinessCheckResult(
+            check_id="web_console_no_external_cdn",
+            name="Verify static assets have no external CDN references",
+            category=category,
+            passed=not has_external_assets if html_exists else False,
+            severity="critical",
+            message="No external CDN links found in index.html." if not has_external_assets else "External CDN links found in index.html.",
+            remediation="Remove external script/stylesheet links and serve them locally."
+        ))
+
+        # 4. no OpenAI or provider calls in web console
+        has_openai = "openai" in web_content.lower() or "requests" in web_content or "httpx" in web_content or "azure" in web_content.lower()
+        passed_provider = not has_openai
+        checks.append(ReadinessCheckResult(
+            check_id="web_console_no_provider_calls",
+            name="Verify web console contains no provider API calls",
+            category=category,
+            passed=passed_provider if web_console_exists else False,
+            severity="critical",
+            message="No provider calls or network libraries in web_console.py." if passed_provider else "Provider APIs or calls detected in web_console.py.",
+            remediation="Remove all direct provider calls or HTTP request libraries from ops/web_console.py."
+        ))
+
+        # 5. upload endpoint restricts extensions
+        has_ext_check = "ALLOWED_EXTENSIONS" in web_content and "ALLOWED_SOURCE_TYPES" in web_content
+        checks.append(ReadinessCheckResult(
+            check_id="web_console_upload_restrictions",
+            name="Verify upload endpoint restricts extensions and folders",
+            category=category,
+            passed=has_ext_check if web_console_exists else False,
+            severity="critical",
+            message="Upload constraints defined in web_console.py." if has_ext_check else "Missing upload constraints in web_console.py.",
+            remediation="Ensure ALLOWED_EXTENSIONS and ALLOWED_SOURCE_TYPES checks exist in ops/web_console.py."
+        ))
+
+        # 6. report endpoint uses safe path validation
+        has_path_validation = "relative_to" in web_content or "safe_path" in web_content
+        checks.append(ReadinessCheckResult(
+            check_id="web_console_report_path_validation",
+            name="Verify report endpoint uses safe path validation",
+            category=category,
+            passed=has_path_validation if web_console_exists else False,
+            severity="critical",
+            message="Report view endpoint uses safe path checks." if has_path_validation else "Missing path validation check in web_console.py.",
+            remediation="Enforce relative_to or safe_path validation checks on report file reading."
+        ))
+
+        return checks
+
     def run_all_checks(self, config: ContinuousTrainingReadinessConfig) -> ContinuousTrainingReadinessResult:
         all_checks = []
 
@@ -784,6 +876,7 @@ class ContinuousTrainingReadinessAuditor:
             all_checks.extend(self.check_prompt_pipeline_modules())
             all_checks.extend(self.check_prompt_file_safety())
         all_checks.extend(self.check_training_pipeline_modules())
+        all_checks.extend(self.check_web_console_safety())
         all_checks.extend(self.check_eval_replay_simulation_modules())
         if config.check_canary_safety:
             all_checks.extend(self.check_canary_modules())

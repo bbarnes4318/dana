@@ -1,0 +1,429 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Dana Training Operations Console</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+  <!-- Safety Header Bar -->
+  <header class="safety-bar">
+    <h1><span>🤖</span> Dana Training Operations Console</h1>
+    <div class="safety-badges">
+      <span class="badge badge-safety">🔒 Default Local-Only</span>
+      <span class="badge badge-safety">🛡️ No Auto-Approval</span>
+      <span class="badge badge-safety">📝 No Prompt Edits</span>
+      <span class="badge badge-safety">🚫 No Provider Uploads</span>
+      <span class="badge badge-safety">⚙️ No Fine-Tuning Started</span>
+      <span class="badge badge-safety">🚀 No Direct Deployment</span>
+    </div>
+  </header>
+
+  <div class="container">
+    
+    <!-- Sidebar Controls -->
+    <aside>
+      
+      <!-- System Summary & Refresh -->
+      <section class="card">
+        <div class="card-title">
+          <span>System Status</span>
+          <button id="btn-refresh" class="btn btn-secondary" style="width: auto; padding: 0.25rem 0.5rem; font-size: 0.75rem;">🔄 Refresh</button>
+        </div>
+        <div class="stats-grid">
+          <div class="stat-box">
+            <div class="stat-label">Pending Reviews</div>
+            <div id="stat-pending" class="stat-val highlight">0</div>
+          </div>
+          <div class="stat-box">
+            <div class="stat-label">Readiness Audit</div>
+            <div id="stat-readiness" class="stat-val">—</div>
+          </div>
+          <div class="stat-box">
+            <div class="stat-label">Recent Sources</div>
+            <div id="stat-sources" class="stat-val">0</div>
+          </div>
+          <div class="stat-box">
+            <div class="stat-label">Recent Reviews</div>
+            <div id="stat-reviews" class="stat-val">0</div>
+          </div>
+          <div class="stat-box">
+            <div class="stat-label">Prompt Versions</div>
+            <div id="stat-prompts" class="stat-val">0</div>
+          </div>
+          <div class="stat-box">
+            <div class="stat-label">Canary Runs</div>
+            <div id="stat-canaries" class="stat-val">0</div>
+          </div>
+          <div class="stat-box" style="grid-column: span 2;">
+            <div class="stat-label">Manual Tracking Jobs</div>
+            <div id="stat-tracking" class="stat-val">0</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Sidebar Tabs Navigation -->
+      <section class="card" style="padding: 0.75rem;">
+        <nav class="tabs-header" style="flex-direction: column; border-bottom: none; gap: 0.2rem; margin-bottom: 0;">
+          <button class="tab-btn active" data-tab="review-tab" style="text-align: left; border-bottom: none; border-left: 2px solid transparent;">📋 Human Review Queue</button>
+          <button class="tab-btn" data-tab="intake-tab" style="text-align: left; border-bottom: none; border-left: 2px solid transparent;">📥 Training Intake & Import</button>
+          <button class="tab-btn" data-tab="scheduler-tab" style="text-align: left; border-bottom: none; border-left: 2px solid transparent;">⏳ Scheduler iteration</button>
+          <button class="tab-btn" data-tab="readiness-tab" style="text-align: left; border-bottom: none; border-left: 2px solid transparent;">🛡️ Readiness Auditor</button>
+          <button class="tab-btn" data-tab="reports-tab" style="text-align: left; border-bottom: none; border-left: 2px solid transparent;">📊 Operator Reports</button>
+        </nav>
+      </section>
+
+      <!-- Safety Warnings Card -->
+      <section class="card" style="border-left: 3px solid var(--warning); background-color: rgba(245, 158, 11, 0.03);">
+        <div class="card-title" style="color: var(--warning); font-size: 0.8rem; margin-bottom: 0.5rem;">⚠️ Safety Boundaries</div>
+        <p style="font-size: 0.75rem; color: var(--text-secondary);">
+          Actions performed in this console are executed strictly within local boundary rules. The system does not write to the active live-call agent prompt, nor does it push to OpenAI/Azure provider APIs.
+        </p>
+      </section>
+
+    </aside>
+
+    <!-- Main Workspace -->
+    <main>
+      
+      <!-- TAB: Review Queue -->
+      <div id="review-tab" class="tab-content active">
+        <section class="card">
+          <div class="card-title">Human Review items Queue</div>
+          
+          <!-- Filters -->
+          <div style="display: flex; gap: 0.75rem; margin-bottom: 1rem; flex-wrap: wrap;">
+            <div style="flex: 1; min-width: 120px;">
+              <select id="review-filter-status" class="form-control">
+                <option value="pending">Pending Review</option>
+                <option value="approved">Approved</option>
+                <option value="rejected">Rejected</option>
+                <option value="needs_changes">Needs Changes</option>
+              </select>
+            </div>
+            <div style="flex: 1; min-width: 120px;">
+              <select id="review-filter-type" class="form-control">
+                <option value="">All Item Types</option>
+                <option value="training_example">Coaching/Training Example</option>
+                <option value="eval_case">Offline Eval Case</option>
+                <option value="prompt_patch">Prompt Patch Candidate</option>
+                <option value="rag_doc">RAG Document Reference</option>
+                <option value="failure_example">Failure Example Analysis</option>
+                <option value="compliance_review">Compliance Audit Item</option>
+              </select>
+            </div>
+            <div style="width: 80px;">
+              <input type="number" id="review-filter-limit" class="form-control" value="50" min="1" max="500" placeholder="Limit">
+            </div>
+            <button id="btn-list-reviews" class="btn btn-secondary" style="width: auto;">🔍 Filter Queue</button>
+          </div>
+
+          <div class="review-split">
+            <!-- Items list -->
+            <div>
+              <div class="table-wrapper">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>ID</th>
+                      <th>Type</th>
+                      <th>Status</th>
+                      <th>Created At</th>
+                      <th>Action</th>
+                    </tr>
+                  </thead>
+                  <tbody id="review-items-tbody">
+                    <tr>
+                      <td colspan="5" style="text-align: center; color: var(--text-muted);">No items retrieved. Click Filter Queue.</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <!-- Details Panel -->
+            <div class="card" style="background-color: var(--bg-tertiary); margin: 0; padding: 1rem;">
+              <div class="card-title" style="font-size: 0.85rem; border-bottom: 1px solid var(--border-color); padding-bottom: 0.5rem; margin-bottom: 0.75rem;">Item Details</div>
+              <div id="review-details-placeholder" style="color: var(--text-muted); font-size: 0.8rem; text-align: center; padding: 2rem 0;">
+                Select a review item to inspect payload details.
+              </div>
+              <div id="review-details-container" style="display: none;">
+                <div style="margin-bottom: 0.75rem; font-size: 0.8rem;">
+                  <strong>Item ID:</strong> <span id="detail-item-id" style="font-family: monospace;">—</span><br>
+                  <strong>Type:</strong> <span id="detail-item-type">—</span>
+                </div>
+                <div class="form-group">
+                  <label>Payload Viewer</label>
+                  <pre id="detail-item-payload"></pre>
+                </div>
+                
+                <div style="border-top: 1px solid var(--border-color); padding-top: 0.75rem; margin-top: 0.75rem;">
+                  <div class="form-group">
+                    <label for="review-reviewer-input">Reviewer Identity *</label>
+                    <input type="text" id="review-reviewer-input" class="form-control" placeholder="Enter your name" required>
+                  </div>
+                  <div class="form-group">
+                    <label for="review-notes-input">Review Notes (Mandatory for rejection or changes)</label>
+                    <textarea id="review-notes-input" class="form-control" placeholder="Provide context or decision criteria"></textarea>
+                  </div>
+                  <div style="display: flex; gap: 0.5rem;">
+                    <button id="btn-review-approve" class="btn btn-success" style="flex: 1;">✅ Approve</button>
+                    <button id="btn-review-reject" class="btn btn-danger" style="flex: 1;">❌ Reject</button>
+                  </div>
+                  <button id="btn-review-changes" class="btn btn-warning" style="margin-top: 0.5rem; width: 100%;">⚠️ Needs Changes</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <!-- TAB: Training Intake & Import -->
+      <div id="intake-tab" class="tab-content">
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem;">
+          
+          <!-- File Upload -->
+          <section class="card">
+            <div class="card-title">Upload Local Material</div>
+            <form id="upload-form">
+              <div class="form-group">
+                <label for="upload-source-type">Import Source Target Type</label>
+                <select id="upload-source-type" class="form-control" required>
+                  <option value="call_transcript">Call Transcript (data/imports/call_transcripts/)</option>
+                  <option value="youtube">YouTube Text Material (data/imports/youtube_training/)</option>
+                  <option value="manager_note">Manager Review Notes (data/imports/manager_notes/)</option>
+                  <option value="licensed_agent_feedback">Agent Feedback (data/imports/licensed_agent_feedback/)</option>
+                  <option value="post_call">Post-Call Export Logs (data/imports/post_call_payloads/)</option>
+                  <option value="strategy_doc">SaaS/Agent Strategy (data/imports/strategy_docs/)</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label for="upload-file-picker">Select File (.txt, .json, .jsonl, .md)</label>
+                <input type="file" id="upload-file-picker" class="form-control" accept=".txt,.json,.jsonl,.md" required>
+              </div>
+              <button type="submit" id="btn-upload-file" class="btn btn-primary">📤 Upload File</button>
+            </form>
+          </section>
+
+          <!-- YouTube Import -->
+          <section class="card">
+            <div class="card-title">YouTube Transcript Text Import</div>
+            <form id="youtube-import-form">
+              <div class="form-group">
+                <label for="youtube-title">Guide/Video Title *</label>
+                <input type="text" id="youtube-title" class="form-control" placeholder="e.g. Objections Training Video" required>
+              </div>
+              <div class="form-group">
+                <label for="youtube-url">YouTube URL (Optional)</label>
+                <input type="url" id="youtube-url" class="form-control" placeholder="https://youtube.com/...">
+              </div>
+              <div class="form-group">
+                <label for="youtube-content">Paste Transcript Content *</label>
+                <textarea id="youtube-content" class="form-control" style="min-height: 120px;" placeholder="Paste transcript text here..." required></textarea>
+              </div>
+              <div class="checkbox-group">
+                <input type="checkbox" id="youtube-run-intake" checked>
+                <label for="youtube-run-intake">Trigger Intake Pipeline Immediately</label>
+              </div>
+              <button type="submit" id="btn-youtube-import" class="btn btn-primary">📥 Import Transcript</button>
+            </form>
+          </section>
+
+          <!-- Folder Intake -->
+          <section class="card">
+            <div class="card-title">Run Intake Orchestration</div>
+            <form id="folder-intake-form">
+              <div class="form-group">
+                <label for="intake-folder-path">Path to Scan *</label>
+                <input type="text" id="intake-folder-path" class="form-control" value="data/imports/call_transcripts" placeholder="data/imports/..." required>
+              </div>
+              <div class="form-group">
+                <label for="intake-source-type">Source Data Type Filter</label>
+                <select id="intake-source-type" class="form-control">
+                  <option value="">All Types</option>
+                  <option value="call_transcript">Call Transcript</option>
+                  <option value="youtube">YouTube Transcript</option>
+                  <option value="manager_note">Manager Note</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label for="intake-limit">Limit Items</label>
+                <input type="number" id="intake-limit" class="form-control" placeholder="100" min="1">
+              </div>
+              <div class="checkbox-group">
+                <input type="checkbox" id="intake-dry-run">
+                <label for="intake-dry-run">Dry Run (do not persist database objects)</label>
+              </div>
+              <button type="submit" id="btn-run-folder-intake" class="btn btn-primary">⚙️ Execute Folder Intake</button>
+            </form>
+          </section>
+
+          <!-- Daily/Manifest Intake -->
+          <section class="card">
+            <div class="card-title">Execute Daily Scan</div>
+            <form id="daily-intake-form">
+              <div class="form-group">
+                <label for="daily-limit">Scan Count Limit</label>
+                <input type="number" id="daily-limit" class="form-control" placeholder="100">
+              </div>
+              <div class="checkbox-group">
+                <input type="checkbox" id="daily-qa-checkbox" checked>
+                <label for="daily-qa-checkbox">Automatically Run Daily QA Miner on complete logs</label>
+              </div>
+              <div class="checkbox-group">
+                <input type="checkbox" id="daily-dry-run">
+                <label for="daily-dry-run">Dry Run Mode</label>
+              </div>
+              <button type="submit" id="btn-run-daily-intake" class="btn btn-primary">📅 Execute Daily Scan</button>
+            </form>
+          </section>
+
+        </div>
+      </div>
+
+      <!-- TAB: Scheduler -->
+      <div id="scheduler-tab" class="tab-content">
+        <section class="card">
+          <div class="card-title">Intake Scheduler Run</div>
+          <p style="font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 1rem;">
+            Trigger a single bounded execution of the scheduling engine. The scheduling run will process queued file imports, verify locking thresholds, and build downstream items.
+          </p>
+          <form id="scheduler-form">
+            <div class="form-group">
+              <label for="sched-limit">Limit of Items processed</label>
+              <input type="number" id="sched-limit" class="form-control" value="100" min="1">
+            </div>
+            <div class="checkbox-group">
+              <input type="checkbox" id="sched-daily-qa" checked>
+              <label for="sched-daily-qa">Trigger Daily QA Evaluation Metrics</label>
+            </div>
+            <div class="checkbox-group">
+              <input type="checkbox" id="sched-dry-run">
+              <label for="sched-dry-run">Dry Run Mode</label>
+            </div>
+            <button type="submit" id="btn-run-scheduler" class="btn btn-primary" style="width: auto;">⏳ Run Scheduler Loop Once</button>
+          </form>
+        </section>
+      </div>
+
+      <!-- TAB: Readiness -->
+      <div id="readiness-tab" class="tab-content">
+        <section class="card">
+          <div class="card-title">Dana Continuous Training Readiness Audit</div>
+          <p style="font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 1rem;">
+            Run a static scan of continuous training compliance rules, checking configurations, local environment flags, database schemas, and validating safety bounds.
+          </p>
+          <div style="display: flex; gap: 1rem; align-items: center; margin-bottom: 1.5rem;">
+            <div class="checkbox-group" style="margin-bottom: 0;">
+              <input type="checkbox" id="readiness-strict" checked>
+              <label for="readiness-strict">Strict Mode (Fail on High Severity failures)</label>
+            </div>
+            <div class="checkbox-group" style="margin-bottom: 0;">
+              <input type="checkbox" id="readiness-fail-medium">
+              <label for="readiness-fail-medium">Fail on Medium Warnings</label>
+            </div>
+            <button id="btn-run-readiness" class="btn btn-primary" style="width: auto;">🛡️ Run Readiness Audit</button>
+          </div>
+
+          <div id="readiness-result-card" class="card" style="display: none; background-color: var(--bg-tertiary);">
+            <div style="font-size: 1rem; font-weight: 700; margin-bottom: 0.5rem;">
+              Readiness Result: <span id="readiness-badge" class="badge">UNKNOWN</span>
+            </div>
+            <div style="font-size: 0.8rem; margin-bottom: 1rem;">
+              Readiness Check ID: <span id="readiness-id" style="font-family: monospace;">—</span><br>
+              Total Checks Run: <span id="readiness-checks-total">—</span> | Passed: <span id="readiness-checks-passed" style="color: var(--success);">—</span> | Failed: <span id="readiness-checks-failed" style="color: var(--danger);">—</span>
+            </div>
+            
+            <div id="remediation-container" style="display: none; border-top: 1px solid var(--border-color); padding-top: 0.75rem;">
+              <strong style="font-size: 0.85rem; color: var(--warning); display: block; margin-bottom: 0.5rem;">⚠️ Required Remediation items:</strong>
+              <ul id="remediation-list" style="font-size: 0.8rem; padding-left: 1.25rem; color: var(--text-secondary);"></ul>
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <!-- TAB: Reports -->
+      <div id="reports-tab" class="tab-content">
+        <section class="card">
+          <div class="card-title">Operator Reports Viewer</div>
+          <div style="display: flex; gap: 0.75rem; margin-bottom: 1rem; flex-wrap: wrap;">
+            <div style="flex: 1; min-width: 150px;">
+              <select id="reports-filter-type" class="form-control">
+                <option value="">All Categories</option>
+                <option value="qa">Daily QA reports (data/reports/)</option>
+                <option value="intake">Intake reports (data/intake_reports/)</option>
+                <option value="prompt">Prompt versions (data/prompt_versions/)</option>
+                <option value="canary">Canary rollouts (data/canary/)</option>
+                <option value="fine_tune">Fine-tune tracking (data/fine_tune_job_tracking/)</option>
+                <option value="readiness">Readiness audits (data/ops_readiness/)</option>
+              </select>
+            </div>
+            <button id="btn-list-reports" class="btn btn-secondary" style="width: auto;">📁 List Reports</button>
+          </div>
+
+          <div class="review-split">
+            <!-- Reports list -->
+            <div>
+              <div class="table-wrapper">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Filename</th>
+                      <th>Category</th>
+                      <th>Size</th>
+                      <th>Modified At</th>
+                      <th>View</th>
+                    </tr>
+                  </thead>
+                  <tbody id="reports-tbody">
+                    <tr>
+                      <td colspan="5" style="text-align: center; color: var(--text-muted);">No reports loaded. Click List Reports.</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <!-- Content Card -->
+            <div class="card" style="background-color: var(--bg-tertiary); margin: 0; padding: 1rem;">
+              <div class="card-title" style="font-size: 0.85rem; border-bottom: 1px solid var(--border-color); padding-bottom: 0.5rem; margin-bottom: 0.75rem;">Report Content</div>
+              <div id="report-content-placeholder" style="color: var(--text-muted); font-size: 0.8rem; text-align: center; padding: 2rem 0;">
+                Select a report to view text contents.
+              </div>
+              <div id="report-content-container" style="display: none;">
+                <div style="margin-bottom: 0.5rem; font-size: 0.8rem; word-break: break-all;">
+                  <strong>File:</strong> <span id="report-filename" style="font-family: monospace;">—</span>
+                </div>
+                <pre id="report-content-text" style="max-height: 450px; white-space: pre-wrap; word-break: break-all; color: var(--text-primary);"></pre>
+              </div>
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <!-- Action status messages -->
+      <div id="action-status-box" class="action-box">
+        <strong id="action-status-title">Status:</strong>
+        <p id="action-status-text" style="font-size: 0.80rem; margin-top: 0.25rem; word-break: break-all;"></p>
+      </div>
+
+      <!-- Activity Console Logs -->
+      <section class="card">
+        <div class="card-title">
+          <span>Operation Activity Log</span>
+          <button id="btn-clear-logs" class="btn btn-secondary" style="width: auto; padding: 0.2rem 0.5rem; font-size: 0.7rem;">🧹 Clear Log</button>
+        </div>
+        <div id="log-console" class="log-panel">
+          <div class="log-entry info">[System] Web UI loaded. Listening for operator inputs.</div>
+        </div>
+      </section>
+
+    </main>
+
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
