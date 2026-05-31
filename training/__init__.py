@@ -31,6 +31,14 @@ from training.fine_tune_export import (
     FineTuneExportResult,
     FineTuneExportBuilder,
 )
+from training.fine_tune_gate import (
+    FineTuneDatasetGateConfig,
+    FineTuneRecordCheck,
+    FineTuneDatasetMetrics,
+    FineTuneDatasetGateResult,
+    FineTuneApprovalPackage,
+    FineTuneDatasetGate,
+)
 
 __all__ = [
     "TrainingIngestionResult",
@@ -55,5 +63,12 @@ __all__ = [
     "FineTuneValidationResult",
     "FineTuneExportResult",
     "FineTuneExportBuilder",
+    "FineTuneDatasetGateConfig",
+    "FineTuneRecordCheck",
+    "FineTuneDatasetMetrics",
+    "FineTuneDatasetGateResult",
+    "FineTuneApprovalPackage",
+    "FineTuneDatasetGate",
 ]
+
 
