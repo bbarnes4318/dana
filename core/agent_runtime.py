@@ -35,6 +35,7 @@ from safety.output_validator import OutputValidator
 from safety.call_stop_policy import CallStopPolicy
 from safety.pii_redaction import PIIRedactor
 from storage.repository import Repository
+from deployment.canary import PromptResolver
 from core.runtime_events import (
     RuntimeEvent,
     UtteranceReceivedEvent,
@@ -100,6 +101,7 @@ class AgentRuntime:
         self.call_stop_policy = call_stop_policy
         self.pii_redactor = pii_redactor
         self.repository = repository or Repository()
+        self.prompt_resolver = PromptResolver(repository=self.repository)
         self.event_callback = event_callback
         self.response_builder = ResponseBuilder()
         
