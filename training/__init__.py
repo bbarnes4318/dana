@@ -24,6 +24,13 @@ from training.daily_qa_miner import (
     WinningResponseCandidate,
     DailyQaMiningResult,
 )
+from training.fine_tune_export import (
+    FineTuneExportConfig,
+    FineTuneExampleRecord,
+    FineTuneValidationResult,
+    FineTuneExportResult,
+    FineTuneExportBuilder,
+)
 
 __all__ = [
     "TrainingIngestionResult",
@@ -43,5 +50,10 @@ __all__ = [
     "FailureCluster",
     "WinningResponseCandidate",
     "DailyQaMiningResult",
+    "FineTuneExportConfig",
+    "FineTuneExampleRecord",
+    "FineTuneValidationResult",
+    "FineTuneExportResult",
+    "FineTuneExportBuilder",
 ]
 
