@@ -743,3 +743,106 @@ async def test_audit_history_appended_for_operations(repo: Repository, manager: 
     assert history[2]["operation"] == "transition_to_running"
     assert history[3]["operation"] == "transition_to_paused"
     assert history[4]["operation"] == "transition_to_rolled_back"
+
+
+@pytest.mark.asyncio
+async def test_candidate_eligibility_passes_for_prompt15_created_candidate(
+    repo: Repository, manager: CanaryManager
+) -> None:
+    from prompts.versioning import PromptVersionManager
+    pvm = PromptVersionManager(repository=repo)
+
+    content = "This is a candidate prompt content."
+    content_hash = pvm.compute_content_hash(content)
+
+    metadata = {
+        "source_prompt_path": "prompts/final_expense_alex.md",
+        "source_prompt_hash": "some_source_hash",
+        "patched_prompt_hash": content_hash,
+        "patch_review_item_ids": ["patch1"],
+        "gate_result": {
+            "passed": True,
+            "prompt_validation_passed": True,
+            "eval_cases_passed": True,
+            "eval_cases_present": True,
+            "transcript_replay_passed": True,
+            "prospect_simulations_passed": True
+        },
+        "created_from": "prompt_patch_preview",
+        "runtime_changed": False,
+        "active_runtime": False
+    }
+
+    # We use PromptVersionManager.create_prompt_version()
+    # status="candidate"
+    res_snapshot = await pvm.create_prompt_version(
+        prompt_name="final_expense_alex",
+        content=content,
+        created_by="tester",
+        status="candidate",
+        source_file="prompts/final_expense_alex.md",
+        metadata=metadata
+    )
+
+    # Now check eligibility using manager
+    elig = await manager.check_candidate_eligibility(res_snapshot.prompt_version_id)
+    assert elig.eligible is True
+    assert not elig.failures
+
+
+@pytest.mark.asyncio
+async def test_candidate_eligibility_uses_normalized_hash(
+    repo: Repository, manager: CanaryManager
+) -> None:
+    from prompts.versioning import PromptVersionManager
+    pvm = PromptVersionManager(repository=repo)
+
+    # Create content with CRLF and trailing spaces
+    content_raw = "Line one with space   \r\nLine two \r\n"
+    normalized_hash = pvm.compute_content_hash(content_raw)
+
+    metadata = {
+        "source_prompt_path": "prompts/final_expense_alex.md",
+        "source_prompt_hash": "some_source_hash",
+        "patched_prompt_hash": normalized_hash,
+        "patch_review_item_ids": ["patch1"],
+        "gate_result": {
+            "passed": True,
+            "prompt_validation_passed": True,
+            "eval_cases_passed": True,
+            "eval_cases_present": True,
+            "transcript_replay_passed": True,
+            "prospect_simulations_passed": True
+        },
+        "created_from": "prompt_patch_preview",
+        "runtime_changed": False,
+        "active_runtime": False
+    }
+
+    res_snapshot = await pvm.create_prompt_version(
+        prompt_name="final_expense_alex",
+        content=content_raw,
+        created_by="tester",
+        status="candidate",
+        source_file="prompts/final_expense_alex.md",
+        metadata=metadata
+    )
+
+    elig = await manager.check_candidate_eligibility(res_snapshot.prompt_version_id)
+    assert elig.eligible is True
+    assert not elig.failures
+
+
+@pytest.mark.asyncio
+async def test_candidate_eligibility_backward_compatible_with_outer_metadata(
+    repo: Repository, manager: CanaryManager
+) -> None:
+    # Keep existing direct qa_thresholds["metadata"] shape.
+    # Assert eligibility still passes.
+    content = "This is valid prompt text."
+    payload = create_valid_candidate_payload(content)
+    pv_id = await repo.save_prompt_version(**payload)
+
+    res = await manager.check_candidate_eligibility(pv_id)
+    assert res.eligible is True
+    assert not res.failures

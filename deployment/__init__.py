@@ -9,6 +9,15 @@ from deployment.canary import (
     CanaryOperationResult,
     CanaryReport,
     CanaryManager,
+    PromptResolver,
+)
+from deployment.monitoring import (
+    CanaryMonitorConfig,
+    CanaryVariantMetrics,
+    CanarySafetySignal,
+    CanaryMonitoringResult,
+    CanaryPromotionReadinessResult,
+    CanaryMonitor,
 )
 
 __all__ = [
@@ -18,4 +27,11 @@ __all__ = [
     "CanaryOperationResult",
     "CanaryReport",
     "CanaryManager",
+    "PromptResolver",
+    "CanaryMonitorConfig",
+    "CanaryVariantMetrics",
+    "CanarySafetySignal",
+    "CanaryMonitoringResult",
+    "CanaryPromotionReadinessResult",
+    "CanaryMonitor",
 ]

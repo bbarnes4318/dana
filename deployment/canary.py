@@ -231,6 +231,40 @@ class CanaryManager:
         self.repository = repository or Repository()
         self.prompt_version_manager = prompt_version_manager
 
+    def _extract_candidate_metadata(self, prompt_version_record: dict) -> dict:
+        qa = prompt_version_record.get("qa_thresholds") or {}
+        outer = qa.get("metadata") or {}
+        inner = outer.get("metadata") or {}
+
+        merged = {}
+        merged.update(outer)
+        merged.update(inner)
+
+        # Preserve prompt name from qa_thresholds if not already set.
+        if "prompt_name" not in merged and qa.get("prompt_name"):
+            merged["prompt_name"] = qa.get("prompt_name")
+
+        return merged
+
+    def _compute_content_hash(self, content: str) -> str:
+        """Compute stable SHA-256 hash, using PromptVersionManager when available."""
+        pvm = self.prompt_version_manager
+        if pvm is None:
+            try:
+                from prompts.versioning import PromptVersionManager
+                pvm = PromptVersionManager(repository=self.repository)
+            except ImportError:
+                pass
+
+        if pvm is not None:
+            return pvm.compute_content_hash(content)
+
+        # local helper fallback
+        normalized = content.replace("\r\n", "\n").replace("\r", "\n")
+        lines = [line.rstrip() for line in normalized.split("\n")]
+        normalized_content = "\n".join(lines)
+        return hashlib.sha256(normalized_content.encode("utf-8")).hexdigest()
+
     def deterministic_bucket(self, key: str) -> float:
         """Deterministically map a key string to a bucket float in [0.0, 100.0)."""
         h = hashlib.sha256(key.encode("utf-8")).hexdigest()
@@ -289,7 +323,7 @@ class CanaryManager:
         # Retrieve mapped extra fields stored in qa_thresholds dict (for db compatibility)
         qa = pv.get("qa_thresholds") or {}
         content = qa.get("content") or ""
-        metadata = qa.get("metadata") or {}
+        metadata = self._extract_candidate_metadata(pv)
 
         # 1. Verify status is candidate
         canary_status = pv.get("canary_status")
@@ -358,7 +392,7 @@ class CanaryManager:
 
         # Verify patched_prompt_hash matches content hash recomputed
         if content:
-            computed_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()
+            computed_hash = self._compute_content_hash(content)
             if computed_hash != patched_prompt_hash:
                 failures.append(f"Content hash '{computed_hash}' does not match patched_prompt_hash '{patched_prompt_hash}'")
 
@@ -370,7 +404,7 @@ class CanaryManager:
             if resolved_path.exists():
                 try:
                     live_content = resolved_path.read_text(encoding="utf-8")
-                    live_hash = hashlib.sha256(live_content.encode("utf-8")).hexdigest()
+                    live_hash = self._compute_content_hash(live_content)
                     if live_hash != source_prompt_hash:
                         warnings.append("Source prompt hash is stale compared to the current live prompt file on disk")
                 except Exception as e:
