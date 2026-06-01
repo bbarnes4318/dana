@@ -76,6 +76,7 @@ class LiveKitOutboundAdapter:
             "LIVEKIT_SIP_OUTBOUND_TRUNK_ID": env["livekit_sip_outbound_trunk_id"],
             "DANA_OUTBOUND_CALLER_ID": env["outbound_caller_id"],
             "DANA_AGENT_WORKER_ENABLED": "true" if env["worker_enabled"] else "false",
+            "DANA_TELEPHONY_PROVIDER": env["active_provider"],
         }
 
     def validate_live_config(self, config: LiveKitDialConfig) -> tuple[bool, list[str]]:

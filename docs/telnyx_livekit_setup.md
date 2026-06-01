@@ -20,6 +20,12 @@ This guide describes how to configure Telnyx carrier connections and route SIP t
 For live outbound dialing, set these keys in the environment:
 
 ```bash
+# Telephony Provider Configuration
+DANA_TELEPHONY_PROVIDER=telnyx
+TELNYX_API_KEY=your_telnyx_api_key
+TELNYX_DIDS=+15551234567
+TELNYX_OUTBOUND_CALLER_ID=+15551234567
+
 # Telephony Live Mode Flags
 TELEPHONY_LIVE_MODE=true
 DANA_ENABLE_OUTBOUND_DIALER=true

@@ -40,6 +40,10 @@ class LiveTelephonyReadinessResult(BaseModel):
     local_stt_ready: bool = False
     local_tts_ready: bool = False
 
+    # Provider fields for Prompt 33
+    active_provider: Optional[str] = None
+    caller_id_source: Optional[str] = None
+
 
 class LiveTelephonyReadinessChecker:
     """Audits environment and db configurations to certify outbound telephony readiness."""
@@ -76,6 +80,7 @@ class LiveTelephonyReadinessChecker:
         env = get_runtime_env()
         trunk_id = env["livekit_sip_outbound_trunk_id"]
         caller_id = env["outbound_caller_id"]
+        provider = env["active_provider"]
 
         if provider_config_id:
             config = await self.repository.get_telephony_provider_config(provider_config_id)
@@ -100,7 +105,23 @@ class LiveTelephonyReadinessChecker:
         if caller_id:
             res["caller_id_present"] = True
         else:
-            res["failures"].append("No outbound caller ID configured (neither in provider config nor in DANA_OUTBOUND_CALLER_ID env).")
+            if provider == "telnyx":
+                res["failures"].append(
+                    "Active provider is telnyx but no Telnyx caller ID was configured. "
+                    "Set DANA_OUTBOUND_CALLER_ID, TELNYX_OUTBOUND_CALLER_ID, TELNYX_DIDS, or TELNYX_PHONE_NUMBERS."
+                )
+            elif provider == "signalwire":
+                res["failures"].append(
+                    "Active provider is signalwire but no SignalWire caller ID was configured. "
+                    "Set DANA_OUTBOUND_CALLER_ID, SIGNALWIRE_OUTBOUND_CALLER_ID, or SIGNALWIRE_DIDS."
+                )
+            elif provider == "twilio":
+                res["failures"].append(
+                    "Active provider is twilio but no Twilio caller ID was configured. "
+                    "Set DANA_OUTBOUND_CALLER_ID, TWILIO_CALLER_ID, or TWILIO_PHONE_NUMBERS."
+                )
+            else:
+                res["failures"].append("No outbound caller ID configured.")
 
         if res["failures"]:
             res["ok"] = False
@@ -218,5 +239,7 @@ class LiveTelephonyReadinessChecker:
             env_loaded=env_loaded,
             local_llm_ready=local_llm_ready,
             local_stt_ready=local_stt_ready,
-            local_tts_ready=local_tts_ready
+            local_tts_ready=local_tts_ready,
+            active_provider=env["active_provider"],
+            caller_id_source=env["outbound_caller_id_source"]
         )

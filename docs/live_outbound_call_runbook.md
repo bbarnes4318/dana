@@ -16,6 +16,12 @@ Before enabling live dialing, verify the following:
 ## Required Environment Variables
 
 ```bash
+# Telephony Provider Choice
+DANA_TELEPHONY_PROVIDER=telnyx
+TELNYX_API_KEY=...
+TELNYX_DIDS=...
+TELNYX_OUTBOUND_CALLER_ID=...
+
 # Enable live calls
 TELEPHONY_LIVE_MODE=true
 DANA_ENABLE_OUTBOUND_DIALER=true

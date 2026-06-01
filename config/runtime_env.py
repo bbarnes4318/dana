@@ -21,6 +21,17 @@ def get_runtime_env() -> dict:
     # Load env variables automatically
     load_environment()
 
+    # 0. Active Telephony Provider
+    provider = os.environ.get("DANA_TELEPHONY_PROVIDER")
+    if provider:
+        provider = provider.strip().lower()
+    
+    if provider not in ("telnyx", "signalwire", "twilio", "mock"):
+        if os.environ.get("TELNYX_API_KEY"):
+            provider = "telnyx"
+        else:
+            provider = "mock"
+
     # 1. LiveKit credentials
     livekit_url = os.environ.get("LIVEKIT_URL")
     livekit_api_key = os.environ.get("LIVEKIT_API_KEY")
@@ -33,18 +44,84 @@ def get_runtime_env() -> dict:
         os.environ.get("TELNYX_LIVEKIT_OUTBOUND_TRUNK_ID")
     )
 
-    # 3. Outbound Caller ID (alias mapping & DID fallback)
-    outbound_caller_id = (
-        os.environ.get("DANA_OUTBOUND_CALLER_ID") or
-        os.environ.get("DANA_PRIMARY_DID")
-    )
-    if not outbound_caller_id:
-        signalwire_dids = os.environ.get("SIGNALWIRE_DIDS", "")
-        if signalwire_dids:
-            # Parse first non-empty DID
-            dids = [d.strip() for d in signalwire_dids.split(",") if d.strip()]
+    # 3. Outbound Caller ID resolution based on active provider
+    outbound_caller_id = None
+    outbound_caller_id_source = None
+
+    if provider == "telnyx":
+        val = os.environ.get("DANA_OUTBOUND_CALLER_ID")
+        if val:
+            outbound_caller_id = val.strip()
+            outbound_caller_id_source = "DANA_OUTBOUND_CALLER_ID"
+        else:
+            val = os.environ.get("TELNYX_OUTBOUND_CALLER_ID")
+            if val:
+                outbound_caller_id = val.strip()
+                outbound_caller_id_source = "TELNYX_OUTBOUND_CALLER_ID"
+            else:
+                dids = os.environ.get("TELNYX_DIDS", "")
+                if dids:
+                    parsed = [d.strip() for d in dids.split(",") if d.strip()]
+                    if parsed:
+                        outbound_caller_id = parsed[0]
+                        outbound_caller_id_source = "TELNYX_DIDS"
+                
+                if not outbound_caller_id:
+                    nums = os.environ.get("TELNYX_PHONE_NUMBERS", "")
+                    if nums:
+                        parsed = [n.strip() for n in nums.split(",") if n.strip()]
+                        if parsed:
+                            outbound_caller_id = parsed[0]
+                            outbound_caller_id_source = "TELNYX_PHONE_NUMBERS"
+
+    elif provider == "signalwire":
+        val = os.environ.get("DANA_OUTBOUND_CALLER_ID")
+        if val:
+            outbound_caller_id = val.strip()
+            outbound_caller_id_source = "DANA_OUTBOUND_CALLER_ID"
+        else:
+            val = os.environ.get("SIGNALWIRE_OUTBOUND_CALLER_ID")
+            if val:
+                outbound_caller_id = val.strip()
+                outbound_caller_id_source = "SIGNALWIRE_OUTBOUND_CALLER_ID"
+            else:
+                dids = os.environ.get("SIGNALWIRE_DIDS", "")
+                if dids:
+                    parsed = [d.strip() for d in dids.split(",") if d.strip()]
+                    if parsed:
+                        outbound_caller_id = parsed[0]
+                        outbound_caller_id_source = "SIGNALWIRE_DIDS"
+
+    elif provider == "twilio":
+        val = os.environ.get("DANA_OUTBOUND_CALLER_ID")
+        if val:
+            outbound_caller_id = val.strip()
+            outbound_caller_id_source = "DANA_OUTBOUND_CALLER_ID"
+        else:
+            val = os.environ.get("TWILIO_CALLER_ID")
+            if val:
+                outbound_caller_id = val.strip()
+                outbound_caller_id_source = "TWILIO_CALLER_ID"
+            else:
+                nums = os.environ.get("TWILIO_PHONE_NUMBERS", "")
+                if nums:
+                    parsed = [n.strip() for n in nums.split(",") if n.strip()]
+                    if parsed:
+                        outbound_caller_id = parsed[0]
+                        outbound_caller_id_source = "TWILIO_PHONE_NUMBERS"
+
+    elif provider == "mock":
+        val = os.environ.get("DANA_OUTBOUND_CALLER_ID")
+        if val:
+            outbound_caller_id = val.strip()
+            outbound_caller_id_source = "DANA_OUTBOUND_CALLER_ID"
+        else:
+            dids = os.environ.get("TELNYX_DIDS", "") or os.environ.get("TELNYX_PHONE_NUMBERS", "") or os.environ.get("SIGNALWIRE_DIDS", "") or os.environ.get("TWILIO_PHONE_NUMBERS", "")
             if dids:
-                outbound_caller_id = dids[0]
+                parsed = [d.strip() for d in dids.split(",") if d.strip()]
+                if parsed:
+                    outbound_caller_id = parsed[0]
+                    outbound_caller_id_source = "FALLBACK_MOCK_DID"
 
     # 4. Test Call To
     test_call_to = (
@@ -95,6 +172,8 @@ def get_runtime_env() -> dict:
         "livekit_api_secret": livekit_api_secret,
         "livekit_sip_outbound_trunk_id": livekit_sip_outbound_trunk_id,
         "outbound_caller_id": outbound_caller_id,
+        "outbound_caller_id_source": outbound_caller_id_source,
+        "active_provider": provider,
         "test_call_to": test_call_to,
         "live_call_enabled": live_call_enabled,
         "worker_enabled": worker_enabled,
