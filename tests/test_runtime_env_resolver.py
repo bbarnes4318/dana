@@ -192,8 +192,7 @@ async def test_missing_telnyx_caller_id_reports_clear_failure(clean_env, tmp_pat
         res = await checker.check_provider_config()
         assert res["ok"] is False
         expected_msg = (
-            "Active provider is telnyx but no Telnyx caller ID was configured. "
-            "Set DANA_OUTBOUND_CALLER_ID, TELNYX_OUTBOUND_CALLER_ID, TELNYX_DIDS, or TELNYX_PHONE_NUMBERS."
+            "No Telnyx caller ID pool found. Run python scripts/sync_telnyx_dids.py or set TELNYX_DIDS."
         )
         assert expected_msg in res["failures"]
 

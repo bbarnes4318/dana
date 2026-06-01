@@ -2679,6 +2679,66 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
+  // Sync Telnyx DIDs
+  const btnSyncTelnyxDids = document.getElementById("btn-sync-telnyx-dids");
+  if (btnSyncTelnyxDids) {
+    btnSyncTelnyxDids.addEventListener("click", async () => {
+      const daily = parseInt(document.getElementById("sync-did-daily").value, 10);
+      const hourly = parseInt(document.getElementById("sync-did-hourly").value, 10);
+      const dryRun = document.getElementById("sync-did-dryrun").checked;
+
+      const summaryResults = document.getElementById("sync-summary-results");
+      const resultStatus = document.getElementById("sync-result-status");
+      const metricFetched = document.getElementById("sync-metric-fetched");
+      const metricImported = document.getElementById("sync-metric-imported");
+      const metricUpdated = document.getElementById("sync-metric-updated");
+      const metricSkipped = document.getElementById("sync-metric-skipped");
+      const metricFailed = document.getElementById("sync-metric-failed");
+
+      if (summaryResults) {
+        summaryResults.style.display = "block";
+        resultStatus.innerHTML = `<span style="color: var(--text-muted);">Syncing...</span>`;
+      }
+
+      const origText = btnSyncTelnyxDids.innerText;
+      btnSyncTelnyxDids.disabled = true;
+      btnSyncTelnyxDids.innerText = "Syncing...";
+
+      try {
+        const res = await fetch("/api/telephony/dids/sync-telnyx", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            dry_run: dryRun,
+            daily_cap: daily,
+            hourly_cap: hourly
+          })
+        });
+        const data = await res.json();
+        if (res.ok && data.success) {
+          const stats = data.data;
+          resultStatus.innerHTML = `<span style="color: var(--success);">${dryRun ? 'DRY RUN COMPLETE' : 'SYNC SUCCESS'}</span>`;
+          if (metricFetched) metricFetched.innerText = stats.fetched_count;
+          if (metricImported) metricImported.innerText = stats.imported_count;
+          if (metricUpdated) metricUpdated.innerText = stats.updated_count;
+          if (metricSkipped) metricSkipped.innerText = stats.skipped_count;
+          if (metricFailed) metricFailed.innerText = stats.failed_count;
+          log(`Telnyx DID sync complete: fetched ${stats.fetched_count}, imported ${stats.imported_count}`, "success");
+          refreshDids();
+        } else {
+          resultStatus.innerHTML = `<span style="color: var(--danger);">FAILED</span>`;
+          alert(`Failed to sync Telnyx DIDs: ${data.error || data.message}`);
+        }
+      } catch (err) {
+        resultStatus.innerHTML = `<span style="color: var(--danger);">ERROR</span>`;
+        log(`Network error syncing Telnyx DIDs: ${err.message}`, "error");
+      } finally {
+        btnSyncTelnyxDids.disabled = false;
+        btnSyncTelnyxDids.innerText = origText;
+      }
+    });
+  }
+
   // Auto-refresh pool on load
   refreshDids();
 

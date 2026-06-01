@@ -141,3 +141,7 @@ To remain compliant and avoid getting flagged as spam, every caller ID enforces 
 - **Hourly Cap**: The maximum number of calls placed by a single number in an hour (default: 20).
 - **Cooldown**: If a number gets a high bounce rate or is manually placed in cooldown (`cooldown_until`), it is excluded from selection until the cooldown period ends.
 ```
+
+### Telnyx DID Inventory Sync
+Deployments should configure automation to sync Telnyx numbers periodically. 
+For more details, see [Telnyx DID Inventory Sync](file:///C:/Users/jimbo/.gemini/antigravity/worktrees/ultimate-voice/telephony-campaign-ops-layer/docs/telnyx_did_inventory_sync.md).

@@ -155,3 +155,9 @@ Each DID in the pool tracks reputation and pacing constraints:
 - **Status Filtering**: Paused, blocked, or retired numbers are never used.
 - **Reputation Cooldowns**: If a number is put in cooldown (`cooldown_until`), it is skipped until the cooldown expires.
 - **Spam Label tracking**: Numbers are labeled as `clean`, `suspected`, `flagged`, or `blocked` to guide selection weighting.
+
+### Telnyx DID Inventory Sync
+You can automate populating and verifying your Telnyx DID pool directly from the API:
+1. Run `python scripts/sync_telnyx_dids.py` to synchronize numbers dynamically.
+2. In the Web UI, use the **Sync Telnyx DIDs** button to pull and configure caps in real-time.
+3. For details, refer to the [Telnyx DID Inventory Sync Guide](file:///C:/Users/jimbo/.gemini/antigravity/worktrees/ultimate-voice/telephony-campaign-ops-layer/docs/telnyx_did_inventory_sync.md).

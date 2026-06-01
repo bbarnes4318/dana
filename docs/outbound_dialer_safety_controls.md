@@ -87,3 +87,7 @@ In addition to lead and campaign-level safety boundaries, Dana monitors and pace
 4. **Cross-Provider Isolation**
    - Cross-provider rotation is blocked by default (e.g. BulkVS numbers cannot be used under Telnyx active provider trunks).
    - This ensures high attestation levels (A-level STIR/SHAKEN) and minimizes the risk of call labeling.
+
+5. **Telnyx DID Inventory Sync Automation**
+   - Use the `scripts/sync_telnyx_dids.py` tool or the console sync button to safely populate the DID pool.
+   - For full usage details, refer to the [Telnyx DID Inventory Sync Guide](file:///C:/Users/jimbo/.gemini/antigravity/worktrees/ultimate-voice/telephony-campaign-ops-layer/docs/telnyx_did_inventory_sync.md).

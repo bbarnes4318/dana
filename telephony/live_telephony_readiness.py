@@ -129,6 +129,18 @@ class LiveTelephonyReadinessChecker:
                     "Missing LiveKit outbound SIP trunk ID. TELNYX_API_KEY is not the same thing. "
                     "Create/locate the LiveKit outbound trunk and set LIVEKIT_SIP_OUTBOUND_TRUNK_ID."
                 )
+                # Check if Telnyx DIDs are already synced
+                has_dids = False
+                try:
+                    from telephony.did_pool import DIDPoolManager
+                    pool = DIDPoolManager(self.repository)
+                    all_dids = await pool.list_numbers(provider="telnyx")
+                    if all_dids:
+                        has_dids = True
+                except Exception:
+                    pass
+                if has_dids:
+                    res["failures"].append("Telnyx DIDs are synced, but LiveKit outbound SIP trunk ID is still required.")
             else:
                 res["failures"].append("No LiveKit SIP Outbound Trunk ID configured (neither in provider config nor in LIVEKIT_SIP_OUTBOUND_TRUNK_ID env).")
 
@@ -138,10 +150,25 @@ class LiveTelephonyReadinessChecker:
             res["caller_id_source"] = caller_id_source
         else:
             if provider == "telnyx":
-                res["failures"].append(
-                    "Active provider is telnyx but no Telnyx caller ID was configured. "
-                    "Set DANA_OUTBOUND_CALLER_ID, TELNYX_OUTBOUND_CALLER_ID, TELNYX_DIDS, or TELNYX_PHONE_NUMBERS."
-                )
+                has_dids = False
+                try:
+                    from telephony.did_pool import DIDPoolManager
+                    pool = DIDPoolManager(self.repository)
+                    all_dids = await pool.list_numbers(provider="telnyx")
+                    if all_dids:
+                        has_dids = True
+                except Exception:
+                    pass
+
+                if not has_dids:
+                    res["failures"].append(
+                        "No Telnyx caller ID pool found. Run python scripts/sync_telnyx_dids.py or set TELNYX_DIDS."
+                    )
+                else:
+                    res["failures"].append(
+                        "Active provider is telnyx but no Telnyx caller ID was configured. "
+                        "Set DANA_OUTBOUND_CALLER_ID, TELNYX_OUTBOUND_CALLER_ID, TELNYX_DIDS, or TELNYX_PHONE_NUMBERS."
+                    )
             elif provider == "bulkvs":
                 res["failures"].append(
                     "Active provider is bulkvs but no BulkVS caller ID was configured. "

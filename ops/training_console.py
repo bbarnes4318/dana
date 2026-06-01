@@ -2161,6 +2161,36 @@ class TrainingOperationsConsole:
                 error=str(e)
             )
 
+    async def sync_telnyx_dids(
+        self,
+        dry_run: bool = False,
+        daily_cap: int = 100,
+        hourly_cap: int = 20
+    ) -> ConsoleActionResult:
+        """Sync phone numbers from Telnyx API into local DID pool."""
+        try:
+            from telephony.telnyx_inventory import TelnyxInventoryConfig, TelnyxDIDInventorySyncService
+            config = TelnyxInventoryConfig(
+                dry_run=dry_run,
+                default_daily_cap=daily_cap,
+                default_hourly_cap=hourly_cap
+            )
+            service = TelnyxDIDInventorySyncService(self.repository)
+            res = await service.sync(config)
+            return ConsoleActionResult(
+                action="sync_telnyx_dids",
+                success=res.success,
+                message="Telnyx DIDs synced successfully." if res.success else "Failed to sync Telnyx DIDs.",
+                data=res.model_dump(mode="json")
+            )
+        except Exception as e:
+            return ConsoleActionResult(
+                action="sync_telnyx_dids",
+                success=False,
+                message="Failed to sync Telnyx DIDs.",
+                error=str(e)
+            )
+
 
 def json_serializable(obj: Any) -> Any:
     """Recursively convert custom objects/dataclasses to JSON-serializable formats."""

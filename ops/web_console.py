@@ -609,6 +609,15 @@ class TrainingWebConsoleServer(ThreadingHTTPServer):
                     strategy=strategy,
                     allow_cross_provider=allow_cross
                 )
+            elif route == "/api/telephony/dids/sync-telnyx" and method == "POST":
+                dry_run = body.get("dry_run", False) if body else False
+                daily_cap = body.get("daily_cap", 100) if body else 100
+                hourly_cap = body.get("hourly_cap", 20) if body else 20
+                res = await self.console.sync_telnyx_dids(
+                    dry_run=dry_run,
+                    daily_cap=daily_cap,
+                    hourly_cap=hourly_cap
+                )
                 return (200 if res.success else 400, res.model_dump(mode="json"))
 
             elif route == "/api/telephony/live/readiness" and method == "POST":
