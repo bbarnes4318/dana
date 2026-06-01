@@ -463,3 +463,101 @@ async def test_live_tick_respects_caps_before_adapter_call(tmp_path, mock_adapte
         if v is not None: os.environ[k] = v
         elif k in os.environ: del os.environ[k]
 
+
+@pytest.mark.asyncio
+async def test_dialer_uses_did_pool_selected_caller_id(tmp_path, mock_adapter):
+    """Test 15: Outbound dialer queries DID pool to select and record caller ID."""
+    repository = Repository(data_dir=tmp_path)
+    service = TelephonyCampaignService(repository=repository)
+    
+    mock_dial = AsyncMock()
+    mock_dial.return_value.success = True
+    mock_dial.return_value.livekit_participant_id = "part_1"
+    mock_dial.return_value.livekit_sip_call_id = "sip_1"
+    mock_dial.return_value.provider_call_id = "provider_1"
+    mock_dial.return_value.answered = True
+    mock_adapter.dial = mock_dial
+
+    dialer = DialerQueue(repository=repository, adapter=mock_adapter)
+
+    campaign_id = await service.create_campaign(
+        name="DID Pool Campaign",
+        operator="Jimmy"
+    )
+    await service.mark_ready(campaign_id, operator="Jimmy")
+    await service.start_campaign(campaign_id, operator="Jimmy")
+
+    await repository.save_campaign_lead(campaign_id=campaign_id, phone_number="+15555550001", status="new")
+
+    # Add a number to DID pool manually
+    from telephony.did_pool import DIDPoolManager
+    pool = DIDPoolManager(repository)
+    await pool.add_number(provider="telnyx", phone_number="+18651111111")
+
+    orig = {k: os.environ.get(k) for k in ["TELEPHONY_LIVE_MODE", "DANA_ENABLE_OUTBOUND_DIALER", "DANA_TELEPHONY_PROVIDER", "LIVEKIT_SIP_OUTBOUND_TRUNK_ID"]}
+    os.environ["TELEPHONY_LIVE_MODE"] = "true"
+    os.environ["DANA_ENABLE_OUTBOUND_DIALER"] = "true"
+    os.environ["DANA_TELEPHONY_PROVIDER"] = "telnyx"
+    os.environ["LIVEKIT_SIP_OUTBOUND_TRUNK_ID"] = "trunk_1"
+
+    config = DialerTickConfig(campaign_id=campaign_id, dry_run=False, live_mode=True, force=True)
+    res = await dialer.run_tick(config)
+
+    assert res.calls_started == 1
+    assert len(res.errors) == 0
+
+    # Ensure caller_id in dial config was +18651111111
+    args, kwargs = mock_dial.call_args
+    dial_conf = args[0]
+    assert dial_conf.caller_id == "+18651111111"
+
+    # Ensure selected_caller_id saved in attempt metadata
+    attempts = await repository.query_call_attempts({"campaign_id": campaign_id})
+    assert attempts[0]["metadata"]["selected_caller_id"] == "+18651111111"
+
+    for k, v in orig.items():
+        if v is not None: os.environ[k] = v
+        elif k in os.environ: del os.environ[k]
+
+
+@pytest.mark.asyncio
+async def test_dialer_fails_without_telnyx_dids_for_telnyx_provider(tmp_path, mock_adapter):
+    """Test 16: Outbound dialer pacing tick blocks with NO_ELIGIBLE_CALLER_ID if provider is Telnyx but no Telnyx DIDs exist."""
+    repository = Repository(data_dir=tmp_path)
+    service = TelephonyCampaignService(repository=repository)
+    
+    mock_dial = AsyncMock()
+    mock_adapter.dial = mock_dial
+
+    dialer = DialerQueue(repository=repository, adapter=mock_adapter)
+
+    campaign_id = await service.create_campaign(
+        name="No DID Campaign",
+        operator="Jimmy"
+    )
+    await service.mark_ready(campaign_id, operator="Jimmy")
+    await service.start_campaign(campaign_id, operator="Jimmy")
+
+    await repository.save_campaign_lead(campaign_id=campaign_id, phone_number="+15555550001", status="new")
+
+    # Ensure DID pool is empty (no env variables, no DB records for telnyx)
+    orig = {k: os.environ.get(k) for k in ["TELEPHONY_LIVE_MODE", "DANA_ENABLE_OUTBOUND_DIALER", "DANA_TELEPHONY_PROVIDER", "LIVEKIT_SIP_OUTBOUND_TRUNK_ID", "DANA_OUTBOUND_CALLER_ID", "TELNYX_OUTBOUND_CALLER_ID", "TELNYX_DIDS", "TELNYX_PHONE_NUMBERS"]}
+    os.environ["TELEPHONY_LIVE_MODE"] = "true"
+    os.environ["DANA_ENABLE_OUTBOUND_DIALER"] = "true"
+    os.environ["DANA_TELEPHONY_PROVIDER"] = "telnyx"
+    os.environ["LIVEKIT_SIP_OUTBOUND_TRUNK_ID"] = "trunk_1"
+    for k in ["DANA_OUTBOUND_CALLER_ID", "TELNYX_OUTBOUND_CALLER_ID", "TELNYX_DIDS", "TELNYX_PHONE_NUMBERS"]:
+        if k in os.environ:
+            del os.environ[k]
+
+    config = DialerTickConfig(campaign_id=campaign_id, dry_run=False, live_mode=True, force=True)
+    res = await dialer.run_tick(config)
+
+    assert res.calls_started == 0
+    assert "No eligible caller ID" in res.blocked_reason
+    assert "NO_ELIGIBLE_CALLER_ID" in res.errors
+
+    for k, v in orig.items():
+        if v is not None: os.environ[k] = v
+        elif k in os.environ: del os.environ[k]
+

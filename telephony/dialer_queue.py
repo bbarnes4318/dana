@@ -277,6 +277,10 @@ class DialerQueue:
             return result
 
         # 6. Dial Leads
+        from telephony.did_pool import DIDPoolManager
+        from storage.schemas import CallerIdSelectionConfig
+        did_pool_manager = DIDPoolManager(self.repository)
+
         for lead in eligible_leads:
             lead_phone = lead.get("phone_number")
             lead_id = lead["id"]
@@ -314,6 +318,19 @@ class DialerQueue:
             room_name = self.adapter.build_room_name(campaign_id, lead_id, attempt_id, room_template)
             part_identity = self.adapter.build_participant_identity(lead_id, attempt_id)
 
+            env = get_runtime_env()
+            provider = env["active_provider"]
+            strategy = campaign.get("caller_id_strategy") or "health_weighted"
+            allow_cross = os.environ.get("DANA_ALLOW_CROSS_PROVIDER_CALLER_ID", "").strip().lower() == "true"
+            require_verified = True
+
+            caller_id = None
+            caller_id_source = "none"
+
+            if not config.live_mode:
+                caller_id = campaign.get("caller_id") or env.get("outbound_caller_id") or "+15550000"
+                caller_id_source = "mock_fallback"
+
             attempt = {
                 "id": attempt_id,
                 "campaign_id": campaign_id,
@@ -326,6 +343,10 @@ class DialerQueue:
                 "started_at": now.isoformat(),
                 "created_at": now,
                 "updated_at": now,
+                "metadata": {
+                    "selected_caller_id": caller_id,
+                    "caller_id_source": caller_id_source
+                }
             }
 
             # If Live Mode is requested
@@ -344,7 +365,6 @@ class DialerQueue:
                     continue
 
                 # Load trunk ID from provider_config or env
-                env = get_runtime_env()
                 outbound_trunk_id = None
                 if provider_config:
                     outbound_trunk_id = provider_config.get("livekit_sip_outbound_trunk_id")
@@ -362,8 +382,33 @@ class DialerQueue:
                     await self.repository.save_campaign_lead(**lead)
                     continue
 
-                # Determine caller ID
-                caller_id = campaign.get("caller_id") or env["outbound_caller_id"]
+                selection_config = CallerIdSelectionConfig(
+                    provider=provider,
+                    strategy=strategy,
+                    allow_cross_provider=allow_cross,
+                    require_verified=require_verified
+                )
+                
+                selection_res = await did_pool_manager.select_caller_id(selection_config)
+                if not selection_res.success:
+                    result.blocked_reason = f"No eligible caller ID: {selection_res.reason}"
+                    result.errors.append("NO_ELIGIBLE_CALLER_ID")
+                    
+                    attempt["status"] = "failed"
+                    attempt["failure_reason"] = f"No eligible caller ID: {selection_res.reason}"
+                    attempt["ended_at"] = now.isoformat()
+                    await self.repository.save_call_attempt(**attempt)
+
+                    lead["status"] = "failed"
+                    await self.repository.save_campaign_lead(**lead)
+                    return result
+
+                caller_id = selection_res.phone_number
+                caller_id_source = selection_res.source
+                
+                # Update attempt metadata with actual selection details
+                attempt["metadata"]["selected_caller_id"] = caller_id
+                attempt["metadata"]["caller_id_source"] = caller_id_source
 
                 # Determine wait_until_answered and krisp_enabled
                 wait_until_answered_env = os.environ.get("DANA_WAIT_UNTIL_ANSWERED", "true").lower() == "true"
@@ -410,6 +455,9 @@ class DialerQueue:
                     attempt["livekit_sip_call_id"] = dial_res.livekit_sip_call_id
                     attempt["provider_call_id"] = dial_res.provider_call_id
                     await self.repository.save_call_attempt(**attempt)
+
+                    # Update usage count after attempt starts
+                    await did_pool_manager.record_call_use(selection_res.phone_number)
 
                     # Create LiveCallSession
                     session_id = str(uuid.uuid4())

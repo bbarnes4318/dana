@@ -112,3 +112,46 @@ python scripts/run_outbound_dialer_once.py --campaign-id <CAMPAIGN_ID> --no-dry-
 - **SIP Status 403 Forbidden**: Telnyx credentials or IP authentication mapping in the SIP Connection is misconfigured.
 - **SIP Status 404 Not Found**: The destination phone number is invalid or route profile rules are incorrect.
 - **SIP Status 486 Busy**: Recipient is busy or has blocked incoming VoIP calls.
+
+---
+
+## Caller ID DID Pool & Rotation Setup
+
+To prevent carrier spam blocking and ensure higher answer rates, Dana uses a provider-specific DID Pool (`telephony/did_pool.py`) for caller ID rotation.
+
+### Env Configuration for Telnyx
+When `DANA_TELEPHONY_PROVIDER=telnyx`, the DID pool dynamically rotates caller IDs using:
+1. `DANA_OUTBOUND_CALLER_ID`
+2. `TELNYX_OUTBOUND_CALLER_ID`
+3. `TELNYX_DIDS` (comma-separated list)
+4. `TELNYX_PHONE_NUMBERS` (comma-separated list)
+
+**Note:** `TELNYX_API_KEY` is not treated as a caller ID. It is strictly used as the carrier API credential.
+
+### Why SignalWire/BulkVS Numbers are Ignored
+For safety and attestation validation, cross-provider caller ID rotation is blocked by default. 
+- If `DANA_TELEPHONY_PROVIDER=telnyx`, any configured `SIGNALWIRE_DIDS` or `BULKVS_DIDS` will be ignored.
+- To allow cross-provider caller ID rotation (e.g., using BulkVS numbers over a Telnyx trunk), you must set:
+  `DANA_ALLOW_CROSS_PROVIDER_CALLER_ID=true`
+- **Caution**: Doing this will trigger a readiness warning: `"Cross-provider caller ID may reduce attestation and increase call labeling risk."`
+
+### BulkVS Provider Options
+If you wish to use BulkVS caller IDs, you have three options:
+- **Option A (Recommended)**: Port your BulkVS phone numbers directly to Telnyx.
+- **Option B (Trunk-level Separation)**: Configure BulkVS as its own provider/trunk profile in Dana:
+  ```env
+  DANA_TELEPHONY_PROVIDER=bulkvs
+  BULKVS_API_KEY=your_bulkvs_api_key
+  BULKVS_DIDS=+1865...,+1725...
+  BULKVS_PHONE_NUMBERS=
+  BULKVS_OUTBOUND_CALLER_ID=
+  BULKVS_LIVEKIT_SIP_OUTBOUND_TRUNK_ID=your_bulkvs_sip_trunk_id
+  ```
+- **Option C**: Avoid showing BulkVS numbers through Telnyx unless they have been explicitly added as verified external caller IDs on your Telnyx outbound trunk configuration.
+
+### Call Reputation & Safety Controls
+Each DID in the pool tracks reputation and pacing constraints:
+- **Per-number Call Caps**: Restricts calls per number per day (`daily_cap`, defaults to 100) and per hour (`hourly_cap`, defaults to 20).
+- **Status Filtering**: Paused, blocked, or retired numbers are never used.
+- **Reputation Cooldowns**: If a number is put in cooldown (`cooldown_until`), it is skipped until the cooldown expires.
+- **Spam Label tracking**: Numbers are labeled as `clean`, `suspected`, `flagged`, or `blocked` to guide selection weighting.

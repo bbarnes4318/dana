@@ -120,4 +120,24 @@ python scripts/run_outbound_dialer_once.py --campaign-id "CAMP_ID" --no-dry-run
 
 # Live dialer tick (places actual calls)
 python scripts/run_outbound_dialer_once.py --campaign-id "CAMP_ID" --no-dry-run --live-mode
+
+---
+
+## Caller ID DID Pool & Reputation Management
+
+To optimize campaign delivery and track carrier reputation, Dana includes a Caller ID DID Pool management interface directly in the Telephony dashboard and backend console.
+
+### Compliant DID Pool Rotation
+Instead of relying on static environment fallbacks or single outbound caller IDs, the outbound dialer queries the DID pool to dynamically select a phone number for each dialing attempt. 
+
+The pool selection logic supports the following rotation strategies:
+- `health_weighted` (Default): Selects the number with the highest computed reputation score. Numbers with spam labels (`suspected`, `flagged`, `blocked`), complaints, or low answer/transfer rates are heavily penalized.
+- `round_robin`: Rotates caller IDs based on the date/time they were last used, ensuring even distribution across the entire active pool.
+- `least_used`: Rotates numbers based on total calls placed today to spread call volume evenly.
+
+### Per-Number Call Caps & Cooldowns
+To remain compliant and avoid getting flagged as spam, every caller ID enforces safety caps:
+- **Daily Cap**: The maximum number of calls placed by a single number in a day (default: 100).
+- **Hourly Cap**: The maximum number of calls placed by a single number in an hour (default: 20).
+- **Cooldown**: If a number gets a high bounce rate or is manually placed in cooldown (`cooldown_until`), it is excluded from selection until the cooldown period ends.
 ```

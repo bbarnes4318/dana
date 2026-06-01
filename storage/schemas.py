@@ -455,3 +455,56 @@ class CampaignControlEvent(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
     created_at: datetime = Field(default_factory=_utcnow)
 
+
+class CallerIdNumber(BaseModel):
+    """An individual caller ID number record in the pool."""
+
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    provider: str  # telnyx|bulkvs|signalwire|twilio
+    phone_number: str
+    status: str = "active"  # active|paused|cooldown|blocked|retired
+    source: str = "manual"  # env|database|api_import|manual
+    verified_for_provider: bool = False
+    stir_shaken_attestation: Optional[str] = "unknown"  # A|B|C|unknown
+    daily_cap: int = 100
+    hourly_cap: int = 20
+    calls_today: int = 0
+    calls_this_hour: int = 0
+    last_used_at: Optional[datetime] = None
+    cooldown_until: Optional[datetime] = None
+    spam_label_status: str = "clean"  # clean|suspected|flagged|blocked|unknown
+    complaint_count: int = 0
+    dnc_count: int = 0
+    answer_rate: Optional[float] = 0.0
+    transfer_rate: Optional[float] = 0.0
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    created_at: datetime = Field(default_factory=_utcnow)
+    updated_at: datetime = Field(default_factory=_utcnow)
+
+
+class CallerIdSelectionConfig(BaseModel):
+    """Configuration options for selecting a caller ID from the pool."""
+
+    provider: str
+    campaign_id: Optional[str] = None
+    strategy: str = "health_weighted"  # round_robin|least_used|health_weighted
+    allow_cross_provider: bool = False
+    require_verified: bool = True
+    max_per_number_per_day: Optional[int] = None
+    max_per_number_per_hour: Optional[int] = None
+
+
+class CallerIdSelectionResult(BaseModel):
+    """Result of attempting to select a caller ID."""
+
+    success: bool
+    phone_number: Optional[str] = None
+    provider: str
+    source: str
+    reason: str
+    warnings: list[str] = Field(default_factory=list)
+    error: Optional[str] = None
+    candidate_count: int = 0
+    eligible_count: int = 0
+
+

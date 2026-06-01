@@ -26,9 +26,11 @@ def get_runtime_env() -> dict:
     if provider:
         provider = provider.strip().lower()
     
-    if provider not in ("telnyx", "signalwire", "twilio", "mock"):
+    if provider not in ("telnyx", "bulkvs", "signalwire", "twilio", "mock"):
         if os.environ.get("TELNYX_API_KEY"):
             provider = "telnyx"
+        elif os.environ.get("BULKVS_API_KEY"):
+            provider = "bulkvs"
         else:
             provider = "mock"
 
@@ -38,11 +40,18 @@ def get_runtime_env() -> dict:
     livekit_api_secret = os.environ.get("LIVEKIT_API_SECRET")
 
     # 2. LiveKit SIP Outbound Trunk ID (alias mapping)
-    livekit_sip_outbound_trunk_id = (
-        os.environ.get("LIVEKIT_SIP_OUTBOUND_TRUNK_ID") or
-        os.environ.get("DANA_LIVEKIT_SIP_OUTBOUND_TRUNK_ID") or
-        os.environ.get("TELNYX_LIVEKIT_OUTBOUND_TRUNK_ID")
-    )
+    if provider == "bulkvs":
+        livekit_sip_outbound_trunk_id = (
+            os.environ.get("BULKVS_LIVEKIT_SIP_OUTBOUND_TRUNK_ID") or
+            os.environ.get("LIVEKIT_SIP_OUTBOUND_TRUNK_ID") or
+            os.environ.get("DANA_LIVEKIT_SIP_OUTBOUND_TRUNK_ID")
+        )
+    else:
+        livekit_sip_outbound_trunk_id = (
+            os.environ.get("LIVEKIT_SIP_OUTBOUND_TRUNK_ID") or
+            os.environ.get("DANA_LIVEKIT_SIP_OUTBOUND_TRUNK_ID") or
+            os.environ.get("TELNYX_LIVEKIT_OUTBOUND_TRUNK_ID")
+        )
 
     # 3. Outbound Caller ID resolution based on active provider
     outbound_caller_id = None
@@ -73,6 +82,34 @@ def get_runtime_env() -> dict:
                         if parsed:
                             outbound_caller_id = parsed[0]
                             outbound_caller_id_source = "TELNYX_PHONE_NUMBERS"
+
+    elif provider == "bulkvs":
+        if os.environ.get("DANA_ALLOW_DANA_CALLER_ID_FOR_BULKVS", "").strip().lower() == "true":
+            val = os.environ.get("DANA_OUTBOUND_CALLER_ID")
+            if val:
+                outbound_caller_id = val.strip()
+                outbound_caller_id_source = "DANA_OUTBOUND_CALLER_ID"
+        
+        if not outbound_caller_id:
+            val = os.environ.get("BULKVS_OUTBOUND_CALLER_ID")
+            if val:
+                outbound_caller_id = val.strip()
+                outbound_caller_id_source = "BULKVS_OUTBOUND_CALLER_ID"
+            else:
+                dids = os.environ.get("BULKVS_DIDS", "")
+                if dids:
+                    parsed = [d.strip() for d in dids.split(",") if d.strip()]
+                    if parsed:
+                        outbound_caller_id = parsed[0]
+                        outbound_caller_id_source = "BULKVS_DIDS"
+                
+                if not outbound_caller_id:
+                    nums = os.environ.get("BULKVS_PHONE_NUMBERS", "")
+                    if nums:
+                        parsed = [n.strip() for n in nums.split(",") if n.strip()]
+                        if parsed:
+                            outbound_caller_id = parsed[0]
+                            outbound_caller_id_source = "BULKVS_PHONE_NUMBERS"
 
     elif provider == "signalwire":
         val = os.environ.get("DANA_OUTBOUND_CALLER_ID")
@@ -151,6 +188,7 @@ def get_runtime_env() -> dict:
 
     # 7. Telnyx API Key
     telnyx_api_key = os.environ.get("TELNYX_API_KEY")
+    bulkvs_api_key = os.environ.get("BULKVS_API_KEY")
 
     # Local-first Routing Modes & Fallbacks
     stt_routing_mode = os.environ.get("DANA_STT_ROUTING_MODE", "local")
@@ -178,6 +216,7 @@ def get_runtime_env() -> dict:
         "live_call_enabled": live_call_enabled,
         "worker_enabled": worker_enabled,
         "telnyx_api_key": telnyx_api_key,
+        "bulkvs_api_key": bulkvs_api_key,
         "stt_routing_mode": stt_routing_mode,
         "llm_routing_mode": llm_routing_mode,
         "tts_routing_mode": tts_routing_mode,

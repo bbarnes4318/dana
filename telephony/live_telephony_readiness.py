@@ -74,12 +74,16 @@ class LiveTelephonyReadinessChecker:
             "ok": True,
             "outbound_trunk_id_present": False,
             "caller_id_present": False,
-            "failures": []
+            "failures": [],
+            "warnings": [],
+            "caller_id": None,
+            "caller_id_source": None
         }
         
         env = get_runtime_env()
         trunk_id = env["livekit_sip_outbound_trunk_id"]
         caller_id = env["outbound_caller_id"]
+        caller_id_source = env["outbound_caller_id_source"]
         provider = env["active_provider"]
 
         if provider_config_id:
@@ -91,10 +95,36 @@ class LiveTelephonyReadinessChecker:
                 trunk_id = config.get("livekit_sip_outbound_trunk_id") or trunk_id
                 caller_id = config.get("default_caller_id") or caller_id
 
+        # If caller ID is missing from environment/config, query DIDPoolManager
+        if not caller_id:
+            try:
+                from telephony.did_pool import DIDPoolManager
+                from storage.schemas import CallerIdSelectionConfig
+                pool = DIDPoolManager(self.repository)
+                allow_cross = os.environ.get("DANA_ALLOW_CROSS_PROVIDER_CALLER_ID", "").strip().lower() == "true"
+                selection_config = CallerIdSelectionConfig(
+                    provider=provider,
+                    strategy="health_weighted",
+                    allow_cross_provider=allow_cross
+                )
+                res_pool = await pool.select_caller_id(selection_config)
+                if res_pool.success:
+                    caller_id = res_pool.phone_number
+                    caller_id_source = f"pool:{res_pool.source}"
+                    if res_pool.warnings:
+                        res["warnings"].extend(res_pool.warnings)
+            except Exception as e:
+                res["failures"].append(f"Failed to query DIDPoolManager: {str(e)}")
+
+        # Warning for cross-provider caller ID if explicitly allowed
+        allow_cross = os.environ.get("DANA_ALLOW_CROSS_PROVIDER_CALLER_ID", "").strip().lower() == "true"
+        if allow_cross:
+            res["warnings"].append("Cross-provider caller ID may reduce attestation and increase call labeling risk.")
+
         if trunk_id:
             res["outbound_trunk_id_present"] = True
         else:
-            if env["telnyx_api_key"]:
+            if env.get("telnyx_api_key"):
                 res["failures"].append(
                     "Missing LiveKit outbound SIP trunk ID. TELNYX_API_KEY is not the same thing. "
                     "Create/locate the LiveKit outbound trunk and set LIVEKIT_SIP_OUTBOUND_TRUNK_ID."
@@ -104,11 +134,18 @@ class LiveTelephonyReadinessChecker:
 
         if caller_id:
             res["caller_id_present"] = True
+            res["caller_id"] = caller_id
+            res["caller_id_source"] = caller_id_source
         else:
             if provider == "telnyx":
                 res["failures"].append(
                     "Active provider is telnyx but no Telnyx caller ID was configured. "
                     "Set DANA_OUTBOUND_CALLER_ID, TELNYX_OUTBOUND_CALLER_ID, TELNYX_DIDS, or TELNYX_PHONE_NUMBERS."
+                )
+            elif provider == "bulkvs":
+                res["failures"].append(
+                    "Active provider is bulkvs but no BulkVS caller ID was configured. "
+                    "Set DANA_OUTBOUND_CALLER_ID, BULKVS_OUTBOUND_CALLER_ID, BULKVS_DIDS, or BULKVS_PHONE_NUMBERS."
                 )
             elif provider == "signalwire":
                 res["failures"].append(
@@ -188,6 +225,8 @@ class LiveTelephonyReadinessChecker:
 
         # 4. Check Provider config
         prov_status = await self.check_provider_config(provider_config_id)
+        if prov_status.get("warnings"):
+            warnings.extend(prov_status["warnings"])
         if not prov_status["ok"]:
             failures.extend(prov_status["failures"])
             if not prov_status["outbound_trunk_id_present"]:
@@ -241,5 +280,5 @@ class LiveTelephonyReadinessChecker:
             local_stt_ready=local_stt_ready,
             local_tts_ready=local_tts_ready,
             active_provider=env["active_provider"],
-            caller_id_source=env["outbound_caller_id_source"]
+            caller_id_source=prov_status.get("caller_id_source") or env["outbound_caller_id_source"]
         )

@@ -555,6 +555,62 @@ class TrainingWebConsoleServer(ThreadingHTTPServer):
                             campaign_id, live_mode=live_mode, dry_run=dry_run, max_calls=max_calls, operator=operator, force=force
                         )
                         return (200 if res.success else 400, res.model_dump(mode="json"))
+            elif route == "/api/telephony/dids" and method == "GET":
+                provider = query_params.get("provider", [None])[0]
+                res = await self.console.list_dids(provider=provider)
+                return (200 if res.success else 400, res.model_dump(mode="json"))
+
+            elif route == "/api/telephony/dids" and method == "POST":
+                if not body:
+                    return (400, {"success": False, "error": "JSON body is required."})
+                res = await self.console.add_did(
+                    provider=body.get("provider"),
+                    phone_number=body.get("phone_number"),
+                    source=body.get("source", "manual"),
+                    verified_for_provider=body.get("verified_for_provider", True),
+                    daily_cap=body.get("daily_cap", 100),
+                    hourly_cap=body.get("hourly_cap", 20),
+                    spam_label_status=body.get("spam_label_status", "unknown")
+                )
+                return (200 if res.success else 400, res.model_dump(mode="json"))
+
+            elif route == "/api/telephony/dids/pause" and method == "POST":
+                if not body or not body.get("phone_number"):
+                    return (400, {"success": False, "error": "JSON body with phone_number is required."})
+                res = await self.console.pause_did(body["phone_number"])
+                return (200 if res.success else 400, res.model_dump(mode="json"))
+
+            elif route == "/api/telephony/dids/resume" and method == "POST":
+                if not body or not body.get("phone_number"):
+                    return (400, {"success": False, "error": "JSON body with phone_number is required."})
+                res = await self.console.resume_did(body["phone_number"])
+                return (200 if res.success else 400, res.model_dump(mode="json"))
+
+            elif route == "/api/telephony/dids/retire" and method == "POST":
+                if not body or not body.get("phone_number"):
+                    return (400, {"success": False, "error": "JSON body with phone_number is required."})
+                res = await self.console.retire_did(body["phone_number"])
+                return (200 if res.success else 400, res.model_dump(mode="json"))
+
+            elif route == "/api/telephony/dids/spam-status" and method == "POST":
+                if not body or not body.get("phone_number") or not body.get("status"):
+                    return (400, {"success": False, "error": "JSON body with phone_number and status is required."})
+                res = await self.console.mark_did_spam_status(body["phone_number"], body["status"])
+                return (200 if res.success else 400, res.model_dump(mode="json"))
+
+            elif route == "/api/telephony/dids/preview" and method == "GET":
+                provider = query_params.get("provider", [None])[0]
+                strategy = query_params.get("strategy", ["health_weighted"])[0]
+                allow_cross = query_params.get("allow_cross_provider", ["false"])[0].lower() == "true"
+                if not provider:
+                    return (400, {"success": False, "error": "provider query parameter is required."})
+                res = await self.console.preview_did_selection(
+                    provider=provider,
+                    strategy=strategy,
+                    allow_cross_provider=allow_cross
+                )
+                return (200 if res.success else 400, res.model_dump(mode="json"))
+
             elif route == "/api/telephony/live/readiness" and method == "POST":
                 provider_config_id = body.get("provider_config_id") if body else None
                 campaign_id = body.get("campaign_id") if body else None

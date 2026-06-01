@@ -389,3 +389,21 @@ async def test_missing_livekit_trunk_reports_clear_message(clean_env, tmp_path):
             "Create/locate the LiveKit outbound trunk and set LIVEKIT_SIP_OUTBOUND_TRUNK_ID."
         )
         assert expected_msg in res["failures"]
+
+def test_bulkvs_not_used_with_telnyx_provider(clean_env):
+    with patch("config.runtime_env.load_environment"):
+        os.environ["DANA_TELEPHONY_PROVIDER"] = "telnyx"
+        os.environ["BULKVS_DIDS"] = "+18888888888"
+        os.environ["TELNYX_DIDS"] = "+18651111111"
+        env = get_runtime_env()
+        assert env["outbound_caller_id"] == "+18651111111"
+        assert env["outbound_caller_id_source"] == "TELNYX_DIDS"
+
+def test_signalwire_not_used_with_telnyx_provider(clean_env):
+    with patch("config.runtime_env.load_environment"):
+        os.environ["DANA_TELEPHONY_PROVIDER"] = "telnyx"
+        os.environ["SIGNALWIRE_DIDS"] = "+19999999999"
+        os.environ["TELNYX_DIDS"] = "+18651111111"
+        env = get_runtime_env()
+        assert env["outbound_caller_id"] == "+18651111111"
+        assert env["outbound_caller_id_source"] == "TELNYX_DIDS"

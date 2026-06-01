@@ -1968,6 +1968,200 @@ class TrainingOperationsConsole:
             )
 
 
+    async def list_dids(self, provider: str | None = None) -> ConsoleActionResult:
+        """List DIDs from the DID pool (database + env)."""
+        try:
+            from telephony.did_pool import DIDPoolManager
+            pool = DIDPoolManager(self.repository)
+            numbers = await pool.list_numbers(provider=provider)
+            dids_list = [num.model_dump(mode="json") for num in numbers]
+            return ConsoleActionResult(
+                action="list_dids",
+                success=True,
+                message=f"Retrieved {len(dids_list)} numbers from pool.",
+                data={"dids": dids_list}
+            )
+        except Exception as e:
+            return ConsoleActionResult(
+                action="list_dids",
+                success=False,
+                message="Failed to list DIDs from pool.",
+                error=str(e)
+            )
+
+    async def add_did(
+        self,
+        provider: str,
+        phone_number: str,
+        source: str = "manual",
+        verified_for_provider: bool = True,
+        **kwargs: Any
+    ) -> ConsoleActionResult:
+        """Add a DID to the pool."""
+        try:
+            from telephony.did_pool import DIDPoolManager
+            pool = DIDPoolManager(self.repository)
+            did = await pool.add_number(
+                provider=provider,
+                phone_number=phone_number,
+                source=source,
+                verified_for_provider=verified_for_provider,
+                **kwargs
+            )
+            return ConsoleActionResult(
+                action="add_did",
+                success=True,
+                message=f"Added number {phone_number} to DID pool.",
+                data={"did": did.model_dump(mode="json")}
+            )
+        except Exception as e:
+            return ConsoleActionResult(
+                action="add_did",
+                success=False,
+                message="Failed to add DID.",
+                error=str(e)
+            )
+
+    async def pause_did(self, phone_number: str) -> ConsoleActionResult:
+        """Pause a DID in the pool."""
+        try:
+            from telephony.did_pool import DIDPoolManager
+            pool = DIDPoolManager(self.repository)
+            ok = await pool.pause_number(phone_number)
+            if ok:
+                return ConsoleActionResult(
+                    action="pause_did",
+                    success=True,
+                    message=f"Paused number {phone_number} successfully."
+                )
+            else:
+                return ConsoleActionResult(
+                    action="pause_did",
+                    success=False,
+                    message=f"Could not pause number {phone_number}.",
+                    error="NOT_FOUND"
+                )
+        except Exception as e:
+            return ConsoleActionResult(
+                action="pause_did",
+                success=False,
+                message="Failed to pause DID.",
+                error=str(e)
+            )
+
+    async def resume_did(self, phone_number: str) -> ConsoleActionResult:
+        """Resume a DID in the pool."""
+        try:
+            from telephony.did_pool import DIDPoolManager
+            pool = DIDPoolManager(self.repository)
+            ok = await pool.resume_number(phone_number)
+            if ok:
+                return ConsoleActionResult(
+                    action="resume_did",
+                    success=True,
+                    message=f"Resumed number {phone_number} successfully."
+                )
+            else:
+                return ConsoleActionResult(
+                    action="resume_did",
+                    success=False,
+                    message=f"Could not resume number {phone_number}.",
+                    error="NOT_FOUND"
+                )
+        except Exception as e:
+            return ConsoleActionResult(
+                action="resume_did",
+                success=False,
+                message="Failed to resume DID.",
+                error=str(e)
+            )
+
+    async def retire_did(self, phone_number: str) -> ConsoleActionResult:
+        """Retire a DID in the pool."""
+        try:
+            from telephony.did_pool import DIDPoolManager
+            pool = DIDPoolManager(self.repository)
+            ok = await pool.retire_number(phone_number)
+            if ok:
+                return ConsoleActionResult(
+                    action="retire_did",
+                    success=True,
+                    message=f"Retired number {phone_number} successfully."
+                )
+            else:
+                return ConsoleActionResult(
+                    action="retire_did",
+                    success=False,
+                    message=f"Could not retire number {phone_number}.",
+                    error="NOT_FOUND"
+                )
+        except Exception as e:
+            return ConsoleActionResult(
+                action="retire_did",
+                success=False,
+                message="Failed to retire DID.",
+                error=str(e)
+            )
+
+    async def mark_did_spam_status(self, phone_number: str, status: str) -> ConsoleActionResult:
+        """Mark spam label status for a DID."""
+        try:
+            from telephony.did_pool import DIDPoolManager
+            pool = DIDPoolManager(self.repository)
+            ok = await pool.mark_spam_status(phone_number, status)
+            if ok:
+                return ConsoleActionResult(
+                    action="mark_did_spam_status",
+                    success=True,
+                    message=f"Marked number {phone_number} as spam status: {status}."
+                )
+            else:
+                return ConsoleActionResult(
+                    action="mark_did_spam_status",
+                    success=False,
+                    message=f"Could not update spam status for number {phone_number}.",
+                    error="NOT_FOUND"
+                )
+        except Exception as e:
+            return ConsoleActionResult(
+                action="mark_did_spam_status",
+                success=False,
+                message="Failed to update DID spam status.",
+                error=str(e)
+            )
+
+    async def preview_did_selection(
+        self,
+        provider: str,
+        strategy: str = "health_weighted",
+        allow_cross_provider: bool = False
+    ) -> ConsoleActionResult:
+        """Preview DID selection result for a provider/strategy configuration."""
+        try:
+            from telephony.did_pool import DIDPoolManager
+            from storage.schemas import CallerIdSelectionConfig
+            pool = DIDPoolManager(self.repository)
+            config = CallerIdSelectionConfig(
+                provider=provider,
+                strategy=strategy,
+                allow_cross_provider=allow_cross_provider
+            )
+            res = await pool.select_caller_id(config)
+            return ConsoleActionResult(
+                action="preview_did_selection",
+                success=res.success,
+                message=res.reason,
+                data=res.model_dump(mode="json")
+            )
+        except Exception as e:
+            return ConsoleActionResult(
+                action="preview_did_selection",
+                success=False,
+                message="Failed to preview DID selection.",
+                error=str(e)
+            )
+
+
 def json_serializable(obj: Any) -> Any:
     """Recursively convert custom objects/dataclasses to JSON-serializable formats."""
     if type(obj).__name__ in ("Mock", "MagicMock", "AsyncMock"):

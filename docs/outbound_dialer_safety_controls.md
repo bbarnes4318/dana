@@ -65,3 +65,25 @@ To guarantee that developers or operators do not accidentally trigger real calls
    - An explicit confirmation phrase input of `"LIVE CALL"`. If this exact string is not provided, the trigger will fail.
 
 These features ensure that all outbound dialing campaigns are triggered with deliberate intent.
+
+---
+
+## Caller ID Reputation & DID Pool Rotation Controls
+
+In addition to lead and campaign-level safety boundaries, Dana monitors and paces caller ID usage at the individual number level:
+
+1. **Per-Number Daily & Hourly Caps**
+   - Each number in the DID pool is restricted by daily and hourly limits (default: 100/day, 20/hour) to prevent aggressive signaling that triggers carrier spam labeling.
+   - If a number hits its daily or hourly cap, it is automatically skipped in the rotation until the boundary resets.
+
+2. **Reputation Status Enforcement**
+   - Paused, blocked, or retired numbers are permanently filtered from candidate selection.
+   - Numbers with active cooldown markers (`cooldown_until`) are skipped until the cooldown time has passed.
+
+3. **Spam Reputation & Health-Weighted Selection**
+   - Candidate selection prioritizes numbers with the highest computed reputation score.
+   - Numbers that are flagged by carriers or have high complaint/DNC outcomes receive a penalty, lowering their selection priority and automatically cooling them down.
+
+4. **Cross-Provider Isolation**
+   - Cross-provider rotation is blocked by default (e.g. BulkVS numbers cannot be used under Telnyx active provider trunks).
+   - This ensures high attestation levels (A-level STIR/SHAKEN) and minimizes the risk of call labeling.

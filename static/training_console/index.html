@@ -1254,6 +1254,114 @@
           </section>
         </div>
 
+        <!-- Caller ID Pool & Reputation Manager -->
+        <section class="card" style="margin-bottom: 1.5rem;" id="caller-id-pool-card">
+          <div class="card-title">
+            <span>📞 Caller ID Pool & Reputation Manager</span>
+            <div style="display: flex; gap: 0.5rem;">
+              <button id="btn-refresh-dids" class="btn btn-secondary" style="width: auto; padding: 0.25rem 0.5rem; font-size: 0.75rem;">🔄 Refresh DIDs</button>
+            </div>
+          </div>
+          
+          <div style="font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 1rem; line-height: 1.5;">
+            <p>Configure and monitor a pool of authorized caller ID phone numbers for dynamic rotation. 
+            Select strategies and prevent cross-provider caller ID leaks.</p>
+            <div style="background: rgba(255,193,7,0.1); border-left: 3px solid var(--warning); padding: 0.5rem; border-radius: 4px; margin-top: 0.5rem;">
+              <strong>BulkVS Warning:</strong> BulkVS numbers should use a BulkVS-linked LiveKit trunk, not a Telnyx trunk, unless cross-provider caller ID is explicitly verified.
+            </div>
+            <div style="background: rgba(0,123,255,0.1); border-left: 3px solid var(--primary); padding: 0.5rem; border-radius: 4px; margin-top: 0.5rem;">
+              <strong>TELNYX_DIDS Guidance:</strong> Define owned/authorized caller IDs in `TELNYX_DIDS` or `TELNYX_PHONE_NUMBERS` env variables to auto-load them.
+            </div>
+          </div>
+
+          <!-- Preview & Config Section -->
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1rem; padding: 0.75rem; background: var(--bg-surface); border-radius: 4px; border: 1px solid var(--border);">
+            <div>
+              <h4 style="margin-bottom: 0.5rem; font-size: 0.85rem; color: var(--text-primary);">Caller ID Selection Preview</h4>
+              <div class="form-group">
+                <label for="preview-provider">Active Provider</label>
+                <select id="preview-provider" class="form-control" style="font-size: 0.8rem; padding: 0.25rem;">
+                  <option value="telnyx">Telnyx</option>
+                  <option value="bulkvs">BulkVS</option>
+                  <option value="signalwire">SignalWire</option>
+                  <option value="twilio">Twilio</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label for="preview-strategy">Strategy</label>
+                <select id="preview-strategy" class="form-control" style="font-size: 0.8rem; padding: 0.25rem;">
+                  <option value="health_weighted">Health Weighted (Default)</option>
+                  <option value="round_robin">Round Robin</option>
+                  <option value="least_used">Least Used</option>
+                </select>
+              </div>
+              <div class="checkbox-group" style="margin-bottom: 0.5rem;">
+                <input type="checkbox" id="preview-allow-cross">
+                <label for="preview-allow-cross" style="font-size: 0.75rem;">Allow Cross-Provider (not recommended)</label>
+              </div>
+              <button id="btn-preview-selection" class="btn btn-secondary" style="font-size: 0.75rem; padding: 0.25rem 0.5rem; width: 100%;">🔍 Preview Selection</button>
+            </div>
+            <div>
+              <h4 style="margin-bottom: 0.5rem; font-size: 0.85rem; color: var(--text-primary);">Selection Result</h4>
+              <div id="selection-preview-result" style="font-size: 0.75rem; color: var(--text-secondary); line-height: 1.4; padding: 0.5rem; background: rgba(0,0,0,0.15); border-radius: 4px; height: calc(100% - 1.5rem); overflow-y: auto;">
+                <p style="color: var(--text-muted);">Click "Preview Selection" to run simulation.</p>
+              </div>
+            </div>
+          </div>
+
+          <!-- Add Number Form -->
+          <div style="background: var(--bg-surface); padding: 0.75rem; border-radius: 4px; border: 1px solid var(--border); margin-bottom: 1rem;">
+            <h4 style="margin-bottom: 0.5rem; font-size: 0.85rem; color: var(--text-primary);">Add Number manually to Pool</h4>
+            <form id="add-did-form" style="display: grid; grid-template-columns: 1fr 1fr 1fr 1fr auto; gap: 0.75rem; align-items: end;">
+              <div class="form-group" style="margin: 0;">
+                <label for="add-did-number">Phone Number (E.164)</label>
+                <input type="text" id="add-did-number" class="form-control" style="font-size: 0.8rem; padding: 0.25rem;" placeholder="+1865..." required>
+              </div>
+              <div class="form-group" style="margin: 0;">
+                <label for="add-did-provider">Provider</label>
+                <select id="add-did-provider" class="form-control" style="font-size: 0.8rem; padding: 0.25rem;">
+                  <option value="telnyx">Telnyx</option>
+                  <option value="bulkvs">BulkVS</option>
+                  <option value="signalwire">SignalWire</option>
+                  <option value="twilio">Twilio</option>
+                </select>
+              </div>
+              <div class="form-group" style="margin: 0;">
+                <label for="add-did-daily">Daily Cap</label>
+                <input type="number" id="add-did-daily" class="form-control" style="font-size: 0.8rem; padding: 0.25rem;" value="100">
+              </div>
+              <div class="form-group" style="margin: 0;">
+                <label for="add-did-hourly">Hourly Cap</label>
+                <input type="number" id="add-did-hourly" class="form-control" style="font-size: 0.8rem; padding: 0.25rem;" value="20">
+              </div>
+              <button type="submit" class="btn btn-primary" style="font-size: 0.8rem; padding: 0.35rem 0.75rem;">➕ Add</button>
+            </form>
+          </div>
+
+          <!-- DIDs Table -->
+          <div class="table-wrapper" style="max-height: 250px;">
+            <table style="font-size: 0.75rem;">
+              <thead>
+                <tr>
+                  <th>Phone Number</th>
+                  <th>Provider</th>
+                  <th>Source</th>
+                  <th>Status</th>
+                  <th>Spam Reputation</th>
+                  <th>Daily/Hourly Cap</th>
+                  <th>Calls Today/Hr</th>
+                  <th>Last Used</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="dids-table-body">
+                <tr>
+                  <td colspan="9" style="text-align: center; color: var(--text-muted);">No numbers loaded. Click "Refresh DIDs".</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
 
         <!-- 5. Live Calls Monitor & Attempts Table -->
         <section class="card" style="margin-bottom: 1.5rem;">

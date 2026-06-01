@@ -1064,6 +1064,97 @@ class Repository:
         else:
             return await self._store.query("caller_ids", {"campaign_id": campaign_id})
 
+    async def save_did(self, **kwargs: Any) -> str:
+        """Validate and persist a did record in the pool."""
+        from storage.schemas import CallerIdNumber
+        validated = CallerIdNumber(**kwargs)
+        data = validated.model_dump(mode="json")
+        for field in ("last_used_at", "cooldown_until", "created_at", "updated_at"):
+            val = getattr(validated, field)
+            if isinstance(val, datetime):
+                data[field] = val.isoformat()
+        return await self._store.save("dids", data)
+
+    async def get_did(self, id: str) -> Optional[dict]:
+        """Retrieve a DID by ID."""
+        if isinstance(self._store, PostgresStore):
+            await self._store._ensure_pool()
+            query = "SELECT * FROM dids WHERE id = $1 LIMIT 1;"
+            async with self._store._pool.acquire() as conn:
+                row = await conn.fetchrow(query, id)
+                if row:
+                    return self._store._row_to_dict("dids", row)
+                return None
+        else:
+            results = await self._store.query("dids", {"id": id})
+            return results[0] if results else None
+
+    async def delete_did(self, id: str) -> bool:
+        """Delete a DID by ID."""
+        if isinstance(self._store, PostgresStore):
+            await self._store._ensure_pool()
+            query = "DELETE FROM dids WHERE id = $1;"
+            async with self._store._pool.acquire() as conn:
+                res = await conn.execute(query, id)
+                return "DELETE 1" in res
+        else:
+            try:
+                import json
+                filepath = self._store._file_path("dids")
+                if not filepath.exists():
+                    return False
+                lines = filepath.read_text(encoding="utf-8").splitlines()
+                new_lines = []
+                deleted = False
+                for line in lines:
+                    if not line.strip():
+                        continue
+                    item = json.loads(line)
+                    if item.get("id") == id:
+                        deleted = True
+                    else:
+                        new_lines.append(line)
+                if deleted:
+                    filepath.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
+                return deleted
+            except Exception:
+                return False
+
+    async def list_dids(self, provider: str | None = None) -> list[dict]:
+        """List DIDs, optionally filtered by provider."""
+        if isinstance(self._store, PostgresStore):
+            await self._store._ensure_pool()
+            if provider:
+                query = "SELECT * FROM dids WHERE provider = $1 ORDER BY phone_number;"
+                async with self._store._pool.acquire() as conn:
+                    rows = await conn.fetch(query, provider)
+                    return [self._store._row_to_dict("dids", r) for r in rows]
+            else:
+                query = "SELECT * FROM dids ORDER BY phone_number;"
+                async with self._store._pool.acquire() as conn:
+                    rows = await conn.fetch(query)
+                    return [self._store._row_to_dict("dids", r) for r in rows]
+        else:
+            filters = {}
+            if provider:
+                filters["provider"] = provider
+            return await self._store.query("dids", filters)
+
+    async def get_did_by_number(self, phone_number: str) -> Optional[dict]:
+        """Retrieve a DID by phone number."""
+        if isinstance(self._store, PostgresStore):
+            await self._store._ensure_pool()
+            query = "SELECT * FROM dids WHERE phone_number = $1 LIMIT 1;"
+            async with self._store._pool.acquire() as conn:
+                row = await conn.fetchrow(query, phone_number)
+                if row:
+                    return self._store._row_to_dict("dids", row)
+                return None
+        else:
+            results = await self._store.query("dids", {"phone_number": phone_number})
+            return results[0] if results else None
+
+
     async def mark_caller_id_used(self, caller_id: str, campaign_id: str, now: Optional[datetime] = None) -> Optional[dict]:
         """Mark a caller ID as used, updating metrics."""
         from datetime import datetime

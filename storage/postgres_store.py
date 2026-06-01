@@ -85,6 +85,12 @@ TABLE_COLUMNS: dict[str, set[str]] = {
     "campaign_control_events": {
         "id", "campaign_id", "event_type", "operator", "reason", "previous_status",
         "new_status", "metadata", "created_at"
+    },
+    "dids": {
+        "id", "provider", "phone_number", "status", "source", "verified_for_provider",
+        "stir_shaken_attestation", "daily_cap", "hourly_cap", "calls_today", "calls_this_hour",
+        "last_used_at", "cooldown_until", "spam_label_status", "complaint_count", "dnc_count",
+        "answer_rate", "transfer_rate", "metadata", "created_at", "updated_at"
     }
 }
 

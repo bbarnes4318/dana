@@ -51,6 +51,7 @@ class LiveCallTestResult(BaseModel):
     message: str
     warnings: List[str] = Field(default_factory=list)
     error: Optional[str] = None
+    caller_id_source: Optional[str] = None
     data: Dict[str, Any] = Field(default_factory=dict)
 
 
@@ -144,13 +145,48 @@ class LiveCallTester:
         # Determine outbound trunk ID and caller ID from provider config or env fallbacks
         env = get_runtime_env()
         trunk_id = env["livekit_sip_outbound_trunk_id"]
-        caller_id = config.caller_id or env["outbound_caller_id"]
+        
+        caller_id = config.caller_id
+        caller_id_source = "explicit_override" if config.caller_id else None
+        
+        if not caller_id:
+            caller_id = env["outbound_caller_id"]
+            caller_id_source = env["outbound_caller_id_source"]
         
         if config.provider_config_id:
             provider_config = await self.repository.get_telephony_provider_config(config.provider_config_id)
             if provider_config:
                 trunk_id = provider_config.get("livekit_sip_outbound_trunk_id") or trunk_id
-                caller_id = provider_config.get("default_caller_id") or caller_id
+                if not config.caller_id:
+                    caller_id = provider_config.get("default_caller_id") or caller_id
+                    if provider_config.get("default_caller_id"):
+                        caller_id_source = "provider_config"
+
+        # If caller ID is still missing, query DIDPoolManager
+        if not caller_id:
+            try:
+                from telephony.did_pool import DIDPoolManager
+                from storage.schemas import CallerIdSelectionConfig
+                pool = DIDPoolManager(self.repository)
+                provider = env["active_provider"]
+                allow_cross = os.environ.get("DANA_ALLOW_CROSS_PROVIDER_CALLER_ID", "").strip().lower() == "true"
+                selection_config = CallerIdSelectionConfig(
+                    provider=provider,
+                    strategy="health_weighted",
+                    allow_cross_provider=allow_cross
+                )
+                res_pool = await pool.select_caller_id(selection_config)
+                if res_pool.success:
+                    caller_id = res_pool.phone_number
+                    caller_id_source = f"pool:{res_pool.source}"
+            except Exception:
+                pass
+
+        # Update metadata in attempt
+        attempt["metadata"] = {
+            "selected_caller_id": caller_id,
+            "caller_id_source": caller_id_source
+        }
 
         # 7. Execute dialing via LiveKit SDK Outbound adapter
         dial_config = LiveKitDialConfig(
@@ -216,7 +252,8 @@ class LiveCallTester:
                 provider_call_id=dial_res.provider_call_id,
                 sip_call_status=dial_res.sip_call_status,
                 answered=dial_res.answered,
-                message="Outbound test call placed successfully."
+                message="Outbound test call placed successfully.",
+                caller_id_source=caller_id_source
             )
         else:
             # Mark attempt failed
@@ -235,5 +272,6 @@ class LiveCallTester:
                 message=f"Live test call failed to place: {dial_res.message}",
                 error=dial_res.error or "CALL_PLACEMENT_FAILED",
                 sip_call_status=dial_res.sip_call_status,
+                caller_id_source=caller_id_source,
                 data=dial_res.data
             )

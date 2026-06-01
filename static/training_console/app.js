@@ -2435,6 +2435,253 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
+  // Caller ID Pool Management
+  const btnRefreshDids = document.getElementById("btn-refresh-dids");
+  const didsTableBody = document.getElementById("dids-table-body");
+  const addDidForm = document.getElementById("add-did-form");
+  const btnPreviewSelection = document.getElementById("btn-preview-selection");
+  const selectionPreviewResult = document.getElementById("selection-preview-result");
+
+  async function refreshDids() {
+    if (!didsTableBody) return;
+    try {
+      const response = await fetch("/api/telephony/dids");
+      const data = await response.json();
+      if (response.ok && data.success) {
+        const dids = data.data.dids || [];
+        if (dids.length === 0) {
+          didsTableBody.innerHTML = `<tr><td colspan="9" style="text-align: center; color: var(--text-secondary);">No numbers loaded in pool.</td></tr>`;
+        } else {
+          didsTableBody.innerHTML = "";
+          dids.forEach(d => {
+            const tr = document.createElement("tr");
+            
+            // Format Last Used
+            let lastUsedStr = "—";
+            if (d.last_used_at) {
+              try {
+                lastUsedStr = new Date(d.last_used_at).toLocaleTimeString();
+              } catch (e) {
+                lastUsedStr = d.last_used_at;
+              }
+            }
+
+            // Status Badge class
+            let statusBadge = "badge-secondary";
+            if (d.status === "active") statusBadge = "badge-success";
+            else if (d.status === "paused") statusBadge = "badge-warning";
+            else if (d.status === "retired" || d.status === "blocked") statusBadge = "badge-danger";
+
+            // Spam status styling
+            let spamColor = "inherit";
+            if (d.spam_label_status === "clean") spamColor = "#28a745";
+            else if (d.spam_label_status === "suspected") spamColor = "#ffc107";
+            else if (d.spam_label_status === "flagged" || d.spam_label_status === "blocked") spamColor = "#dc3545";
+
+            // Generate Action buttons based on status
+            let actionButtons = "";
+            if (d.status === "active") {
+              actionButtons += `<button type="button" class="btn btn-secondary action-did" data-action="pause" data-phone="${d.phone_number}" style="padding: 0.1rem 0.3rem; font-size: 0.65rem; width: auto; margin-right: 0.25rem;">Pause</button>`;
+            } else if (d.status === "paused") {
+              actionButtons += `<button type="button" class="btn btn-success action-did" data-action="resume" data-phone="${d.phone_number}" style="padding: 0.1rem 0.3rem; font-size: 0.65rem; width: auto; margin-right: 0.25rem;">Resume</button>`;
+            }
+            if (d.status !== "retired") {
+              actionButtons += `<button type="button" class="btn btn-danger action-did" data-action="retire" data-phone="${d.phone_number}" style="padding: 0.1rem 0.3rem; font-size: 0.65rem; width: auto; margin-right: 0.25rem;">Retire</button>`;
+            }
+            actionButtons += `<button type="button" class="btn btn-secondary action-did" data-action="spam" data-phone="${d.phone_number}" data-current="${d.spam_label_status}" style="padding: 0.1rem 0.3rem; font-size: 0.65rem; width: auto;">Rep</button>`;
+
+            tr.innerHTML = `
+              <td style="font-weight: bold;">${d.phone_number}</td>
+              <td><span class="badge" style="background: rgba(255,255,255,0.1); font-size: 0.65rem;">${d.provider.toUpperCase()}</span></td>
+              <td><span style="font-size: 0.7rem; color: var(--text-muted);">${d.source}</span></td>
+              <td><span class="badge ${statusBadge}">${d.status}</span></td>
+              <td style="color: ${spamColor}; font-weight: 500;">${d.spam_label_status || 'unknown'}</td>
+              <td>${d.daily_cap} / ${d.hourly_cap}</td>
+              <td>${d.calls_today} / ${d.calls_this_hour}</td>
+              <td style="font-size: 0.7rem;">${lastUsedStr}</td>
+              <td>${actionButtons}</td>
+            `;
+            didsTableBody.appendChild(tr);
+          });
+        }
+      }
+    } catch (error) {
+      log(`Error loading DID pool: ${error.message}`, "error");
+    }
+  }
+
+  if (btnRefreshDids) {
+    btnRefreshDids.addEventListener("click", refreshDids);
+  }
+
+  // Handle Action buttons via Event Delegation
+  if (didsTableBody) {
+    didsTableBody.addEventListener("click", async (e) => {
+      const btn = e.target.closest(".action-did");
+      if (!btn) return;
+
+      const action = btn.getAttribute("data-action");
+      const phone = btn.getAttribute("data-phone");
+
+      if (action === "pause") {
+        if (!confirm(`Are you sure you want to pause caller ID ${phone}?`)) return;
+        try {
+          const res = await fetch("/api/telephony/dids/pause", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ phone_number: phone })
+          });
+          const data = await res.json();
+          if (res.ok && data.success) {
+            log(`Paused caller ID ${phone}`, "success");
+            refreshDids();
+          } else {
+            log(`Failed to pause caller ID: ${data.error || data.message}`, "error");
+          }
+        } catch (err) {
+          log(`Network error: ${err.message}`, "error");
+        }
+      } else if (action === "resume") {
+        try {
+          const res = await fetch("/api/telephony/dids/resume", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ phone_number: phone })
+          });
+          const data = await res.json();
+          if (res.ok && data.success) {
+            log(`Resumed caller ID ${phone}`, "success");
+            refreshDids();
+          } else {
+            log(`Failed to resume caller ID: ${data.error || data.message}`, "error");
+          }
+        } catch (err) {
+          log(`Network error: ${err.message}`, "error");
+        }
+      } else if (action === "retire") {
+        if (!confirm(`Are you sure you want to RETIRE caller ID ${phone}? It will be permanently retired from pool usage.`)) return;
+        try {
+          const res = await fetch("/api/telephony/dids/retire", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ phone_number: phone })
+          });
+          const data = await res.json();
+          if (res.ok && data.success) {
+            log(`Retired caller ID ${phone}`, "success");
+            refreshDids();
+          } else {
+            log(`Failed to retire caller ID: ${data.error || data.message}`, "error");
+          }
+        } catch (err) {
+          log(`Network error: ${err.message}`, "error");
+        }
+      } else if (action === "spam") {
+        const current = btn.getAttribute("data-current");
+        const status = prompt(`Enter new spam reputation label for ${phone} (clean | suspected | flagged | blocked):`, current);
+        if (status === null) return;
+        const normalized = status.trim().toLowerCase();
+        if (!["clean", "suspected", "flagged", "blocked", "unknown"].includes(normalized)) {
+          alert("Invalid status. Please enter clean, suspected, flagged, or blocked.");
+          return;
+        }
+        try {
+          const res = await fetch("/api/telephony/dids/spam-status", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ phone_number: phone, status: normalized })
+          });
+          const data = await res.json();
+          if (res.ok && data.success) {
+            log(`Updated spam status for ${phone} to ${normalized}`, "success");
+            refreshDids();
+          } else {
+            log(`Failed to update spam status: ${data.error || data.message}`, "error");
+          }
+        } catch (err) {
+          log(`Network error: ${err.message}`, "error");
+        }
+      }
+    });
+  }
+
+  // Add manually to pool
+  if (addDidForm) {
+    addDidForm.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const phone = document.getElementById("add-did-number").value.trim();
+      const provider = document.getElementById("add-did-provider").value;
+      const daily = parseInt(document.getElementById("add-did-daily").value, 10);
+      const hourly = parseInt(document.getElementById("add-did-hourly").value, 10);
+
+      try {
+        const res = await fetch("/api/telephony/dids", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            phone_number: phone,
+            provider: provider,
+            daily_cap: daily,
+            hourly_cap: hourly,
+            source: "manual",
+            verified_for_provider: true
+          })
+        });
+        const data = await res.json();
+        if (res.ok && data.success) {
+          log(`Added ${phone} to DID pool successfully`, "success");
+          document.getElementById("add-did-number").value = "";
+          refreshDids();
+        } else {
+          alert(`Failed to add number: ${data.error || data.message}`);
+        }
+      } catch (err) {
+        log(`Network error adding DID: ${err.message}`, "error");
+      }
+    });
+  }
+
+  // Preview selection
+  if (btnPreviewSelection) {
+    btnPreviewSelection.addEventListener("click", async () => {
+      const provider = document.getElementById("preview-provider").value;
+      const strategy = document.getElementById("preview-strategy").value;
+      const allowCross = document.getElementById("preview-allow-cross").checked;
+
+      selectionPreviewResult.innerHTML = `<span style="color: var(--text-muted);">Simulating selection...</span>`;
+
+      try {
+        const res = await fetch(`/api/telephony/dids/preview?provider=${provider}&strategy=${strategy}&allow_cross_provider=${allowCross}`);
+        const data = await res.json();
+        if (res.ok && data.success) {
+          const detail = data.data;
+          let html = `
+            <div style="margin-bottom: 0.5rem;"><strong style="color: var(--success); font-size: 0.9rem;">🟢 Selected: ${detail.phone_number || 'None'}</strong></div>
+            <div><strong>Source:</strong> ${detail.source}</div>
+            <div><strong>Candidate Count:</strong> ${detail.candidate_count}</div>
+            <div><strong>Eligible Count:</strong> ${detail.eligible_count}</div>
+            <div><strong>Reason:</strong> ${detail.reason}</div>
+          `;
+          if (detail.warnings && detail.warnings.length > 0) {
+            html += `<div style="margin-top: 0.5rem; color: var(--warning);">⚠️ <strong>Warnings:</strong>`;
+            detail.warnings.forEach(w => {
+              html += `<div style="padding-left: 0.5rem;">• ${w}</div>`;
+            });
+            html += `</div>`;
+          }
+          selectionPreviewResult.innerHTML = html;
+        } else {
+          selectionPreviewResult.innerHTML = `<div style="color: var(--danger);"><strong>🔴 Simulation Failed</strong><br>${data.error || data.message || 'No eligible numbers found.'}</div>`;
+        }
+      } catch (err) {
+        selectionPreviewResult.innerHTML = `<div style="color: var(--danger);"><strong>Error:</strong><br>${err.message}</div>`;
+      }
+    });
+  }
+
+  // Auto-refresh pool on load
+  refreshDids();
+
   // Initial load
   listProviders();
   listCampaignsTel();

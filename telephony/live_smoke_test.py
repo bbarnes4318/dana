@@ -67,6 +67,7 @@ class LiveSmokeTestResult(BaseModel):
     expected_agent_join: bool = False
     expected_agent_speech: bool = False
     partial_success: bool = False
+    caller_id_source: Optional[str] = None
 
 
 class LiveTelephonySmokeTester:
@@ -128,6 +129,7 @@ class LiveTelephonySmokeTester:
             f"- **Status**: {'🔴 FAILURE' if not result.success else '🟢 SUCCESS'}",
             f"- **Dry Run**: {result.dry_run}",
             f"- **Attempted Live Call**: {result.attempted_live_call}",
+            f"- **Caller ID Source**: {result.caller_id_source or 'N/A'}",
             "",
             "## 📋 Readiness Checklist",
             f"- Live Mode Enabled: {'🟢' if result.readiness.get('live_mode_enabled') else '🔴'}",
@@ -315,7 +317,8 @@ class LiveTelephonySmokeTester:
                 worker_can_start=worker_can_start,
                 expected_agent_join=expected_agent_join,
                 expected_agent_speech=expected_agent_speech,
-                partial_success=False
+                partial_success=False,
+                caller_id_source=readiness_res.caller_id_source
             )
             self.write_reports(config, result)
             return result
@@ -337,7 +340,8 @@ class LiveTelephonySmokeTester:
                 worker_can_start=worker_can_start,
                 expected_agent_join=expected_agent_join,
                 expected_agent_speech=expected_agent_speech,
-                partial_success=False
+                partial_success=False,
+                caller_id_source=readiness_res.caller_id_source
             )
             self.write_reports(config, result)
             return result
@@ -395,7 +399,8 @@ class LiveTelephonySmokeTester:
             worker_can_start=worker_can_start,
             expected_agent_join=expected_agent_join,
             expected_agent_speech=expected_agent_speech,
-            partial_success=partial_success
+            partial_success=partial_success,
+            caller_id_source=test_res.caller_id_source or readiness_res.caller_id_source
         )
         self.write_reports(config, result)
         return result
