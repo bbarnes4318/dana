@@ -1967,6 +1967,43 @@ class TrainingOperationsConsole:
                 error=str(e)
             )
 
+    async def run_one_lead_live_campaign_test(
+        self,
+        to: str,
+        operator: str,
+        confirm: str,
+        allow_now: bool = False,
+        dry_run: bool = True,
+    ) -> ConsoleActionResult:
+        try:
+            from telephony.one_lead_live_campaign_test import ControlledCampaignTester, ControlledCampaignTestConfig
+            tester = ControlledCampaignTester(repository=self.repository)
+            config = ControlledCampaignTestConfig(
+                to=to,
+                operator=operator,
+                confirm=confirm,
+                allow_now=allow_now,
+                dry_run=dry_run,
+            )
+            res = await tester.run(config)
+            return ConsoleActionResult(
+                action="run_one_lead_live_campaign_test",
+                success=res.success,
+                message="One-lead live campaign test executed.",
+                data=res.model_dump(mode="json"),
+                warnings=res.warnings,
+                report_json_path=res.report_json_path,
+                report_markdown_path=res.report_markdown_path
+            )
+        except Exception as e:
+            return ConsoleActionResult(
+                action="run_one_lead_live_campaign_test",
+                success=False,
+                message="Failed to execute controlled campaign test.",
+                error=str(e)
+            )
+
+
 
     async def list_dids(self, provider: str | None = None) -> ConsoleActionResult:
         """List DIDs from the DID pool (database + env)."""

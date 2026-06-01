@@ -2435,6 +2435,119 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
+  // One-Lead Live Campaign Test Form submission
+  const campaignTestForm = document.getElementById("campaign-test-form");
+  if (campaignTestForm) {
+    campaignTestForm.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const to = document.getElementById("campaign-test-phone").value.trim();
+      const operator = document.getElementById("campaign-test-operator").value.trim();
+      const confirmInput = document.getElementById("campaign-test-confirm").value.trim();
+      const dryRun = document.getElementById("campaign-test-dry-run").checked;
+      const allowNow = document.getElementById("campaign-test-allow-now").checked;
+      
+      const btn = document.getElementById("btn-run-campaign-test");
+      const text = btn.innerText;
+
+      if (!to) {
+        alert("Destination Phone is required!");
+        return;
+      }
+      if (!operator) {
+        alert("Operator is required!");
+        return;
+      }
+
+      if (!dryRun && confirmInput !== "LIVE CALL") {
+        alert("You must type LIVE CALL to confirm placing a live campaign call!");
+        return;
+      }
+
+      setButtonState(btn, true, "🎯 Running Campaign Test...");
+      log(`Starting controlled campaign test (dry-run: ${dryRun}, allow-now: ${allowNow})...`);
+
+      const payload = {
+        to: to,
+        operator: operator,
+        confirm: confirmInput,
+        dry_run: dryRun,
+        allow_now: allowNow
+      };
+
+      try {
+        const response = await fetch("/api/telephony/live/one-lead-campaign-test", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+        const data = await response.json();
+        
+        // Show results box
+        const resultsBox = document.getElementById("campaign-test-results");
+        const jsonBox = document.getElementById("campaign-test-output-json");
+        const checklistBox = document.getElementById("campaign-test-checklist");
+        
+        if (resultsBox && jsonBox) {
+          resultsBox.style.display = "block";
+          jsonBox.innerText = JSON.stringify(data, null, 2);
+        }
+
+        // Parse result object (console wraps action result)
+        const result = data.data || data;
+
+        if (checklistBox) {
+          let html = "<ul style='list-style-type: none; padding: 0; margin: 0; line-height: 1.8; font-size: 0.75rem;'>";
+          
+          // Readiness Check
+          const readinessOk = result.readiness_ok;
+          html += `<li>${readinessOk ? "🟢" : "🔴"} <strong>Readiness Audits:</strong> ${readinessOk ? "Passed" : "Failed"}</li>`;
+          
+          // Worker Status
+          const workerOk = result.worker_ok;
+          html += `<li>${workerOk ? "🟢" : "🔴"} <strong>LiveKit Voice Worker:</strong> ${workerOk ? "Ready and running" : "Missing dependencies or stopped"}</li>`;
+          
+          // Lead Setup
+          const leadSetup = !!result.lead_id;
+          html += `<li>${leadSetup ? "🟢" : "🔴"} <strong>Lead Import:</strong> ${leadSetup ? `Imported exactly one lead (ID: ${result.lead_id})` : "Failed to setup test lead"}</li>`;
+          
+          // Dialer Tick
+          const dialerTick = !!result.dialer_tick_result;
+          html += `<li>${dialerTick ? "🟢" : "🔴"} <strong>Dialer Tick Executed:</strong> ${dialerTick ? `Executed tick successfully` : "Dialer tick blocked"}</li>`;
+
+          // Phone Rang
+          const phoneRang = result.phone_rang;
+          html += `<li>${phoneRang ? "🟢" : "🔴"} <strong>Phone Ring Path:</strong> ${phoneRang ? "Phone rang successfully" : "No answer or calling failed"}</li>`;
+
+          // Dana Spoke
+          const danaSpoke = result.dana_spoke;
+          html += `<li>${danaSpoke ? "🟢" : "🔴"} <strong>Dana Spoke:</strong> ${danaSpoke ? "Dana voice worker connected and greeted" : "Worker did not join/speak"}</li>`;
+
+          // Campaign Stopped
+          const campaignStopped = result.campaign_stopped;
+          html += `<li>${campaignStopped ? "🟢" : "🔴"} <strong>Post-Test Shutdown:</strong> ${campaignStopped ? "Campaign safely stopped" : "Failed to stop campaign"}</li>`;
+          
+          html += "</ul>";
+          
+          checklistBox.innerHTML = html;
+        }
+
+        if (response.ok && data.success) {
+          showStatus("Campaign Test Passed", data.message || "Controlled one-lead campaign test finished successfully.");
+          log(`Campaign test succeeded! Report paths: JSON: ${data.report_json_path}, MD: ${data.report_markdown_path}`, "success");
+        } else {
+          const msg = data.error || data.message || "Controlled campaign test failed.";
+          showStatus("Campaign Test Result", msg, true);
+          log(`Campaign test error: ${msg}`, "error");
+        }
+      } catch (err) {
+        showStatus("Network Error", err.message, true);
+        log(`Campaign test network error: ${err.message}`, "error");
+      } finally {
+        setButtonState(btn, false, text);
+      }
+    });
+  }
+
   // Caller ID Pool Management
   const btnRefreshDids = document.getElementById("btn-refresh-dids");
   const didsTableBody = document.getElementById("dids-table-body");

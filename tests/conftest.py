@@ -3,15 +3,59 @@ import os
 from unittest.mock import MagicMock
 import dotenv
 
+from pathlib import Path
+
 # Clear DATABASE_URL initially and disable write-behind queue by default in tests
-os.environ.pop("DATABASE_URL", None)
+_telephony_keys = [
+    "DATABASE_URL",
+    "DANA_CONFIRM_PLACE_CALL",
+    "TELEPHONY_LIVE_MODE",
+    "DANA_ENABLE_OUTBOUND_DIALER",
+    "LIVEKIT_SIP_OUTBOUND_TRUNK_ID",
+    "DANA_LIVEKIT_SIP_OUTBOUND_TRUNK_ID",
+    "TELNYX_LIVEKIT_OUTBOUND_TRUNK_ID",
+    "DANA_TELEPHONY_PROVIDER",
+    "TELNYX_API_KEY",
+    "TELNYX_DIDS",
+    "TELNYX_PHONE_NUMBERS",
+    "TELNYX_OUTBOUND_CALLER_ID",
+    "DANA_OUTBOUND_CALLER_ID",
+    "DANA_TEST_CALL_TO",
+    "TEST_CALL_TO"
+]
+
+for k in _telephony_keys:
+    os.environ.pop(k, None)
 os.environ["DANA_WRITE_BEHIND_ENABLED"] = "false"
+
+# Resolve real repo root
+_real_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 # Intercept all calls to load_dotenv during tests to keep DATABASE_URL cleared and write-behind disabled
 _orig_load_dotenv = dotenv.load_dotenv
 def _mock_load_dotenv(*args, **kwargs):
-    res = _orig_load_dotenv(*args, **kwargs)
-    os.environ.pop("DATABASE_URL", None)
+    dotenv_path = kwargs.get("dotenv_path") or (args[0] if len(args) > 0 else None)
+    is_real = True
+    if dotenv_path:
+        try:
+            p = str(Path(dotenv_path).resolve())
+            real_resolved = str(Path(_real_root).resolve())
+            if "temp" in p.lower() or "pytest" in p.lower() or not p.startswith(real_resolved):
+                is_real = False
+        except Exception:
+            pass
+
+    if is_real:
+        backup = {k: os.environ[k] for k in _telephony_keys if k in os.environ}
+        res = _orig_load_dotenv(*args, **kwargs)
+        for k in _telephony_keys:
+            if k in backup:
+                os.environ[k] = backup[k]
+            else:
+                os.environ.pop(k, None)
+    else:
+        res = _orig_load_dotenv(*args, **kwargs)
+
     os.environ["DANA_WRITE_BEHIND_ENABLED"] = "false"
     return res
 dotenv.load_dotenv = _mock_load_dotenv
@@ -21,8 +65,27 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from config import env_loader
 _orig_load_environment = env_loader.load_environment
 def _mock_load_environment(*args, **kwargs):
-    res = _orig_load_environment(*args, **kwargs)
-    os.environ.pop("DATABASE_URL", None)
+    from config.env_loader import find_repo_root
+    is_real_root = True
+    try:
+        repo_root = str(find_repo_root().resolve())
+        real_resolved = str(Path(_real_root).resolve())
+        if repo_root != real_resolved:
+            is_real_root = False
+    except Exception:
+        pass
+
+    if is_real_root:
+        backup = {k: os.environ[k] for k in _telephony_keys if k in os.environ}
+        res = _orig_load_environment(*args, **kwargs)
+        for k in _telephony_keys:
+            if k in backup:
+                os.environ[k] = backup[k]
+            else:
+                os.environ.pop(k, None)
+    else:
+        res = _orig_load_environment(*args, **kwargs)
+
     os.environ["DANA_WRITE_BEHIND_ENABLED"] = "false"
     return res
 env_loader.load_environment = _mock_load_environment

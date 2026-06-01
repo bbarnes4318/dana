@@ -278,7 +278,10 @@ class DIDPoolManager:
         provider = config.provider.strip().lower()
         
         # 1. Fetch merged candidates list
-        all_numbers = await self.list_numbers()
+        if config.allow_cross_provider:
+            all_numbers = await self.list_numbers()
+        else:
+            all_numbers = await self.list_numbers(provider=provider)
         
         candidates: List[CallerIdNumber] = []
         warnings: List[str] = []

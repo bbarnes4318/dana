@@ -32,9 +32,9 @@ def test_live_mode_true_missing_env_fails():
         participant_identity="p_1"
     )
     with patch("config.runtime_env.load_environment"):
-        # Clear env
         if "TELEPHONY_LIVE_MODE" in os.environ: del os.environ["TELEPHONY_LIVE_MODE"]
         if "DANA_ENABLE_OUTBOUND_DIALER" in os.environ: del os.environ["DANA_ENABLE_OUTBOUND_DIALER"]
+        if "DANA_CONFIRM_PLACE_CALL" in os.environ: del os.environ["DANA_CONFIRM_PLACE_CALL"]
 
         import asyncio
         res = asyncio.run(adapter.dial(config))

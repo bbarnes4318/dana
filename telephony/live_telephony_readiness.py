@@ -235,8 +235,8 @@ class LiveTelephonyReadinessChecker:
         
         # Collect failures regarding live modes
         if not live_mode_enabled:
-            failures.append("TELEPHONY_LIVE_MODE is not set to 'true'.")
-            next_steps.append("Set environment variable TELEPHONY_LIVE_MODE=true")
+            failures.append("TELEPHONY_LIVE_MODE is not set to 'true' (or DANA_CONFIRM_PLACE_CALL is not set to 'yes').")
+            next_steps.append("Set environment variable TELEPHONY_LIVE_MODE=true or DANA_CONFIRM_PLACE_CALL=yes")
 
         # 2. Check general LiveKit secrets
         for k, v in [("LIVEKIT_URL", env["livekit_url"]), ("LIVEKIT_API_KEY", env["livekit_api_key"]), ("LIVEKIT_API_SECRET", env["livekit_api_secret"])]:

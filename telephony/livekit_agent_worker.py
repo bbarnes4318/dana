@@ -23,6 +23,13 @@ from pydantic import BaseModel, Field
 from storage.repository import Repository
 from core.agent_runtime import AgentRuntime
 
+try:
+    from livekit.plugins import openai as lk_openai
+    from livekit.plugins import silero
+except ImportError:
+    lk_openai = None
+    silero = None
+
 # Setup standard logging
 logger = logging.getLogger("telephony.agent_worker")
 
@@ -544,6 +551,16 @@ async def run_room_session(ctx: Any, config: LiveKitAgentWorkerConfig) -> None:
         await export_completed_session_if_possible(session_state, shared.repository)
 
 
+def initialize_process(job_proc: Any) -> None:
+    """Pre-import and register plugins on the main thread of the job process."""
+    logger.info("Initializing job process: pre-importing plugins on main thread")
+    try:
+        from livekit.plugins import openai as lk_openai
+        from livekit.plugins import silero
+    except ImportError as e:
+        logger.warning(f"Failed to pre-import plugins in job process: {e}")
+
+
 async def entrypoint_cb(ctx: Any):
     config = build_worker_config_from_env()
     await run_room_session(ctx, config)
@@ -562,6 +579,7 @@ def start_worker(config: LiveKitAgentWorkerConfig) -> None:
     
     opts = WorkerOptions(
         entrypoint_fnc=entrypoint_cb,
+        prewarm_fnc=initialize_process,
     )
     
     if len(sys.argv) == 1:

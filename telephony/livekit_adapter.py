@@ -238,7 +238,12 @@ class LiveKitOutboundAdapter:
             )
         finally:
             if lk_api:
-                await lk_api.aclose()
+                aclose_func = getattr(lk_api, "aclose", None)
+                if aclose_func:
+                    try:
+                        await aclose_func()
+                    except TypeError:
+                        pass
 
     def extract_sip_result_fields(self, participant: Any) -> dict:
         """Safely extract details from LiveKit SIP participant response object."""

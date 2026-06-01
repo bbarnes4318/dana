@@ -1100,7 +1100,38 @@ class Repository:
         else:
             try:
                 import json
-                filepath = self._store._file_path("dids")
+                filepath = self._store._path_for("dids")
+                if not filepath.exists():
+                    return False
+                lines = filepath.read_text(encoding="utf-8").splitlines()
+                new_lines = []
+                deleted = False
+                for line in lines:
+                    if not line.strip():
+                        continue
+                    item = json.loads(line)
+                    if item.get("id") == id:
+                        deleted = True
+                    else:
+                        new_lines.append(line)
+                if deleted:
+                    filepath.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
+                return deleted
+            except Exception:
+                return False
+
+    async def delete_campaign_lead(self, id: str) -> bool:
+        """Delete a campaign lead by ID."""
+        if isinstance(self._store, PostgresStore):
+            await self._store._ensure_pool()
+            query = "DELETE FROM campaign_leads WHERE id = $1;"
+            async with self._store._pool.acquire() as conn:
+                res = await conn.execute(query, id)
+                return "DELETE 1" in res
+        else:
+            try:
+                import json
+                filepath = self._store._path_for("campaign_leads")
                 if not filepath.exists():
                     return False
                 lines = filepath.read_text(encoding="utf-8").splitlines()

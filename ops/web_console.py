@@ -698,6 +698,29 @@ class TrainingWebConsoleServer(ThreadingHTTPServer):
                 )
                 return (200 if res.success else 400, res.model_dump(mode="json"))
 
+            elif route == "/api/telephony/live/one-lead-campaign-test" and method == "POST":
+                if not body:
+                    return (400, {"success": False, "error": "JSON body is required."})
+                to = body.get("to")
+                operator = body.get("operator")
+                confirm = body.get("confirm")
+                allow_now = bool(body.get("allow_now", False))
+                dry_run = bool(body.get("dry_run", True))
+
+                if not to:
+                    return (400, {"success": False, "error": "to parameter is required."})
+                if not operator:
+                    return (400, {"success": False, "error": "operator parameter is required."})
+
+                res = await self.console.run_one_lead_live_campaign_test(
+                    to=to,
+                    operator=operator,
+                    confirm=confirm or "",
+                    allow_now=allow_now,
+                    dry_run=dry_run,
+                )
+                return (200 if res.success else 400, res.model_dump(mode="json"))
+
             elif route == "/api/telephony/calls/live" and method == "GET":
                 campaign_id = query_params.get("campaign_id", [None])[0]
                 limit = int(query_params.get("limit", [100])[0])
