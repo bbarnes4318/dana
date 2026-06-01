@@ -4,11 +4,13 @@ import sys
 # Safety fallback loading
 try:
     from config.env_loader import load_environment
+    from config.runtime_env import get_runtime_env
     load_environment()
 except ImportError:
     from pathlib import Path
     sys.path.append(str(Path(__file__).resolve().parent.parent))
     from config.env_loader import load_environment
+    from config.runtime_env import get_runtime_env
     load_environment()
 
 import json
@@ -211,7 +213,8 @@ class LiveTelephonySmokeTester:
             )
 
         # 3. Resolve destination phone number
-        phone_number = config.phone_number or os.environ.get("DANA_TEST_CALL_TO")
+        env = get_runtime_env()
+        phone_number = config.phone_number or env["test_call_to"]
         phone_redacted = self.redact_phone(phone_number) if phone_number else None
 
         if config.place_call and not config.dry_run and not phone_number:
@@ -274,7 +277,7 @@ class LiveTelephonySmokeTester:
                 worker_ready = False
                 worker_can_start = False
 
-            worker_enabled = os.environ.get("DANA_AGENT_WORKER_ENABLED") == "true"
+            worker_enabled = env["worker_enabled"]
             worker_status = {
                 "installed": worker_ok,
                 "error": worker_err,

@@ -4,11 +4,13 @@ import sys
 # Safety fallback loading
 try:
     from config.env_loader import load_environment
+    from config.runtime_env import get_runtime_env
     load_environment()
 except ImportError:
     from pathlib import Path
     sys.path.append(str(Path(__file__).resolve().parent.parent))
     from config.env_loader import load_environment
+    from config.runtime_env import get_runtime_env
     load_environment()
 
 import json
@@ -59,33 +61,33 @@ class LiveKitOutboundAdapter:
 
     def live_mode_enabled(self) -> bool:
         """Check if live outbound dialing is enabled via environment variables."""
-        return (
-            os.environ.get("TELEPHONY_LIVE_MODE") == "true"
-            and os.environ.get("DANA_ENABLE_OUTBOUND_DIALER") == "true"
-        )
+        env = get_runtime_env()
+        return env["live_call_enabled"]
 
     def required_env_status(self) -> dict:
         """Get status of required environment variables for live telephony."""
+        env = get_runtime_env()
         return {
-            "TELEPHONY_LIVE_MODE": os.environ.get("TELEPHONY_LIVE_MODE"),
-            "DANA_ENABLE_OUTBOUND_DIALER": os.environ.get("DANA_ENABLE_OUTBOUND_DIALER"),
-            "LIVEKIT_URL": os.environ.get("LIVEKIT_URL"),
-            "LIVEKIT_API_KEY": os.environ.get("LIVEKIT_API_KEY"),
-            "LIVEKIT_API_SECRET": os.environ.get("LIVEKIT_API_SECRET"),
-            "LIVEKIT_SIP_OUTBOUND_TRUNK_ID": os.environ.get("LIVEKIT_SIP_OUTBOUND_TRUNK_ID"),
-            "DANA_OUTBOUND_CALLER_ID": os.environ.get("DANA_OUTBOUND_CALLER_ID"),
-            "DANA_AGENT_WORKER_ENABLED": os.environ.get("DANA_AGENT_WORKER_ENABLED"),
+            "TELEPHONY_LIVE_MODE": "true" if env["live_call_enabled"] else "false",
+            "DANA_ENABLE_OUTBOUND_DIALER": "true" if env["live_call_enabled"] else "false",
+            "LIVEKIT_URL": env["livekit_url"],
+            "LIVEKIT_API_KEY": env["livekit_api_key"],
+            "LIVEKIT_API_SECRET": env["livekit_api_secret"],
+            "LIVEKIT_SIP_OUTBOUND_TRUNK_ID": env["livekit_sip_outbound_trunk_id"],
+            "DANA_OUTBOUND_CALLER_ID": env["outbound_caller_id"],
+            "DANA_AGENT_WORKER_ENABLED": "true" if env["worker_enabled"] else "false",
         }
 
     def validate_live_config(self, config: LiveKitDialConfig) -> tuple[bool, list[str]]:
         """Validate that all required credentials and variables are present for live calls."""
         warnings = []
+        env = get_runtime_env()
         
         # Check config fields
-        url = config.livekit_url or os.environ.get("LIVEKIT_URL")
-        key = config.api_key or os.environ.get("LIVEKIT_API_KEY")
-        secret = config.api_secret or os.environ.get("LIVEKIT_API_SECRET")
-        trunk_id = config.outbound_trunk_id or os.environ.get("LIVEKIT_SIP_OUTBOUND_TRUNK_ID")
+        url = config.livekit_url or env["livekit_url"]
+        key = config.api_key or env["livekit_api_key"]
+        secret = config.api_secret or env["livekit_api_secret"]
+        trunk_id = config.outbound_trunk_id or env["livekit_sip_outbound_trunk_id"]
         
         if not url:
             warnings.append("Missing livekit_url config or LIVEKIT_URL env")
@@ -97,11 +99,11 @@ class LiveKitOutboundAdapter:
             warnings.append("Missing outbound_trunk_id config or LIVEKIT_SIP_OUTBOUND_TRUNK_ID env")
 
         # Check required env variables directly (as mandated by prompt)
-        if not os.environ.get("LIVEKIT_URL"):
+        if not env["livekit_url"]:
             warnings.append("Missing LIVEKIT_URL environment variable")
-        if not os.environ.get("LIVEKIT_API_KEY"):
+        if not env["livekit_api_key"]:
             warnings.append("Missing LIVEKIT_API_KEY environment variable")
-        if not os.environ.get("LIVEKIT_API_SECRET"):
+        if not env["livekit_api_secret"]:
             warnings.append("Missing LIVEKIT_API_SECRET environment variable")
 
         return len(warnings) == 0, warnings
@@ -176,10 +178,11 @@ class LiveKitOutboundAdapter:
                 error="SDK_IMPORT_ERROR",
             )
 
-        url = config.livekit_url or os.environ.get("LIVEKIT_URL")
-        api_key = config.api_key or os.environ.get("LIVEKIT_API_KEY")
-        api_secret = config.api_secret or os.environ.get("LIVEKIT_API_SECRET")
-        trunk_id = config.outbound_trunk_id or os.environ.get("LIVEKIT_SIP_OUTBOUND_TRUNK_ID")
+        env = get_runtime_env()
+        url = config.livekit_url or env["livekit_url"]
+        api_key = config.api_key or env["livekit_api_key"]
+        api_secret = config.api_secret or env["livekit_api_secret"]
+        trunk_id = config.outbound_trunk_id or env["livekit_sip_outbound_trunk_id"]
 
         lk_api = None
         try:

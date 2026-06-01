@@ -1891,9 +1891,10 @@ class TrainingOperationsConsole:
             status_dict = check_worker_dependencies()
             ok = status_dict.get("ready", False)
             err = status_dict.get("error")
-            import os
+            from config.runtime_env import get_runtime_env
+            env = get_runtime_env()
             cmd = "python scripts/run_livekit_agent_worker.py"
-            worker_enabled = os.environ.get("DANA_AGENT_WORKER_ENABLED") == "true"
+            worker_enabled = env["worker_enabled"]
             data = {
                 "installed": status_dict.get("livekit_agents_installed", False),
                 "error": err,

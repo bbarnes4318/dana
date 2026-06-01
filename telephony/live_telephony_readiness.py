@@ -4,11 +4,13 @@ import sys
 # Safety fallback loading
 try:
     from config.env_loader import load_environment
+    from config.runtime_env import get_runtime_env
     load_environment()
 except ImportError:
     from pathlib import Path
     sys.path.append(str(Path(__file__).resolve().parent.parent))
     from config.env_loader import load_environment
+    from config.runtime_env import get_runtime_env
     load_environment()
 
 import importlib.metadata
@@ -31,6 +33,12 @@ class LiveTelephonyReadinessResult(BaseModel):
     failures: List[str] = Field(default_factory=list)
     warnings: List[str] = Field(default_factory=list)
     next_steps: List[str] = Field(default_factory=list)
+    
+    # Unified resolver fields for Prompt 32
+    env_loaded: bool = False
+    local_llm_ready: bool = False
+    local_stt_ready: bool = False
+    local_tts_ready: bool = False
 
 
 class LiveTelephonyReadinessChecker:
@@ -65,10 +73,9 @@ class LiveTelephonyReadinessChecker:
             "failures": []
         }
         
-        # 1. Resolve Trunk ID
-        trunk_id = os.environ.get("LIVEKIT_SIP_OUTBOUND_TRUNK_ID")
-        # 2. Resolve Caller ID
-        caller_id = os.environ.get("DANA_OUTBOUND_CALLER_ID")
+        env = get_runtime_env()
+        trunk_id = env["livekit_sip_outbound_trunk_id"]
+        caller_id = env["outbound_caller_id"]
 
         if provider_config_id:
             config = await self.repository.get_telephony_provider_config(provider_config_id)
@@ -82,7 +89,13 @@ class LiveTelephonyReadinessChecker:
         if trunk_id:
             res["outbound_trunk_id_present"] = True
         else:
-            res["failures"].append("No LiveKit SIP Outbound Trunk ID configured (neither in provider config nor in LIVEKIT_SIP_OUTBOUND_TRUNK_ID env).")
+            if env["telnyx_api_key"]:
+                res["failures"].append(
+                    "Missing LiveKit outbound SIP trunk ID. TELNYX_API_KEY is not the same thing. "
+                    "Create/locate the LiveKit outbound trunk and set LIVEKIT_SIP_OUTBOUND_TRUNK_ID."
+                )
+            else:
+                res["failures"].append("No LiveKit SIP Outbound Trunk ID configured (neither in provider config nor in LIVEKIT_SIP_OUTBOUND_TRUNK_ID env).")
 
         if caller_id:
             res["caller_id_present"] = True
@@ -129,21 +142,20 @@ class LiveTelephonyReadinessChecker:
         warnings = []
         next_steps = []
 
-        # 1. Check live mode settings
-        live_mode_enabled = self.adapter.live_mode_enabled()
+        env = get_runtime_env()
         env_status = self.check_env()
         
+        # 1. Check live mode settings
+        live_mode_enabled = env["live_call_enabled"]
+        
         # Collect failures regarding live modes
-        if env_status.get("TELEPHONY_LIVE_MODE") != "true":
+        if not live_mode_enabled:
             failures.append("TELEPHONY_LIVE_MODE is not set to 'true'.")
             next_steps.append("Set environment variable TELEPHONY_LIVE_MODE=true")
-        if env_status.get("DANA_ENABLE_OUTBOUND_DIALER") != "true":
-            failures.append("DANA_ENABLE_OUTBOUND_DIALER is not set to 'true'.")
-            next_steps.append("Set environment variable DANA_ENABLE_OUTBOUND_DIALER=true")
 
         # 2. Check general LiveKit secrets
-        for k in ["LIVEKIT_URL", "LIVEKIT_API_KEY", "LIVEKIT_API_SECRET"]:
-            if not env_status.get(k):
+        for k, v in [("LIVEKIT_URL", env["livekit_url"]), ("LIVEKIT_API_KEY", env["livekit_api_key"]), ("LIVEKIT_API_SECRET", env["livekit_api_secret"])]:
+            if not v:
                 failures.append(f"Missing required secret environment variable: {k}")
                 next_steps.append(f"Provide environment variable {k}")
 
@@ -174,12 +186,21 @@ class LiveTelephonyReadinessChecker:
                 next_steps.append(f"Activate the campaign to running state via UI/CLI")
 
         # 6. Check Agent Worker
-        worker_enabled = env_status.get("DANA_AGENT_WORKER_ENABLED") == "true"
+        worker_enabled = env["worker_enabled"]
         if not worker_enabled:
             warnings.append("DANA_AGENT_WORKER_ENABLED is not set to 'true'. Calls might place, but Dana agent worker will not join rooms automatically.")
             next_steps.append("Set environment variable DANA_AGENT_WORKER_ENABLED=true and start scripts/run_livekit_agent_worker.py")
 
         ready = len(failures) == 0
+
+        # Load environment file load results
+        loader_summary = load_environment()
+        env_loaded = len(loader_summary.get("loaded_files", [])) > 0
+
+        # Engine checks
+        local_llm_ready = env["llm_routing_mode"] == "local" and bool(env["vllm_base_url"])
+        local_stt_ready = env["stt_routing_mode"] == "local"
+        local_tts_ready = env["tts_routing_mode"] == "local" and bool(env["kokoro_model_path"]) and bool(env["kokoro_voices_path"])
 
         return LiveTelephonyReadinessResult(
             ready=ready,
@@ -193,5 +214,9 @@ class LiveTelephonyReadinessChecker:
             campaign_ready=campaign_status,
             failures=failures,
             warnings=warnings,
-            next_steps=next_steps
+            next_steps=next_steps,
+            env_loaded=env_loaded,
+            local_llm_ready=local_llm_ready,
+            local_stt_ready=local_stt_ready,
+            local_tts_ready=local_tts_ready
         )

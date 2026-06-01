@@ -4,11 +4,13 @@ import sys
 # Safety fallback loading
 try:
     from config.env_loader import load_environment
+    from config.runtime_env import get_runtime_env
     load_environment()
 except ImportError:
     from pathlib import Path
     sys.path.append(str(Path(__file__).resolve().parent.parent))
     from config.env_loader import load_environment
+    from config.runtime_env import get_runtime_env
     load_environment()
 
 import uuid
@@ -140,8 +142,9 @@ class LiveCallTester:
         await self.repository.save_call_attempt(**attempt)
 
         # Determine outbound trunk ID and caller ID from provider config or env fallbacks
-        trunk_id = os.environ.get("LIVEKIT_SIP_OUTBOUND_TRUNK_ID")
-        caller_id = config.caller_id or os.environ.get("DANA_OUTBOUND_CALLER_ID")
+        env = get_runtime_env()
+        trunk_id = env["livekit_sip_outbound_trunk_id"]
+        caller_id = config.caller_id or env["outbound_caller_id"]
         
         if config.provider_config_id:
             provider_config = await self.repository.get_telephony_provider_config(config.provider_config_id)
@@ -152,9 +155,9 @@ class LiveCallTester:
         # 7. Execute dialing via LiveKit SDK Outbound adapter
         dial_config = LiveKitDialConfig(
             live_mode=True,
-            livekit_url=os.environ.get("LIVEKIT_URL"),
-            api_key=os.environ.get("LIVEKIT_API_KEY"),
-            api_secret=os.environ.get("LIVEKIT_API_SECRET"),
+            livekit_url=env["livekit_url"],
+            api_key=env["livekit_api_key"],
+            api_secret=env["livekit_api_secret"],
             outbound_trunk_id=trunk_id,
             room_name=room_name,
             phone_number=config.phone_number,

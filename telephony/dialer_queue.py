@@ -4,11 +4,13 @@ import sys
 # Safety fallback loading
 try:
     from config.env_loader import load_environment
+    from config.runtime_env import get_runtime_env
     load_environment()
 except ImportError:
     from pathlib import Path
     sys.path.append(str(Path(__file__).resolve().parent.parent))
     from config.env_loader import load_environment
+    from config.runtime_env import get_runtime_env
     load_environment()
 
 import uuid
@@ -342,11 +344,12 @@ class DialerQueue:
                     continue
 
                 # Load trunk ID from provider_config or env
+                env = get_runtime_env()
                 outbound_trunk_id = None
                 if provider_config:
                     outbound_trunk_id = provider_config.get("livekit_sip_outbound_trunk_id")
                 if not outbound_trunk_id:
-                    outbound_trunk_id = os.environ.get("LIVEKIT_SIP_OUTBOUND_TRUNK_ID")
+                    outbound_trunk_id = env["livekit_sip_outbound_trunk_id"]
 
                 if not outbound_trunk_id:
                     result.errors.append(f"Live dial failed: missing outbound trunk ID for lead {lead_id}.")
@@ -360,7 +363,7 @@ class DialerQueue:
                     continue
 
                 # Determine caller ID
-                caller_id = campaign.get("caller_id") or os.environ.get("DANA_OUTBOUND_CALLER_ID")
+                caller_id = campaign.get("caller_id") or env["outbound_caller_id"]
 
                 # Determine wait_until_answered and krisp_enabled
                 wait_until_answered_env = os.environ.get("DANA_WAIT_UNTIL_ANSWERED", "true").lower() == "true"
@@ -379,9 +382,9 @@ class DialerQueue:
 
                 dial_conf = LiveKitDialConfig(
                     live_mode=True,
-                    livekit_url=provider_config.get("livekit_url") if provider_config else os.environ.get("LIVEKIT_URL"),
-                    api_key=(provider_config.get("livekit_api_key") if provider_config else None) or os.environ.get("LIVEKIT_API_KEY"),
-                    api_secret=(provider_config.get("livekit_api_secret") if provider_config else None) or os.environ.get("LIVEKIT_API_SECRET"),
+                    livekit_url=provider_config.get("livekit_url") if provider_config else env["livekit_url"],
+                    api_key=(provider_config.get("livekit_api_key") if provider_config else None) or env["livekit_api_key"],
+                    api_secret=(provider_config.get("livekit_api_secret") if provider_config else None) or env["livekit_api_secret"],
                     outbound_trunk_id=outbound_trunk_id,
                     room_name=room_name,
                     phone_number=lead_phone,

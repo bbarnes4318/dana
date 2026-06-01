@@ -53,19 +53,25 @@ def main():
 
     print(f"Starting LiveKit Agent Worker (prefix={args.room_prefix}, agent={args.agent_name})...", file=sys.stderr)
     
+    from config.runtime_env import get_runtime_env
+    env = get_runtime_env()
+    
     # Build config dynamically from parameters and environment
     greeting = args.greeting_text or os.environ.get("DANA_OPENING_LINE") or "Hi, this is Dana with American Beneficiary. I’m calling about final expense information you recently requested."
+    llm_p = env["llm_routing_mode"]
+    if llm_p == "local":
+        llm_p = "agent_runtime"
     config = LiveKitAgentWorkerConfig(
-        livekit_url=os.environ.get("LIVEKIT_URL"),
-        api_key=os.environ.get("LIVEKIT_API_KEY"),
-        api_secret=os.environ.get("LIVEKIT_API_SECRET"),
+        livekit_url=env["livekit_url"],
+        api_key=env["livekit_api_key"],
+        api_secret=env["livekit_api_secret"],
         room_prefix=args.room_prefix,
         worker_enabled=True,
         agent_name=args.agent_name,
         greeting_text=greeting,
-        stt_provider="openai",
-        llm_provider="agent_runtime",
-        tts_provider="openai",
+        stt_provider=env["stt_routing_mode"],
+        llm_provider=llm_p,
+        tts_provider=env["tts_routing_mode"],
         vad_provider="silero"
     )
 

@@ -422,9 +422,9 @@ def test_runtime_mode_fails_cleanly_without_config(tmp_path):
         "--mode", "runtime"
     ]
     env = os.environ.copy()
-    # Unset API keys
-    env.pop("OPENAI_API_KEY", None)
-    env.pop("TELNYX_API_KEY", None)
+    # Set API keys to empty strings so they are not overridden by automatic env loader
+    env["OPENAI_API_KEY"] = ""
+    env["TELNYX_API_KEY"] = ""
     env["PYTHONPATH"] = "."
     
     proc = subprocess.run(cmd, capture_output=True, text=True, env=env)

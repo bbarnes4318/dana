@@ -16,6 +16,17 @@ def _mock_load_dotenv(*args, **kwargs):
     return res
 dotenv.load_dotenv = _mock_load_dotenv
 
+# Ensure root dir is in path before importing config
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from config import env_loader
+_orig_load_environment = env_loader.load_environment
+def _mock_load_environment(*args, **kwargs):
+    res = _orig_load_environment(*args, **kwargs)
+    os.environ.pop("DATABASE_URL", None)
+    os.environ["DANA_WRITE_BEHIND_ENABLED"] = "false"
+    return res
+env_loader.load_environment = _mock_load_environment
+
 # Dummy base classes to allow clean subclassing in tests
 class DummyTTS:
     sample_rate = 24000

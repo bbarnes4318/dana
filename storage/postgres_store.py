@@ -143,7 +143,6 @@ class PostgresStore(BaseStore):
                 # Connect directly using DATABASE_ADMIN_URL to avoid running migrations via PgBouncer
                 admin_dsn = os.environ.get("DATABASE_ADMIN_URL") or self._dsn
                 if admin_dsn:
-                    import asyncpg
                     logger.info("Running migrations via direct admin connection to bypass PgBouncer...")
                     conn = await asyncpg.connect(admin_dsn)
                     try:

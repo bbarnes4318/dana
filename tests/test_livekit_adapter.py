@@ -31,26 +31,28 @@ def test_live_mode_true_missing_env_fails():
         phone_number="+15550000",
         participant_identity="p_1"
     )
-    # Clear env
-    if "TELEPHONY_LIVE_MODE" in os.environ: del os.environ["TELEPHONY_LIVE_MODE"]
-    if "DANA_ENABLE_OUTBOUND_DIALER" in os.environ: del os.environ["DANA_ENABLE_OUTBOUND_DIALER"]
+    with patch("config.runtime_env.load_environment"):
+        # Clear env
+        if "TELEPHONY_LIVE_MODE" in os.environ: del os.environ["TELEPHONY_LIVE_MODE"]
+        if "DANA_ENABLE_OUTBOUND_DIALER" in os.environ: del os.environ["DANA_ENABLE_OUTBOUND_DIALER"]
 
-    import asyncio
-    res = asyncio.run(adapter.dial(config))
-    assert res.success is True  # Because live_mode_enabled() is False, it falls back to mock
-    assert res.dry_run is True
+        import asyncio
+        res = asyncio.run(adapter.dial(config))
+        assert res.success is True  # Because live_mode_enabled() is False, it falls back to mock
+        assert res.dry_run is True
 
 def test_required_env_status_reports_missing_keys():
     adapter = LiveKitOutboundAdapter()
     # Save env
     orig = {k: os.environ.get(k) for k in ["TELEPHONY_LIVE_MODE", "LIVEKIT_URL"]}
     
-    os.environ["TELEPHONY_LIVE_MODE"] = "true"
-    if "LIVEKIT_URL" in os.environ: del os.environ["LIVEKIT_URL"]
-    
-    status = adapter.required_env_status()
-    assert status["TELEPHONY_LIVE_MODE"] == "true"
-    assert status["LIVEKIT_URL"] is None
+    with patch("config.runtime_env.load_environment"):
+        os.environ["TELEPHONY_LIVE_MODE"] = "true"
+        if "LIVEKIT_URL" in os.environ: del os.environ["LIVEKIT_URL"]
+        
+        status = adapter.required_env_status()
+        assert status["TELEPHONY_LIVE_MODE"] == "true"
+        assert status["LIVEKIT_URL"] is None
     
     # Restore env
     for k, v in orig.items():
@@ -68,18 +70,19 @@ def test_validate_live_config_requires_outbound_trunk():
         participant_identity="p_1"
     )
     
-    # Empty out trunk env and config
-    if "LIVEKIT_SIP_OUTBOUND_TRUNK_ID" in os.environ: del os.environ["LIVEKIT_SIP_OUTBOUND_TRUNK_ID"]
-    config.outbound_trunk_id = None
-    
-    # Mock other env
-    os.environ["LIVEKIT_URL"] = "wss://test.livekit.cloud"
-    os.environ["LIVEKIT_API_KEY"] = "key"
-    os.environ["LIVEKIT_API_SECRET"] = "secret"
-    
-    ok, warnings = adapter.validate_live_config(config)
-    assert ok is False
-    assert any("outbound_trunk_id" in w for w in warnings)
+    with patch("config.runtime_env.load_environment"):
+        # Empty out trunk env and config
+        if "LIVEKIT_SIP_OUTBOUND_TRUNK_ID" in os.environ: del os.environ["LIVEKIT_SIP_OUTBOUND_TRUNK_ID"]
+        config.outbound_trunk_id = None
+        
+        # Mock other env
+        os.environ["LIVEKIT_URL"] = "wss://test.livekit.cloud"
+        os.environ["LIVEKIT_API_KEY"] = "key"
+        os.environ["LIVEKIT_API_SECRET"] = "secret"
+        
+        ok, warnings = adapter.validate_live_config(config)
+        assert ok is False
+        assert any("outbound_trunk_id" in w for w in warnings)
 
 def test_livekit_import_uses_official_import_path():
     # Verify we can import correctly from the official path

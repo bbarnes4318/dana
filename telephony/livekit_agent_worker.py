@@ -4,11 +4,13 @@ import sys
 # Safety fallback loading
 try:
     from config.env_loader import load_environment
+    from config.runtime_env import get_runtime_env
     load_environment()
 except ImportError:
     from pathlib import Path
     sys.path.append(str(Path(__file__).resolve().parent.parent))
     from config.env_loader import load_environment
+    from config.runtime_env import get_runtime_env
     load_environment()
 
 import uuid
@@ -90,9 +92,7 @@ def audit_worker_status() -> WorkerDependencyStatus:
         import livekit.api
         livekit_agents_installed = True
     except ImportError as e:
-        missing_packages.append("livekit")
-        missing_packages.append("livekit-api")
-        missing_packages.append("livekit-agents")
+        missing_packages.extend(["livekit", "livekit-api", "livekit-agents"])
         error_msg = str(e) if not error_msg else error_msg
 
     try:
@@ -123,20 +123,46 @@ def audit_worker_status() -> WorkerDependencyStatus:
     except ImportError as e:
         error_msg = f"AgentRuntime import failed: {e}"
 
-    # 3. Required environment variables checks
-    required_keys = ["LIVEKIT_URL", "LIVEKIT_API_KEY", "LIVEKIT_API_SECRET"]
-    for key in required_keys:
-        if not os.environ.get(key):
-            missing_env.append(key)
+    # 3. Required environment variables checks via centralized resolver
+    env = get_runtime_env()
+    
+    if not env["livekit_url"]:
+        missing_env.append("LIVEKIT_URL")
+    if not env["livekit_api_key"]:
+        missing_env.append("LIVEKIT_API_KEY")
+    if not env["livekit_api_secret"]:
+        missing_env.append("LIVEKIT_API_SECRET")
     
     required_env_present = len(missing_env) == 0
-    worker_enabled = os.environ.get("DANA_AGENT_WORKER_ENABLED") == "true"
+    worker_enabled = env["worker_enabled"]
 
     # 4. LLM / STT / TTS Provider credentials check
-    # Since we default to OpenAI for LLM/STT/TTS, require OPENAI_API_KEY if using those providers
-    openai_key = os.environ.get("OPENAI_API_KEY")
-    if not openai_key:
+    llm_is_cloud = env["llm_routing_mode"] == "cloud"
+    tts_is_cloud = env["tts_routing_mode"] == "cloud"
+    fallback_enabled = env["allow_cloud_llm_fallback"] or env["allow_cloud_tts_fallback"]
+    
+    needs_openai = llm_is_cloud or tts_is_cloud or fallback_enabled
+    if needs_openai and not os.environ.get("OPENAI_API_KEY"):
         missing_provider_config.append("OPENAI_API_KEY")
+
+    # Cloud STT check
+    stt_is_cloud = env["stt_routing_mode"] == "cloud"
+    cloud_stt_on_failure = env["cloud_stt_on_failure"]
+    allow_cloud_stt_poor_line = (os.environ.get("DANA_ALLOW_CLOUD_STT_FOR_POOR_LINE", "").lower() == "true")
+    needs_deepgram = stt_is_cloud or cloud_stt_on_failure or allow_cloud_stt_poor_line
+    if needs_deepgram and not os.environ.get("DEEPGRAM_API_KEY"):
+        missing_provider_config.append("DEEPGRAM_API_KEY")
+
+    # Local LLM base URL check
+    if env["llm_routing_mode"] == "local" and not env["vllm_base_url"]:
+        missing_provider_config.append("VLLM_BASE_URL")
+
+    # Local TTS checks
+    if env["tts_routing_mode"] == "local":
+        if not env["kokoro_model_path"]:
+            missing_provider_config.append("KOKORO_MODEL_PATH")
+        if not env["kokoro_voices_path"]:
+            missing_provider_config.append("KOKORO_VOICES_PATH")
 
     # 5. Determine overall status and details
     if missing_packages:
@@ -153,9 +179,9 @@ def audit_worker_status() -> WorkerDependencyStatus:
         next_steps.append(f"Provide environment values for: {', '.join(missing_env)}")
     elif missing_provider_config:
         status_str = "provider_missing"
-        error_msg = "LLM/STT/TTS provider configuration missing."
-        warnings.append("LLM/STT/TTS provider configuration missing (OPENAI_API_KEY is not set).")
-        next_steps.append("Set OPENAI_API_KEY environment variable")
+        error_msg = f"LLM/STT/TTS provider configuration missing: {', '.join(missing_provider_config)}"
+        warnings.append(f"LLM/STT/TTS provider configuration missing ({', '.join(missing_provider_config)} is not set).")
+        next_steps.append(f"Set environment variables: {', '.join(missing_provider_config)}")
     elif not worker_enabled:
         status_str = "not_enabled"
         warnings.append("DANA_AGENT_WORKER_ENABLED is not set to 'true'.")
@@ -192,24 +218,23 @@ def check_worker_dependencies() -> dict:
 
 def build_worker_config_from_env() -> LiveKitAgentWorkerConfig:
     """Build LiveKitAgentWorkerConfig from environment variables with safe defaults."""
+    env = get_runtime_env()
     prefix = os.environ.get("DANA_LIVEKIT_ROOM_PREFIX") or os.environ.get("LIVEKIT_ROOM_PREFIX") or "dana"
-    enabled = os.environ.get("DANA_AGENT_WORKER_ENABLED") == "true"
+    enabled = env["worker_enabled"]
     agent_name = os.environ.get("DANA_AGENT_NAME") or "Dana"
     greeting_text = os.environ.get("DANA_OPENING_LINE") or "Hi, this is Dana with American Beneficiary. I’m calling about final expense information you recently requested."
     
     # STT/LLM/TTS Providers
-    stt_p = os.environ.get("DANA_STT_PROVIDER") or "openai"
-    llm_p = os.environ.get("DANA_LLM_PROVIDER") or "agent_runtime"
-    tts_p = os.environ.get("DANA_TTS_VOICE")
-    if tts_p and ("openai" in tts_p.lower() or "alloy" in tts_p.lower() or "shimmer" in tts_p.lower()):
-        tts_p = "openai"
-    else:
-        tts_p = "openai"  # default standard fallback for cloud worker
+    stt_p = env["stt_routing_mode"]
+    llm_p = env["llm_routing_mode"]
+    if llm_p == "local":
+        llm_p = "agent_runtime"
+    tts_p = env["tts_routing_mode"]
 
     return LiveKitAgentWorkerConfig(
-        livekit_url=os.environ.get("LIVEKIT_URL"),
-        api_key=os.environ.get("LIVEKIT_API_KEY"),
-        api_secret=os.environ.get("LIVEKIT_API_SECRET"),
+        livekit_url=env["livekit_url"],
+        api_key=env["livekit_api_key"],
+        api_secret=env["livekit_api_secret"],
         room_prefix=prefix,
         worker_enabled=enabled,
         agent_name=agent_name,

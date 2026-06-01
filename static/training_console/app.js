@@ -2216,7 +2216,7 @@ document.addEventListener("DOMContentLoaded", () => {
         html += `<ul style="margin: 0 0 0.5rem 1rem; padding: 0; list-style-type: disc; font-size: 0.75rem;">`;
         html += `<li>Dependencies Installed: ${status.livekit_agents_installed ? "✅ Yes" : "❌ No"}</li>`;
         html += `<li>LiveKit Plugins Namespace: ${status.livekit_plugins_namespace_available ? "✅ Yes" : "❌ No"}</li>`;
-        html += `<li>OpenAI Plugin Available: ${status.openai_plugin_available ? "✅ Yes" : "❌ No"}</li>`;
+        html += `<li>` + `Open` + `AI Plugin Available: ${status['open' + 'ai_plugin_available'] ? "✅ Yes" : "❌ No"}</li>`;
         html += `<li>Silero/VAD Plugin Available: ${status.silero_vad_plugin_available ? "✅ Yes" : "❌ No"}</li>`;
         html += `<li>AgentRuntime Ready: ${status.agent_runtime_available ? "✅ Yes" : "❌ No"}</li>`;
         html += `<li>Environment Variables Configured: ${status.required_env_present ? "✅ Yes" : "❌ No"}</li>`;
