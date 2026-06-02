@@ -1859,6 +1859,19 @@ class TrainingOperationsConsole:
         except Exception as e:
             return ConsoleActionResult(action="check_live_telephony_readiness", success=False, message="Failed to run readiness check.", error=str(e))
 
+    async def get_live_production_readiness_gate(self) -> ConsoleActionResult:
+        try:
+            from telephony.live_production_readiness_gate import run_production_readiness_gate
+            res = await run_production_readiness_gate(repository=self.repository)
+            return self.result_from_model("get_live_production_readiness_gate", res, "Production readiness gate check completed.")
+        except Exception as e:
+            return ConsoleActionResult(
+                action="get_live_production_readiness_gate",
+                success=False,
+                message="Failed to execute production readiness gate check.",
+                error=str(e)
+            )
+
     async def place_live_test_call(
         self,
         phone_number: str,

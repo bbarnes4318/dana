@@ -620,6 +620,10 @@ class TrainingWebConsoleServer(ThreadingHTTPServer):
                 )
                 return (200 if res.success else 400, res.model_dump(mode="json"))
 
+            elif route == "/api/telephony/live/production-readiness-gate" and method == "GET":
+                res = await self.console.get_live_production_readiness_gate()
+                return (200 if res.success else 400, res.model_dump(mode="json"))
+
             elif route == "/api/telephony/live/readiness" and method == "POST":
                 provider_config_id = body.get("provider_config_id") if body else None
                 campaign_id = body.get("campaign_id") if body else None

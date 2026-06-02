@@ -2118,6 +2118,94 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   };
 
+  // Live Production Readiness Gate Check
+  async function refreshProductionReadinessGate() {
+    const btn = document.getElementById("btn-check-prod-readiness");
+    const resultsDiv = document.getElementById("prod-readiness-results");
+    const canarySpan = document.getElementById("prod-readiness-canary");
+    const scaleSpan = document.getElementById("prod-readiness-scale");
+    const passedCount = document.getElementById("prod-readiness-passed-count");
+    const failedCount = document.getElementById("prod-readiness-failed-count");
+    const warningCount = document.getElementById("prod-readiness-warning-count");
+    const checklistDiv = document.getElementById("prod-readiness-checklist");
+    const warningsSection = document.getElementById("prod-readiness-warnings-section");
+    const warningsList = document.getElementById("prod-readiness-warnings-list");
+    const nextstepsSection = document.getElementById("prod-readiness-nextsteps-section");
+    const nextstepsList = document.getElementById("prod-readiness-nextsteps-list");
+
+    if (!btn || !resultsDiv) return;
+
+    setButtonState(btn, true, "🔒 Running Gate Audit...");
+    resultsDiv.style.display = "none";
+
+    try {
+      const response = await fetch("/api/telephony/live/production-readiness-gate", { method: "GET" });
+      const data = await response.json();
+      
+      const gateResult = data.data || data;
+      
+      if (response.ok && gateResult) {
+        canarySpan.innerHTML = gateResult.ready_for_small_canary ? 
+          `<span style="color: var(--success); font-weight: bold;">YES</span>` : 
+          `<span style="color: var(--danger); font-weight: bold;">NO</span>`;
+        scaleSpan.innerHTML = `<span style="color: var(--danger); font-weight: bold;">NO (Hard Locked)</span>`;
+
+        passedCount.textContent = (gateResult.passed_checks || []).length;
+        failedCount.textContent = (gateResult.failed_checks || []).length;
+        warningCount.textContent = (gateResult.warnings || []).length;
+
+        // Render checklist items
+        let checklistHtml = "";
+        
+        const items = [
+          { name: "Core environment readiness", check: () => !gateResult.failed_checks.some(c => c.includes("Core environment")) },
+          { name: "LiveKit agent worker status", check: () => !gateResult.failed_checks.some(c => c.includes("worker")) },
+          { name: "DID Pool configurations", check: () => !gateResult.failed_checks.some(c => c.includes("DID Pool")) && !gateResult.failed_checks.some(c => c.includes("caller ID source")) },
+          { name: "SIP Outbound Trunk config", check: () => !gateResult.failed_checks.some(c => c.includes("SIP Trunk")) },
+          { name: "Dry-run validation history", check: () => !gateResult.failed_checks.some(c => c.includes("dry-run")) },
+          { name: "Smoke test validation history", check: () => !gateResult.failed_checks.some(c => c.includes("smoke test")) },
+          { name: "One-lead campaign history", check: () => !gateResult.failed_checks.some(c => c.includes("one-lead")) },
+          { name: "3-lead live validation history", check: () => !gateResult.failed_checks.some(c => c.includes("3-lead")) },
+          { name: "Post-call export verified", check: () => !gateResult.failed_checks.some(c => c.includes("export")) },
+          { name: "Training intake staged", check: () => !gateResult.failed_checks.some(c => c.includes("intake")) },
+          { name: "Compliance evaluator & DNC", check: () => !gateResult.failed_checks.some(c => c.includes("evaluator")) && !gateResult.failed_checks.some(c => c.includes("DNC")) },
+          { name: "Git ignore safety check", check: () => !gateResult.failed_checks.some(c => c.includes("Git safety")) }
+        ];
+
+        items.forEach(item => {
+          const passed = item.check();
+          const icon = passed ? `<span style="color: var(--success); margin-right: 0.5rem;">●</span>` : `<span style="color: var(--danger); margin-right: 0.5rem;">●</span>`;
+          checklistHtml += `<div style="display: flex; align-items: center; padding: 0.25rem 0.5rem; background: rgba(0,0,0,0.1); border-radius: 4px;">${icon} ${item.name}</div>`;
+        });
+        
+        checklistDiv.innerHTML = checklistHtml;
+
+        if (gateResult.warnings && gateResult.warnings.length > 0) {
+          warningsSection.style.display = "block";
+          warningsList.innerHTML = gateResult.warnings.map(w => `<li>${w}</li>`).join("");
+        } else {
+          warningsSection.style.display = "none";
+        }
+
+        if (gateResult.next_steps && gateResult.next_steps.length > 0) {
+          nextstepsSection.style.display = "block";
+          nextstepsList.innerHTML = gateResult.next_steps.map(step => `<li>${step}</li>`).join("");
+        } else {
+          nextstepsSection.style.display = "none";
+        }
+
+        resultsDiv.style.display = "block";
+        log(`Production readiness gate check complete. Canary ready: ${gateResult.ready_for_small_canary}`, gateResult.ready_for_small_canary ? "success" : "warning");
+      } else {
+        log(`Failed to run production readiness gate: ${data.error || data.message}`, "error");
+      }
+    } catch (err) {
+      log(`Network error running production readiness gate: ${err.message}`, "error");
+    } finally {
+      setButtonState(btn, false, "🔒 Run Gate Audit");
+    }
+  }
+
   // Live Telephony Diagnostics & Testing Helpers
   async function runReadinessAudit() {
     const btn = document.getElementById("btn-check-readiness");
@@ -2251,6 +2339,11 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   // Event Listeners for diagnostics
+  const btnCheckProdReadiness = document.getElementById("btn-check-prod-readiness");
+  if (btnCheckProdReadiness) {
+    btnCheckProdReadiness.addEventListener("click", () => refreshProductionReadinessGate());
+  }
+
   const btnCheckReadiness = document.getElementById("btn-check-readiness");
   if (btnCheckReadiness) {
     btnCheckReadiness.addEventListener("click", () => runReadinessAudit());

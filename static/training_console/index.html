@@ -1432,6 +1432,44 @@
             </div>
           </section>
 
+          <!-- H. Live Production Readiness Gate Card (Span 2) -->
+          <section class="card" style="grid-column: span 2;" id="production-readiness-gate-card">
+            <div class="card-title">
+              <span>🛡️ Live Production Readiness Gate</span>
+              <button id="btn-check-prod-readiness" class="btn btn-primary" style="width: auto; padding: 0.25rem 0.5rem; font-size: 0.75rem;">🔒 Run Gate Audit</button>
+            </div>
+            <p style="font-size: 0.75rem; color: var(--text-secondary); margin-bottom: 0.5rem;">
+              Audits environment variables, worker daemon, DID pool, SIP trunks, call validation history, post-call exports, training intake, compliance scoring, emergency controls, and safety boundaries to certify readiness for small canary rollout.
+            </p>
+            <div id="prod-readiness-results" style="font-size: 0.75rem; color: var(--text-secondary); line-height: 1.4; display: none;">
+              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1rem;">
+                <div style="background: var(--bg-surface); padding: 0.75rem; border-radius: 4px; border: 1px solid var(--border);">
+                  <h4 style="color: var(--text-primary); margin-bottom: 0.5rem; border-bottom: 1px solid var(--border); padding-bottom: 0.25rem;">Canary Readiness</h4>
+                  <p style="font-size: 0.85rem;">Ready for Small Canary: <span id="prod-readiness-canary" style="font-weight: bold;">—</span></p>
+                  <p style="font-size: 0.85rem;">Ready for Production Scale: <span id="prod-readiness-scale" style="font-weight: bold; color: var(--danger);">NO (Hard Locked)</span></p>
+                </div>
+                <div style="background: var(--bg-surface); padding: 0.75rem; border-radius: 4px; border: 1px solid var(--border);">
+                  <h4 style="color: var(--text-primary); margin-bottom: 0.5rem; border-bottom: 1px solid var(--border); padding-bottom: 0.25rem;">Checks Summary</h4>
+                  <p>Passed Checks: <span id="prod-readiness-passed-count" style="font-weight: bold; color: var(--success);">0</span></p>
+                  <p>Failed Checks: <span id="prod-readiness-failed-count" style="font-weight: bold; color: var(--danger);">0</span></p>
+                  <p>Warnings: <span id="prod-readiness-warning-count" style="font-weight: bold; color: var(--warning);">0</span></p>
+                </div>
+              </div>
+              <div style="background: var(--bg-surface); padding: 0.75rem; border-radius: 4px; border: 1px solid var(--border); margin-bottom: 1rem;">
+                <h4 style="color: var(--text-primary); margin-bottom: 0.5rem; border-bottom: 1px solid var(--border); padding-bottom: 0.25rem;">Checks Checklist</h4>
+                <div id="prod-readiness-checklist" style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem;"></div>
+              </div>
+              <div id="prod-readiness-warnings-section" style="background: rgba(245, 158, 11, 0.05); padding: 0.75rem; border-radius: 4px; border: 1px solid var(--warning); margin-bottom: 1rem; display: none;">
+                <h4 style="color: var(--warning); margin-bottom: 0.25rem;">⚠️ Warnings</h4>
+                <ul id="prod-readiness-warnings-list" style="margin: 0; padding-left: 1.25rem;"></ul>
+              </div>
+              <div id="prod-readiness-nextsteps-section" style="background: rgba(0, 123, 255, 0.05); padding: 0.75rem; border-radius: 4px; border: 1px solid var(--primary); display: none;">
+                <h4 style="color: var(--primary); margin-bottom: 0.25rem;">📋 Next Steps / Remediation</h4>
+                <ul id="prod-readiness-nextsteps-list" style="margin: 0; padding-left: 1.25rem;"></ul>
+              </div>
+            </div>
+          </section>
+
         </div>
 
         <!-- Caller ID Pool & Reputation Manager -->
