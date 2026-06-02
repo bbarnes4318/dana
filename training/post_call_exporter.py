@@ -297,7 +297,7 @@ class PostCallExporter:
                 payload["call_id"] = getattr(lead, "call_id", None)
                 payload["campaign"] = getattr(lead, "campaign_id", None)
                 payload["prospect_phone"] = getattr(lead, "lead_phone_e164", None)
-                payload["transfer_consent"] = getattr(lead, "transfer_consent", False)
+                payload["transfer_consent"] = getattr(lead, "transfer_consent_confirmed", getattr(lead, "transfer_consent", False))
                 if getattr(lead, "do_not_call_requested", False):
                     payload["outcome"] = "dnc"
                 elif getattr(lead, "callback_requested", False):

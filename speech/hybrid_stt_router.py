@@ -77,6 +77,7 @@ class HybridSTTRouter(stt.STT):
         self.config = config
         self.local_stt = local_stt
         self._deepgram_stt: Optional[stt.STT] = None
+        self._openai_stt: Optional[stt.STT] = None
         self._preprocessor = None
 
         if config.enable_audio_preprocessing:
@@ -110,6 +111,28 @@ class HybridSTTRouter(stt.STT):
             return None
         except Exception as e:
             logger.error(f"Failed to instantiate Deepgram STT: {e}")
+            return None
+
+    @property
+    def openai_stt(self) -> Optional[stt.STT]:
+        """Lazy load OpenAI STT only when configured and requested."""
+        if self._openai_stt is not None:
+            return self._openai_stt
+
+        api_key = os.getenv("OPENAI_API_KEY")
+        if not api_key:
+            logger.warning("OPENAI_API_KEY is missing. OpenAI STT provider not configured.")
+            return None
+
+        try:
+            from livekit.plugins import openai
+            self._openai_stt = openai.STT()
+            return self._openai_stt
+        except ImportError:
+            logger.warning("livekit-plugins-openai package is not installed.")
+            return None
+        except Exception as e:
+            logger.error(f"Failed to instantiate OpenAI STT: {e}")
             return None
 
     def select_provider(self, call_id: Optional[str] = None, campaign_id: Optional[str] = None) -> str:
@@ -190,20 +213,30 @@ class HybridSTTRouter(stt.STT):
                 except Exception as e:
                     logger.error(f"Deepgram recognize failed: {e}. Falling back to Local STT.")
                     _local_failures[call_id] = _local_failures.get(call_id, 0) + 1
+        elif provider == "openai":
+            oa = self.openai_stt
+            if oa:
+                try:
+                    return await oa._recognize_impl(buffer, language=language)
+                except Exception as e:
+                    logger.error(f"OpenAI recognize failed: {e}. Falling back to Local STT.")
+                    _local_failures[call_id] = _local_failures.get(call_id, 0) + 1
 
         # Use Local STT with concurrency tracking
         async with AsyncTrackLocalSTTTask():
             return await self.local_stt._recognize_impl(buffer, language=language)
 
-    def stream(self) -> HybridSTTStream:
-        return HybridSTTStream(self)
+    def stream(self, *args, **kwargs) -> HybridSTTStream:
+        return HybridSTTStream(self, *args, **kwargs)
 
 
 class HybridSTTStream(stt.SpeechStream):
     """Audio stream forwarding frame chunks to the dynamically selected STT stream delegate."""
 
-    def __init__(self, router: HybridSTTRouter) -> None:
-        super().__init__()
+    def __init__(self, router: HybridSTTRouter, *args, **kwargs) -> None:
+        stt_val = kwargs.pop("stt", router)
+        conn_options = kwargs.get("conn_options")
+        super().__init__(stt=stt_val, conn_options=conn_options)
         self.router = router
         self._preprocessor = router._preprocessor
 
@@ -238,8 +271,22 @@ class HybridSTTStream(stt.SpeechStream):
                     campaign_id=self.campaign_id,
                 )
                 self.delegate_stt = self.router.local_stt
+        elif self.provider == "openai":
+            oa = self.router.openai_stt
+            if oa:
+                self.delegate_stt = oa
+            else:
+                logger.warning("OpenAI STT unavailable. Falling back to Local STT at stream start.")
+                self.provider = "local"
+                self.router.log_decision(
+                    "local",
+                    reason="fallback_openai_unavailable",
+                    call_id=self.call_id,
+                    campaign_id=self.campaign_id,
+                )
+                self.delegate_stt = self.router.local_stt
 
-        self.active_stream = self.delegate_stt.stream()
+        self.active_stream = self.delegate_stt.stream(*args, **kwargs)
         self._closed = False
 
     async def push_frame(self, frame: rtc.AudioFrame) -> None:
@@ -268,50 +315,29 @@ class HybridSTTStream(stt.SpeechStream):
                     campaign_id=self.campaign_id,
                 )
             self._closed = True
-            await self.active_stream.aclose(wait=False)
+            try:
+                await self.active_stream.aclose()
+            except Exception:
+                pass
             raise e
 
-    async def _run(self) -> AsyncIterator[SpeechEvent]:
-        """Iterates and yields transcript speech events safely."""
-        queue: asyncio.Queue[Optional[SpeechEvent]] = asyncio.Queue()
-        forward_task = None
-        current_delegate = None
-
-        async def forward_loop(stream: Any, q: asyncio.Queue[Optional[SpeechEvent]]) -> None:
-            try:
-                async for event in stream:
-                    await q.put(event)
-            except Exception as ex:
-                logger.error(f"Error in STT stream forwarder: {ex}")
-            finally:
-                await q.put(None)
-
+    async def _run(self) -> None:
+        """Forward speech events from the active stream delegate to our local event channel."""
         try:
-            while not self._closed:
-                if current_delegate != self.active_stream:
-                    if forward_task:
-                        forward_task.cancel()
-                    current_delegate = self.active_stream
-                    forward_task = asyncio.create_task(forward_loop(current_delegate, queue))
-
-                try:
-                    event = await asyncio.wait_for(queue.get(), timeout=0.1)
-                    if event is None:
-                        if current_delegate == self.active_stream:
-                            break
-                        continue
-                    yield event
-                    queue.task_done()
-                except asyncio.TimeoutError:
-                    continue
-        finally:
-            if forward_task:
-                forward_task.cancel()
+            async for event in self.active_stream:
+                self._event_ch.send_nowait(event)
+        except Exception as e:
+            logger.error(f"Error in STT stream forwarding run loop: {e}")
+            raise e
 
     async def aclose(self, *, wait: bool = True) -> None:
         self._closed = True
-        await self.active_stream.aclose(wait=wait)
+        try:
+            await self.active_stream.aclose()
+        except Exception as e:
+            logger.warning(f"Error closing delegate STT stream: {e}")
         # Clear preprocessor cache for the call
         if self._preprocessor:
             self._preprocessor.cleanup_call(self.call_id)
+        await super().aclose()
 

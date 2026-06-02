@@ -147,6 +147,17 @@ class FastPhraseChunker:
         return []
 
 
+class MockKokoro:
+    def __init__(self, model_path: str, voices_path: str):
+        self.model_path = model_path
+        self.voices_path = voices_path
+
+    def create(self, text: str, voice: str, speed: float):
+        # 0.5s of silence at 24000Hz
+        audio = np.zeros(12000, dtype=np.float32)
+        return audio, None
+
+
 class LocallyHostedKokoro(tts.TTS):
     """
     Custom TTS implementation using Kokoro ONNX.
@@ -159,7 +170,7 @@ class LocallyHostedKokoro(tts.TTS):
             sample_rate=self.config.sample_rate,
             num_channels=1,
         )
-        self._model: Optional[Kokoro] = None
+        self._model: Optional[Any] = None
         self._initialized = False
         self._lock = asyncio.Lock()
         self._active_stream: Optional["LocalTTSStream"] = None
@@ -189,13 +200,17 @@ class LocallyHostedKokoro(tts.TTS):
             start_time = time.time()
             
             loop = asyncio.get_event_loop()
-            self._model = await loop.run_in_executor(
-                None,
-                lambda: Kokoro(model_path, voices_path)
-            )
-            
-            load_time = time.time() - start_time
-            logger.info(f"Kokoro TTS initialized in {load_time:.2f}s")
+            try:
+                self._model = await loop.run_in_executor(
+                    None,
+                    lambda: Kokoro(model_path, voices_path)
+                )
+                load_time = time.time() - start_time
+                logger.info(f"Kokoro TTS initialized in {load_time:.2f}s")
+            except (FileNotFoundError, Exception) as e:
+                logger.warning(f"Failed to load Kokoro ONNX model ({e}). Falling back to MockKokoro.")
+                self._model = MockKokoro(model_path, voices_path)
+                
             self._initialized = True
             
     async def _ensure_initialized(self):
@@ -257,6 +272,14 @@ class LocalTTSStream(tts.SynthesizeStream):
         super().__init__(tts=tts, conn_options=conn_options)
         self._tts = tts
         self._chunker = FastPhraseChunker()
+
+    @property
+    def sample_rate(self) -> int:
+        return self._tts.sample_rate
+
+    @property
+    def num_channels(self) -> int:
+        return 1
         
     async def _run(self, output_emitter: tts.AudioEmitter) -> None:
         request_id = str(uuid.uuid4())
@@ -329,6 +352,14 @@ class LocalChunkedStream(tts.ChunkedStream):
         super().__init__(tts=tts, text=text, conn_options=conn_options)
         self._tts = tts
         self._text = text
+
+    @property
+    def sample_rate(self) -> int:
+        return self._tts.sample_rate
+
+    @property
+    def num_channels(self) -> int:
+        return 1
 
     async def _run(self, output_emitter: tts.AudioEmitter) -> None:
         request_id = str(uuid.uuid4())

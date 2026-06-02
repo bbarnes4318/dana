@@ -26,9 +26,11 @@ from core.agent_runtime import AgentRuntime
 try:
     from livekit.plugins import openai as lk_openai
     from livekit.plugins import silero
+    from livekit.plugins import deepgram
 except ImportError:
     lk_openai = None
     silero = None
+    deepgram = None
 
 # Setup standard logging
 logger = logging.getLogger("telephony.agent_worker")
@@ -562,7 +564,7 @@ async def run_room_session(ctx: Any, config: LiveKitAgentWorkerConfig) -> None:
         lead_phone_e164=participant.identity or "unknown",
         campaign_id=campaign_id
     )
-    state_machine = StateMachine(lead_prof, CallState())
+    state_machine = StateMachine(call_state=CallState(), lead_profile=lead_prof)
     
     from safety.call_stop_policy import CallStopPolicy
     call_stop_policy = CallStopPolicy()
@@ -632,10 +634,12 @@ async def run_room_session(ctx: Any, config: LiveKitAgentWorkerConfig) -> None:
     from livekit.agents import Agent as LkAgent
     class SimpleAgent(LkAgent):
         def __init__(self):
-            super().__init__(instructions="")
-            self.llm = shared.llm
-            self.tts = shared.tts
-            self.stt = shared.stt
+            super().__init__(
+                instructions="",
+                llm=shared.llm,
+                tts=shared.tts,
+                stt=shared.stt
+            )
 
         async def llm_node(self, chat_ctx, tools, model_settings):
             # Read last turn and process it
@@ -677,10 +681,10 @@ async def run_room_session(ctx: Any, config: LiveKitAgentWorkerConfig) -> None:
         room=ctx.room,
         agent=agent_instance,
         room_options=room_io.RoomOptions(
-            audio_input=room_io.AudioInputOptions(enabled=True),
-            audio_output=room_io.AudioOutputOptions(enabled=True),
-            video_input=room_io.VideoInputOptions(enabled=False),
-            text_input=room_io.TextInputOptions(enabled=False),
+            audio_input=room_io.AudioInputOptions(),
+            audio_output=room_io.AudioOutputOptions(),
+            video_input=False,
+            text_input=False,
         )
     )
 
@@ -692,7 +696,7 @@ async def run_room_session(ctx: Any, config: LiveKitAgentWorkerConfig) -> None:
 
     try:
         # Loop until disconnect
-        while ctx.room.is_connected():
+        while ctx.room.isconnected():
             await asyncio.sleep(1.0)
     finally:
         logger.info(f"Room session closed for call {session_state['call_id']}")
@@ -832,7 +836,7 @@ async def run_room_session(ctx: Any, config: LiveKitAgentWorkerConfig) -> None:
                         "campaign": campaign_id,
                         "prospect_phone": lead_phone or participant.identity,
                         "outcome": outcome,
-                        "transfer_consent": bool(lead_prof.transfer_consent),
+                        "transfer_consent": bool(lead_prof.transfer_consent_confirmed),
                         "turns": turns,
                         "tool_events": tool_events,
                         "qa": {},
@@ -885,6 +889,7 @@ def initialize_process(job_proc: Any) -> None:
     try:
         from livekit.plugins import openai as lk_openai
         from livekit.plugins import silero
+        from livekit.plugins import deepgram
     except ImportError as e:
         logger.warning(f"Failed to pre-import plugins in job process: {e}")
 

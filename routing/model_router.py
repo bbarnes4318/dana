@@ -247,7 +247,7 @@ class ModelRouter:
 
     def _get_cloud_provider(self, component: str) -> str:
         if component == "stt":
-            return "deepgram"
+            return os.getenv("DANA_STT_PROVIDER", "deepgram").lower()
         elif component == "llm":
             return "openai"
         elif component == "tts":
