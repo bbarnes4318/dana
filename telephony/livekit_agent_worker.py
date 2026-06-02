@@ -388,8 +388,10 @@ async def generate_agent_response(user_text: str, session_state: dict, runtime: 
             llm = lk_openai.LLM()
             chat_ctx = llm.ChatContext()
             
-            # System instructions
-            chat_ctx.messages.append(llm.ChatMessage(role="system", content=instructions))
+            # System instructions prefixed with static prompt loader context
+            static_prompt = runtime.prompt_loader.build_system_prompt()
+            combined_prompt = f"{static_prompt}\n\n{instructions}"
+            chat_ctx.messages.append(llm.ChatMessage(role="system", content=combined_prompt))
             
             # Dialogue history
             for t in session_state.get("turns", []):

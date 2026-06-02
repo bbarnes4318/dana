@@ -26,6 +26,7 @@ from livekit.agents import (
 )
 from livekit.plugins import openai as lk_openai
 from livekit.plugins import silero
+from speech.custom_vad import ElderlySileroVAD
 
 from voice_config import VoiceConfig
 from latency_metrics import LatencyRecorder
@@ -55,6 +56,39 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
+
+# Monkeypatch _ParticipantAudioOutput to support event-loop bypass for direct FFI playback
+try:
+    import livekit.agents.voice.room_io._output as room_io_output
+    import time
+    
+    original_forward_audio = room_io_output._ParticipantAudioOutput._forward_audio
+    
+    async def patched_forward_audio(self):
+        if getattr(self, "_bypass_main_loop", False):
+            # Bypass native push to self._audio_source and sleep instead to simulate playback pacing
+            # This maintains all events and callbacks on the main loop without blocking/scheduling native writes.
+            async for frame in self._audio_buf:
+                if not self._playback_enabled.is_set():
+                    await self._playback_enabled.wait()
+                    
+                if self._interrupted_event.is_set() or self._pushed_duration == 0:
+                    if self._interrupted_event.is_set() and self._flush_task:
+                        await self._flush_task
+                    continue
+                    
+                if not self._first_frame_event.is_set():
+                    self._first_frame_event.set()
+                    self.on_playback_started(created_at=time.time())
+                
+                await asyncio.sleep(frame.duration)
+        else:
+            await original_forward_audio(self)
+            
+    room_io_output._ParticipantAudioOutput._forward_audio = patched_forward_audio
+    logger.info("Successfully monkeypatched _ParticipantAudioOutput._forward_audio for event-loop bypass.")
+except Exception as e:
+    logger.error(f"Failed to monkeypatch _ParticipantAudioOutput: {e}")
 
 # ---- Default fallback prompt (used when file is missing) --------------------
 _DEFAULT_INSTRUCTIONS = (
@@ -206,9 +240,9 @@ class SharedComponents:
         self.llm = RoutedLLM(local_llm, cloud_llm, self.router)
         self.tts = RoutedTTS(local_tts, cloud_tts, self.router)
         
-        # 4. Initialize VAD (Silero VAD)
+        # 4. Initialize VAD (Elderly-Demographic Optimized Silero VAD)
         loop = asyncio.get_event_loop()
-        self.vad = await loop.run_in_executor(None, silero.VAD.load)
+        self.vad = await loop.run_in_executor(None, ElderlySileroVAD.load)
 
         # 5. Initialize stateless AgentRuntime components
         project_root = Path(__file__).resolve().parent
@@ -287,10 +321,14 @@ class DanaAgent(Agent):
         async def chat_fn(instructions: str) -> str:
             new_ctx = llm.ChatContext()
             
+            # Prepend static system prompt prefix (personality and compliance parameters)
+            static_prompt = self.prompt_loader.build_system_prompt()
+            combined_prompt = f"{static_prompt}\n\n{instructions}"
+            
             # Add compiled instructions as the system prompt
             new_ctx.messages.append(llm.ChatMessage(
                 role="system",
-                content=instructions
+                content=combined_prompt
             ))
             
             # Copy conversation history (user and assistant messages only)
@@ -638,6 +676,15 @@ async def entrypoint(ctx: JobContext):
         ),
     )
     
+    # Store the audio source for the direct FFI background playback
+    if hasattr(session, "_room_io") and session._room_io:
+        audio_output = session._room_io.audio_output
+        if hasattr(audio_output, "_audio_source"):
+            import tts_service
+            tts_service.active_audio_source = audio_output._audio_source
+            audio_output._bypass_main_loop = True
+            logger.info("Direct audio source registered in tts_service and main-loop bypass enabled.")
+            
     # Emit call.session_started event
     from integrations.crm_webhooks import emit_crm_event_async
     lead_prof = agent.adapter.state_machine.lead.to_summary_dict() if agent.adapter else None

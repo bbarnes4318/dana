@@ -100,6 +100,7 @@ services:
       --quantization ${VLLM_QUANTIZATION:-fp8}
       --gpu-memory-utilization ${VLLM_GPU_MEMORY_UTILIZATION:-0.70}
       --max-model-len ${VLLM_MAX_MODEL_LEN:-4096}
+      --block-size 16
       --enforce-eager
       --enable-prefix-caching
       --host 0.0.0.0

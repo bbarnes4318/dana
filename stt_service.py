@@ -16,6 +16,7 @@ from faster_whisper import WhisperModel
 from livekit import rtc
 from livekit.agents import stt, utils
 from livekit.agents.stt import SpeechEvent, SpeechEventType, SpeechData
+from livekit.agents.types import TimedString
 from voice_config import VoiceConfig
 
 logger = logging.getLogger(__name__)
@@ -198,24 +199,27 @@ class LocallyHostedSTT(stt.STT):
 class LocalSTTStream(stt.SpeechStream):
     """
     Queue/Event-driven streaming STT implementation with VAD speech boundary detection.
+    Optimized for low latency, zero-allocation rolling buffer ingestion.
     """
     
     def __init__(self, stt_instance: LocallyHostedSTT):
         super().__init__()
         self._stt = stt_instance
-        self._audio_buffer: list[rtc.AudioFrame] = []
         self._is_speaking = False
         self._speech_start_time: Optional[float] = None
         self._speech_end_time: Optional[float] = None
         self._silence_frames = 0
         
-        # Calculate min silence frames based on ms config (assumes 20ms per frame)
-        min_silence_ms = self._stt.config.min_silence_ms
-        self._min_silence_frames = max(1, min_silence_ms // 20)
-        
-        self._queue: asyncio.Queue[Optional[list[rtc.AudioFrame]]] = asyncio.Queue()
+        # Buffer sizes: 30 seconds at 16kHz
+        self._buffer_size = int(self._stt.config.sample_rate * self._stt.config.max_speech_duration_s)
+        self._rolling_buffer = np.zeros(self._buffer_size, dtype=np.float32)
+        self._inference_buffer = np.zeros(self._buffer_size, dtype=np.float32)
+        self._write_cursor = 0
+        self._speech_finalized = False
+        self._early_emitted = False
+        self._data_event = asyncio.Event()
         self._closed = False
-        
+
     @property
     def speech_start_time(self) -> Optional[float]:
         return self._speech_start_time
@@ -224,86 +228,213 @@ class LocalSTTStream(stt.SpeechStream):
     def speech_end_time(self) -> Optional[float]:
         return self._speech_end_time
         
+    def _run_whisper(self, audio_data: np.ndarray):
+        # Runs in executor (background thread)
+        segments, info = self._stt._model.transcribe(
+            audio_data,
+            language=self._stt.config.language,
+            beam_size=self._stt.config.beam_size,
+            vad_filter=self._stt.config.vad_filter,
+            vad_parameters=dict(
+                min_speech_duration_ms=self._stt.config.min_speech_duration_ms,
+                threshold=self._stt.config.vad_threshold
+            ),
+            word_timestamps=True,
+            hotwords="yes yeah no nope hello who is this insurance funeral burial cost price senior medicare age",
+            condition_on_previous_text=False
+        )
+        results = []
+        for segment in segments:
+            segment_words = []
+            if segment.words:
+                for w in segment.words:
+                    segment_words.append({
+                        "word": w.word,
+                        "start": w.start,
+                        "end": w.end,
+                        "probability": w.probability
+                    })
+            results.append({
+                "text": segment.text,
+                "words": segment_words
+            })
+        return results
+
     async def _run(self) -> AsyncIterator[SpeechEvent]:
         await self._stt._ensure_initialized()
         
         while not self._closed:
             try:
-                audio_frames = await self._queue.get()
-                if audio_frames is None:
+                # Wait for data event or a timeout/sleep (throttling transcription to at most once per 100ms)
+                try:
+                    await asyncio.wait_for(self._data_event.wait(), timeout=0.1)
+                    self._data_event.clear()
+                except asyncio.TimeoutError:
+                    pass
+                
+                if self._closed:
                     break
                     
-                # Speech segment ended, transcribe it
-                audio = self._stt._audio_frames_to_numpy(audio_frames)
-                
-                if len(audio) > self._stt.config.sample_rate * 0.25:  # Min 250ms
-                    # Emit interim event
-                    yield SpeechEvent(
-                        type=SpeechEventType.INTERIM_TRANSCRIPT,
-                        alternatives=[SpeechData(text="...", language=self._stt.config.language)]
-                    )
+                current_cursor = self._write_cursor
+                if current_cursor == 0:
+                    continue
                     
-                    # Transcribe
-                    from speech.local_stt_load import TrackLocalSTTTask
-                    with TrackLocalSTTTask():
-                        text = await self._stt._transcribe(audio)
-                    if text:
+                if self._early_emitted:
+                    if self._speech_finalized:
+                        self._speech_finalized = False
+                        self._write_cursor = 0
+                        self._early_emitted = False
+                    continue
+                
+                # Double-buffering copy to avoid concurrent write issues with background executor thread
+                self._inference_buffer[:current_cursor] = self._rolling_buffer[:current_cursor]
+                self._inference_buffer[current_cursor:] = 0.0
+                
+                # Check minimum length for Whisper (min 250ms or 4000 samples)
+                if current_cursor < 4000:
+                    continue
+                    
+                # Run transcription in executor
+                loop = asyncio.get_event_loop()
+                from speech.local_stt_load import TrackLocalSTTTask
+                with TrackLocalSTTTask():
+                    results = await loop.run_in_executor(None, self._run_whisper, self._inference_buffer)
+                
+                full_text = " ".join(seg["text"].strip() for seg in results).strip()
+                
+                # Construct words list
+                words = []
+                for seg in results:
+                    for w in seg["words"]:
+                        words.append(TimedString(
+                            w["word"].strip(),
+                            start_time=w["start"],
+                            end_time=w["end"],
+                            confidence=w["probability"]
+                        ))
+                
+                if not words and not full_text:
+                    if self._speech_finalized:
+                        self._speech_finalized = False
+                        self._write_cursor = 0
+                    continue
+                
+                # Check for early affirmation/negation token (confidence > 85%)
+                AFFIRMATION_NEGATION_TOKENS = {"yes", "yeah", "no", "nope"}
+                if words and not self._early_emitted:
+                    first_word = words[0]
+                    first_word_text = first_word.lower().strip(".,?!;:")
+                    if first_word_text in AFFIRMATION_NEGATION_TOKENS and first_word.confidence > 0.85:
+                        logger.info(f"STT early emit triggered for token: '{first_word_text}' (confidence: {first_word.confidence:.2f})")
+                        self._early_emitted = True
+                        
                         yield SpeechEvent(
                             type=SpeechEventType.FINAL_TRANSCRIPT,
-                            alternatives=[SpeechData(text=text, language=self._stt.config.language)]
+                            alternatives=[SpeechData(
+                                language=self._stt.config.language,
+                                text=first_word_text,
+                                start_time=first_word.start_time,
+                                end_time=first_word.end_time,
+                                confidence=first_word.confidence,
+                                words=[first_word]
+                            )]
                         )
+                        
+                        self._speech_finalized = False
+                        self._write_cursor = 0
+                        continue
                 
-                self._stt._vad.reset()
-                self._queue.task_done()
+                if self._speech_finalized:
+                    self._speech_finalized = False
+                    self._write_cursor = 0
+                    
+                    yield SpeechEvent(
+                        type=SpeechEventType.FINAL_TRANSCRIPT,
+                        alternatives=[SpeechData(
+                            language=self._stt.config.language,
+                            text=full_text,
+                            start_time=words[0].start_time if words else 0.0,
+                            end_time=words[-1].end_time if words else 0.0,
+                            confidence=sum(w.confidence for w in words) / len(words) if words else 0.0,
+                            words=words
+                        )]
+                    )
+                else:
+                    yield SpeechEvent(
+                        type=SpeechEventType.INTERIM_TRANSCRIPT,
+                        alternatives=[SpeechData(
+                            language=self._stt.config.language,
+                            text=full_text,
+                            start_time=words[0].start_time if words else 0.0,
+                            end_time=words[-1].end_time if words else 0.0,
+                            confidence=sum(w.confidence for w in words) / len(words) if words else 0.0,
+                            words=words
+                        )]
+                    )
             except Exception as e:
-                logger.error(f"Error in STT stream run loop: {e}")
-                
+                logger.error(f"Error in STT stream run loop: {e}", exc_info=True)
+
     async def push_frame(self, frame: rtc.AudioFrame):
         if self._closed:
             return
             
         await self._stt._ensure_initialized()
         
-        # Convert frame to numpy for VAD
-        audio_data = np.frombuffer(frame.data, dtype=np.int16).astype(np.float32) / 32768.0
-        
-        # Run VAD
-        is_speech = self._stt._vad.is_speech(audio_data)
-        
-        if is_speech:
-            if not self._is_speaking:
-                self._is_speaking = True
-                self._speech_start_time = time.time()
-                logger.debug(f"STT: Speech start detected at {self._speech_start_time}")
+        samples = np.frombuffer(frame.data, dtype=np.int16)
+        n_samples = len(samples)
+        if n_samples == 0:
+            return
             
-            self._silence_frames = 0
-            self._audio_buffer.append(frame)
+        # Determine min_silence_frames dynamically based on frame size
+        frame_duration_ms = (n_samples / self._stt.config.sample_rate) * 1000
+        min_silence_ms = self._stt.config.min_silence_ms
+        min_silence_frames = max(1, int(min_silence_ms / frame_duration_ms))
+        
+        # Zero-allocation normalization and copy to rolling buffer
+        write_len = min(n_samples, self._buffer_size - self._write_cursor)
+        if write_len > 0:
+            np.divide(samples[:write_len], 32768.0, out=self._rolling_buffer[self._write_cursor : self._write_cursor + write_len])
             
-            # Check for max duration
-            if self._speech_start_time and (time.time() - self._speech_start_time > self._stt.config.max_speech_duration_s):
-                self._is_speaking = False
-                self._speech_end_time = time.time()
-                logger.debug(f"STT: Speech max duration exceeded, end detected at {self._speech_end_time}")
-                await self._queue.put(list(self._audio_buffer))
-                self._audio_buffer.clear()
-        else:
-            if self._is_speaking:
-                self._silence_frames += 1
-                self._audio_buffer.append(frame)  # Include trailing silence
+            # Run VAD on the slice of new samples (zero allocation view)
+            is_speech = self._stt._vad.is_speech(self._rolling_buffer[self._write_cursor : self._write_cursor + write_len])
+            self._write_cursor += write_len
+            
+            if is_speech:
+                if not self._is_speaking:
+                    self._is_speaking = True
+                    self._speech_finalized = False
+                    self._early_emitted = False
+                    self._speech_start_time = time.time()
+                    # Copy the frame that triggered speech to the beginning of the rolling buffer
+                    self._rolling_buffer[:write_len] = self._rolling_buffer[self._write_cursor - write_len : self._write_cursor]
+                    self._rolling_buffer[write_len:].fill(0.0)
+                    self._write_cursor = write_len
+                    logger.debug(f"STT: Speech start detected at {self._speech_start_time}")
                 
-                # End of speech detected
-                if self._silence_frames >= self._min_silence_frames:
+                self._silence_frames = 0
+                
+                if self._speech_start_time and (time.time() - self._speech_start_time > self._stt.config.max_speech_duration_s):
                     self._is_speaking = False
+                    self._speech_finalized = True
                     self._speech_end_time = time.time()
-                    logger.debug(f"STT: Speech end detected at {self._speech_end_time} after {self._silence_frames} silence frames")
-                    await self._queue.put(list(self._audio_buffer))
-                    self._audio_buffer.clear()
+                    logger.debug(f"STT: Speech max duration exceeded, end detected at {self._speech_end_time}")
+                
+                self._data_event.set()
+            else:
+                if self._is_speaking:
+                    self._silence_frames += 1
+                    
+                    if self._silence_frames >= min_silence_frames:
+                        self._is_speaking = False
+                        self._speech_finalized = True
+                        self._speech_end_time = time.time()
+                        logger.debug(f"STT: Speech end detected at {self._speech_end_time} after {self._silence_frames} silence frames")
+                    
+                    self._data_event.set()
     
     async def aclose(self):
         self._closed = True
-        # Terminate queue worker
-        await self._queue.put(None)
-        self._audio_buffer.clear()
+        self._data_event.set()
 
 
 def create_stt(config: VoiceConfig) -> stt.STT:

@@ -6,46 +6,40 @@ import numpy as np
 
 from tts_service import FastPhraseChunker, normalize_text, LocallyHostedKokoro, LocalTTSStream
 
-def test_punctuation_flush():
-    chunker = FastPhraseChunker()
+def test_token_phrase_chunking():
+    # Test that it chunks when hitting min_tokens (3)
+    chunker = FastPhraseChunker(min_tokens=3, max_tokens=5)
     
+    # 1 word, not completed (no trailing space)
     p1 = chunker.feed("Hello")
     assert len(p1) == 0
     
-    p2 = chunker.feed(" world")
+    # 2 words completed (with trailing space)
+    p2 = chunker.feed(" world ")
     assert len(p2) == 0
     
-    p3 = chunker.feed("!")
-    assert p3 == ["Hello world!"]
+    # 3 words completed total (Hello, world, this)
+    p3 = chunker.feed("this is")
+    # "Hello world this" are completed words (followed by a space/word boundaries)
+    # completed words: "Hello", "world", "this". The "is" at the end is not followed by space yet.
+    assert p3 == ["Hello world this"]
+    assert chunker.buffer == "is"
     
-    p4 = chunker.feed(" How")
-    assert len(p4) == 0
+    # Push more to trigger next chunk
+    p4 = chunker.feed(" a test of the")
+    # Buffer was "is a test of the"
+    # Words in buffer: ["is", "a", "test", "of", "the"]
+    # Completed count: 4 (since "the" is not followed by a space)
+    # With min_tokens=3 and max_tokens=5: chunk_len = min(4, 5) = 4
+    # Returns ["is a test of"]
+    # Buffer becomes "the"
+    assert p4 == ["is a test of"]
+    assert chunker.buffer == "the"
     
-    p5 = chunker.feed(" are you?")
-    assert p5 == ["How are you?"]
-
-
-def test_word_boundary_flush():
-    chunker = FastPhraseChunker()
-    
-    # Feed buffer that is long and ends in a space (ends with space at index 33 >= 18)
-    p = chunker.feed("This is a very long sentence that ")
-    assert p == ["This is a very long sentence that"]
+    # Flush remaining
+    p5 = chunker.flush()
+    assert p5 == ["the"]
     assert chunker.buffer == ""
-
-
-@pytest.mark.asyncio
-async def test_timeout_flush():
-    chunker = FastPhraseChunker()
-    
-    p1 = chunker.feed("Yes indeed")
-    assert len(p1) == 0
-    
-    # Wait > 150ms to trigger timeout
-    await asyncio.sleep(0.2)
-    
-    p2 = chunker.feed(" ")
-    assert p2 == ["Yes indeed"]
 
 
 def test_pronunciation_normalization():

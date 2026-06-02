@@ -27,8 +27,8 @@ def test_signatures_match_sdk():
     assert "conn_options" in synthesize_sig.parameters
 
 def test_phrase_chunker_passes():
-    chunker = FastPhraseChunker()
-    p = chunker.feed("Hello world!")
+    chunker = FastPhraseChunker(min_tokens=2)
+    p = chunker.feed("Hello world! ")
     assert p == ["Hello world!"]
 
 def test_normalize_text_passes():

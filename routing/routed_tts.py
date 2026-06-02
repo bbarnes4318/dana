@@ -181,7 +181,7 @@ class RoutedTTSStream(tts.SynthesizeStream):
         # Initialize the output emitter mirroring active stream settings
         request_id = str(uuid.uuid4())
         active_sample_rate = getattr(self.active_stream, "sample_rate", getattr(self.active_stream, "_tts", self.routed_tts).sample_rate)
-        active_num_channels = getattr(self.active_stream, "num_channels", getattr(self.active_stream, "_tts", self.routed_tts).num_channels)
+        active_num_channels = getattr(self.active_stream, "num_channels", getattr(getattr(self.active_stream, "_tts", self.routed_tts), "num_channels", 1))
         output_emitter.initialize(
             request_id=request_id,
             sample_rate=active_sample_rate,

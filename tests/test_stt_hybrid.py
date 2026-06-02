@@ -530,3 +530,72 @@ def test_runtime_finalization_audits() -> None:
     finalized, compliant = runtime._finalize_spoken_response(text, "callback")
     assert finalized == "No problem. Would later today or tomorrow be better?"
     assert compliant is False
+
+
+def test_local_stt_stream_rolling_and_early_emit() -> None:
+    """Verify that LocalSTTStream handles rolling buffer writes and detects early emit tokens."""
+    from unittest.mock import MagicMock, AsyncMock
+    
+    # 1. Setup mock LocallyHostedSTT instance
+    stt_mock = MagicMock()
+    stt_mock.config.sample_rate = 16000
+    stt_mock.config.max_speech_duration_s = 30.0
+    stt_mock.config.language = "en"
+    stt_mock.config.beam_size = 1
+    stt_mock.config.vad_filter = True
+    stt_mock.config.min_speech_duration_ms = 250
+    stt_mock.config.vad_threshold = 0.5
+    stt_mock.config.min_silence_ms = 300
+    
+    stt_mock._ensure_initialized = AsyncMock()
+    
+    # Mock VAD
+    vad_mock = MagicMock()
+    vad_mock.is_speech.return_value = True
+    stt_mock._vad = vad_mock
+    
+    # 2. Instantiate stream
+    from stt_service import LocalSTTStream
+    stream = LocalSTTStream(stt_mock)
+    
+    # Assert rolling/inference buffer initialized
+    assert stream._rolling_buffer is not None
+    assert len(stream._rolling_buffer) == 480000
+    assert stream._write_cursor == 0
+    
+    # 3. Simulate push_frame with speech data (30ms frame at 16kHz = 480 samples = 960 bytes)
+    frame_data = b"\x00" * 960
+    frame = rtc.AudioFrame(data=frame_data, sample_rate=16000, num_channels=1, samples_per_channel=480)
+    
+    asyncio.run(stream.push_frame(frame))
+    
+    # Assert write cursor incremented
+    assert stream._write_cursor == 480
+    assert stream._is_speaking is True
+    
+    # 4. Test _run_whisper result mapping
+    # Mock transcribe call response
+    class MockSegment:
+        def __init__(self, text, words):
+            self.text = text
+            self.words = words
+            
+    class MockWord:
+        def __init__(self, word, start, end, probability):
+            self.word = word
+            self.start = start
+            self.end = end
+            self.probability = probability
+            
+    stt_mock._model.transcribe.return_value = (
+        [MockSegment("yes", [MockWord("yes", 0.0, 0.3, 0.95)])],
+        None
+    )
+    
+    results = stream._run_whisper(stream._inference_buffer)
+    assert len(results) == 1
+    assert results[0]["text"] == "yes"
+    assert len(results[0]["words"]) == 1
+    assert results[0]["words"][0]["word"] == "yes"
+    assert results[0]["words"][0]["probability"] == 0.95
+

@@ -237,6 +237,10 @@ sys.modules['livekit.agents.voice'] = agents_voice
 agents_utils = MagicMock()
 sys.modules['livekit.agents.utils'] = agents_utils
 
+# Create agents.types module
+agents_types = MagicMock()
+sys.modules['livekit.agents.types'] = agents_types
+
 # Create DummyAgent, function_tool, and RunContext to allow proper subclassing and introspection
 class DummyAgent:
     def __init__(self, instructions: str = "", **kwargs):
@@ -289,6 +293,7 @@ livekit_agents.llm = agents_llm
 livekit_agents.stt = agents_stt
 livekit_agents.voice = agents_voice
 livekit_agents.utils = agents_utils
+livekit_agents.types = agents_types
 livekit_agents.Agent = DummyAgent
 livekit_agents.function_tool = function_tool
 livekit_agents.RunContext = DummyRunContext
@@ -319,6 +324,7 @@ sys.modules['livekit'] = livekit_mock
 sys.modules['livekit.plugins'] = MagicMock()
 sys.modules['livekit.plugins.openai'] = MagicMock()
 sys.modules['livekit.plugins.silero'] = MagicMock()
+sys.modules['livekit.plugins.silero.vad'] = MagicMock()
 sys.modules['livekit.plugins.deepgram'] = MagicMock()
 
 # Mock model packages
