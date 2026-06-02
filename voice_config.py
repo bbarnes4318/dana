@@ -87,8 +87,8 @@ class VoiceConfig:
     agent_prompt_path: str = field(default_factory=lambda: env_str("DANA_AGENT_PROMPT_PATH", "prompts/final_expense_alex.md"))
 
     # ---- Opening Behavior ----
-    opening_mode: str = field(default_factory=lambda: env_str("DANA_OPENING_MODE", "wait_for_user"))
-    opening_line: str = field(default_factory=lambda: env_str("DANA_OPENING_LINE", ""))
+    opening_mode: str = field(default_factory=lambda: env_str("DANA_OPENING_MODE", "immediate"))
+    opening_line: str = field(default_factory=lambda: env_str("DANA_OPENING_LINE", "Hello?"))
 
     # ---- STT ----
     stt_provider: str = field(default_factory=lambda: env_str("DANA_STT_PROVIDER", "local"))

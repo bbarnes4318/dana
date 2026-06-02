@@ -121,11 +121,7 @@ def test_worker_generates_safe_fallback_greeting():
     with patch.dict(os.environ, {}, clear=True):
         config = build_worker_config_from_env()
         greeting = config.greeting_text
-        assert "licensed" not in greeting.lower()
-        assert "qualify" not in greeting.lower()
-        assert "price" not in greeting.lower()
-        assert "approval" not in greeting.lower()
-        assert "American Beneficiary" in greeting
+        assert greeting == "Hello?"
 
 # 7. test_generate_agent_response_uses_agent_runtime
 @pytest.mark.asyncio

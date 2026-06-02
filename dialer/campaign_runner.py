@@ -350,8 +350,10 @@ class CampaignRunner:
             if is_dry_run:
                 outcome = "human_answered"  # default dry run connects
             else:
-                # In real scenario, wait/parse webhook AMD and VAD updates from DB
-                outcome = await self._wait_for_amd_outcome(call_id)
+                # In real scenario, we no longer block/wait for AMD to eliminate post-dial delay.
+                # We instantly bridge the media stream and assume human_answered.
+                outcome = "human_answered"
+
 
         # Update caller ID metrics
         await self.caller_id_pool.update_metrics_and_cooldown(caller_id, campaign_id, campaign, outcome, now)

@@ -476,6 +476,91 @@ class DanaAgent(Agent):
             push_task.cancel()
 
 
+async def run_amd_worker(track: rtc.Track, session: AgentSession, agent: any, room: rtc.Room):
+    import array
+    import math
+    logger.info("AMD classification worker started for call_id=%s", getattr(agent, "call_id", "unknown"))
+    
+    audio_stream = rtc.AudioStream(track, sample_rate=16000, num_channels=1)
+    
+    # RMS Energy threshold (RMS) = 300.0 (detects speech component)
+    # ZCR frequency range = 0.01 to 0.55 (voiced speech components)
+    rms_threshold = 300.0
+    zcr_min = 0.01
+    zcr_max = 0.55
+    
+    speech_duration = 0.0
+    silence_duration = 0.0
+    is_speaking = False
+    
+    try:
+        async for event in audio_stream:
+            if not room.is_connected() or getattr(agent, "is_voicemail", False):
+                break
+                
+            frame = event.frame
+            if not frame.data:
+                continue
+                
+            samples = array.array('h', frame.data)
+            num_samples = len(samples)
+            if num_samples == 0:
+                continue
+                
+            frame_duration = frame.duration
+            
+            # Root Mean Square (RMS) energy
+            sum_squares = sum(s * s for s in samples)
+            rms = math.sqrt(sum_squares / num_samples)
+            
+            # Zero Crossing Rate (ZCR)
+            zero_crossings = 0
+            for i in range(1, num_samples):
+                if (samples[i] >= 0 and samples[i-1] < 0) or (samples[i] < 0 and samples[i-1] >= 0):
+                    zero_crossings += 1
+            zcr = zero_crossings / num_samples
+            
+            is_frame_speech = (rms > rms_threshold) and (zcr_min <= zcr <= zcr_max)
+            
+            if is_frame_speech:
+                if not is_speaking:
+                    is_speaking = True
+                    logger.debug("AMD: Speech onset detected (RMS=%.1f, ZCR=%.3f)", rms, zcr)
+                speech_duration += frame_duration
+                silence_duration = 0.0
+            else:
+                if is_speaking:
+                    silence_duration += frame_duration
+                    if silence_duration > 0.25:
+                        logger.debug("AMD: Speech offset detected. Total speech duration was %.2fs", speech_duration - silence_duration)
+                        is_speaking = False
+                        speech_duration = 0.0
+                        silence_duration = 0.0
+                    else:
+                        speech_duration += frame_duration
+            
+            if speech_duration >= 1.5:
+                logger.info("AMD: Voicemail greeting detected (speech_duration=%.2fs >= 1.5s). Triggering MachineDetected teardown.", speech_duration)
+                agent.is_voicemail = True
+                
+                # Switch LLM state machine to voicemail/end stage
+                if hasattr(agent, "adapter") and agent.adapter and agent.adapter.state_machine:
+                    from core.call_state import CallStage
+                    agent.adapter.state_machine.call_state.transition_to(CallStage.END)
+                
+                # Free up outbound port immediately by disconnecting room
+                asyncio.create_task(room.disconnect())
+                break
+                
+    except asyncio.CancelledError:
+        logger.debug("AMD worker task cancelled")
+    except Exception as e:
+        logger.error("Error in AMD parallel worker: %s", e, exc_info=True)
+    finally:
+        await audio_stream.aclose()
+        logger.info("AMD classification worker finished")
+
+
 async def entrypoint(ctx: JobContext):
     logger.info(f"New connection: room={ctx.room.name}")
     
@@ -601,10 +686,26 @@ async def entrypoint(ctx: JobContext):
     # Connect to room (audio only)
     await ctx.connect(auto_subscribe=AutoSubscribe.AUDIO_ONLY)
     
+    # Track listener for AMD
+    def start_amd_for_track(track):
+        if track.kind == rtc.TrackKind.KIND_AUDIO:
+            if not getattr(agent, "_amd_started", False):
+                agent._amd_started = True
+                logger.info("Starting AMD parallel worker for track: %s", track.sid)
+                asyncio.create_task(run_amd_worker(track, session, agent, ctx.room))
+
+    @ctx.room.on("track_subscribed")
+    def on_track_subscribed(track: rtc.Track, publication: rtc.TrackPublication, participant: rtc.RemoteParticipant):
+        start_amd_for_track(track)
+    
     # Wait for participant
     participant = await ctx.wait_for_participant()
     latency_recorder.mark("participant_joined")
     logger.info(f"Participant joined: {participant.identity}")
+
+    for publication in participant.track_publications.values():
+        if publication.track:
+            start_amd_for_track(publication.track)
     
     # Resolve campaign_id from room metadata, participant metadata, or lead profile in database
     campaign_id = None
@@ -738,6 +839,16 @@ async def entrypoint(ctx: JobContext):
 
         # Run post-call QA and scoring
         outcome = "ended"
+        if getattr(agent, "is_voicemail", False):
+            outcome = "voicemail"
+        elif lead_prof.get("is_qualified"):
+            outcome = "transferred"
+        elif lead_prof.get("callback_requested"):
+            outcome = "callback"
+        elif lead_prof.get("do_not_call_requested"):
+            outcome = "dnc"
+        elif lead_prof.get("disqualified_reason"):
+            outcome = "disqualified"
         try:
             from qa.call_record import CallRecord as QACallRecord, CallTurn as QACallTurn
             from qa.scoring import CallScorer
@@ -766,7 +877,9 @@ async def entrypoint(ctx: JobContext):
             duration = (ended_at - started_at).total_seconds()
             final_stage = agent.adapter.state_machine.call_state.current_stage.value if agent.adapter else "end"
             
-            if lead_prof.get("is_qualified"):
+            if getattr(agent, "is_voicemail", False):
+                outcome = "voicemail"
+            elif lead_prof.get("is_qualified"):
                 outcome = "transferred"
             elif lead_prof.get("callback_requested"):
                 outcome = "callback"
@@ -829,9 +942,11 @@ async def entrypoint(ctx: JobContext):
                 started_at = latency_recorder.get_timestamp("call_start") or ended_at
             if 'duration' not in locals():
                 duration = (ended_at - started_at).total_seconds()
-            if 'outcome' not in locals():
+            if 'outcome' not in locals() or outcome == "ended":
                 outcome = "ended"
-                if lead_prof.get("is_qualified"):
+                if getattr(agent, "is_voicemail", False):
+                    outcome = "voicemail"
+                elif lead_prof.get("is_qualified"):
                     outcome = "transferred"
                 elif lead_prof.get("callback_requested"):
                     outcome = "callback"
@@ -898,6 +1013,50 @@ async def entrypoint(ctx: JobContext):
                 logger.error(f"Failed to mark call finished in campaign pacer: {pe}")
         except Exception as ce:
             logger.error(f"Failed to update call record or save metrics: {ce}")
+
+        # Update lead queue status in database based on actual outcome
+        try:
+            if lead_id and shared.repository:
+                from datetime import datetime, timezone, timedelta
+                from dialer.retry_policy import RetryPolicy
+                
+                if outcome == "voicemail":
+                    campaign_rec = await shared.repository.get_campaign(campaign_id)
+                    lead_rec = await shared.repository.get_lead(lead_id)
+                    if campaign_rec and lead_rec:
+                        attempts = lead_rec.get("attempts", 1)
+                        retry_after = RetryPolicy.get_retry_after("voicemail", campaign_rec, attempts, datetime.now(timezone.utc))
+                        await shared.repository.release_lead_lock(
+                            lead_id=lead_id,
+                            reason="transient_call_failure",
+                            retry_after=retry_after,
+                            status_override="failed"
+                        )
+                elif outcome == "dnc":
+                    lead_rec = await shared.repository.get_lead(lead_id)
+                    phone = lead_rec.get("phone_number") or lead_rec.get("phone_e164") or participant.identity
+                    await shared.repository.mark_lead_dnc(
+                        lead_id=lead_id,
+                        phone_e164=phone,
+                        campaign_id=campaign_id,
+                        reason="prospect_dnc_request"
+                    )
+                elif outcome == "callback":
+                    cb_time_str = lead_prof.get("callback_time_local") or lead_prof.get("callback_time")
+                    cb_time = None
+                    if cb_time_str:
+                        try:
+                            cb_time = datetime.fromisoformat(cb_time_str)
+                        except ValueError:
+                            pass
+                    if not cb_time:
+                        cb_time = datetime.now(timezone.utc) + timedelta(hours=2)
+                    await shared.repository.mark_lead_callback(
+                        lead_id=lead_id,
+                        callback_time=cb_time
+                    )
+        except Exception as ue:
+            logger.error(f"Failed to update lead status at session end: {ue}")
 
         # Emit call.completed exactly once at the very end of the call cycle
         await emit_crm_event_async(

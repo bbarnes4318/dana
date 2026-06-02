@@ -57,7 +57,7 @@ def main():
     env = get_runtime_env()
     
     # Build config dynamically from parameters and environment
-    greeting = args.greeting_text or os.environ.get("DANA_OPENING_LINE") or "Hi, this is Dana with American Beneficiary. I’m calling about final expense information you recently requested."
+    greeting = args.greeting_text or os.environ.get("DANA_OPENING_LINE") or "Hello?"
     llm_p = env["llm_routing_mode"]
     if llm_p == "local":
         llm_p = "agent_runtime"

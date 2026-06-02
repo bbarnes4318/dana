@@ -432,11 +432,11 @@ async def test_dana_confirm_place_call_validation(
 
 
 @pytest.mark.asyncio
-async def test_real_mode_without_amd_result_does_not_blindly_assume_human_answered(
+async def test_real_mode_without_amd_result_instantly_bridges_call(
     repo, default_campaign, default_lead, default_consent
 ):
-    """Test that in real mode, if no simulated outcome is provided and no AMD outcome is written,
-    it does not blindly assume human_answered and eventually times out to no_answer.
+    """Test that in real mode, if no simulated outcome is provided,
+    it instantly bridges the call (success_human_answered) to eliminate post-dial delay.
     """
     await default_campaign(campaign_id="camp-test")
     await default_lead(lead_id="lead-123", campaign_id="camp-test", state="FL")
@@ -468,13 +468,12 @@ async def test_real_mode_without_amd_result_does_not_blindly_assume_human_answer
 
     with mock.patch.dict(os.environ, env_patches):
         status = await runner.run_once(campaign_id="camp-test", now=now_utc)
-        assert status == "retryable_failure_no_answer"
+        assert status == "success_human_answered"
 
-    # Verify lead status is failed and lock is released, rather than completed (human_answered)
+    # Verify lead status is completed
     updated_lead = await repo.get_lead("lead-123")
     assert updated_lead is not None
-    assert updated_lead["lock_holder_id"] is None
-    assert updated_lead["status"] == "failed"
+    assert updated_lead["status"] == "completed"
 
 
 @pytest.mark.asyncio
