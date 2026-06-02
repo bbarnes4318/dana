@@ -1328,6 +1328,110 @@
             </div>
           </section>
 
+          <!-- F. Safe Batch Live Campaign Test Card (Span 2) -->
+          <section class="card" style="grid-column: span 2;" id="batch-campaign-test-card">
+            <div class="card-title">Run Safe Batch Live Campaign Test</div>
+            <p style="font-size: 0.75rem; color: var(--text-secondary); margin-bottom: 0.5rem;">
+              Enforces a controlled batch of test leads dialed sequentially. Max concurrent calls = 1.
+            </p>
+            <form id="batch-test-form">
+              <div class="form-group" style="margin-bottom: 0.5rem;">
+                <label for="batch-test-phones">Phone Numbers (comma or newline-separated, E.164, max 5) *</label>
+                <textarea id="batch-test-phones" class="form-control" rows="3" placeholder="+15551111111&#10;+15552222222&#10;+15553333333" required style="font-family: monospace; font-size: 0.8rem;"></textarea>
+              </div>
+              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 0.5rem;">
+                <div class="form-group">
+                  <label for="batch-test-operator">Operator *</label>
+                  <input type="text" id="batch-test-operator" class="form-control" placeholder="Operator Name" required>
+                </div>
+                <div class="form-group">
+                  <label for="batch-test-max-leads">Max Leads</label>
+                  <select id="batch-test-max-leads" class="form-control">
+                    <option value="1">1</option>
+                    <option value="2">2</option>
+                    <option value="3" selected>3 (Default)</option>
+                    <option value="4">4</option>
+                    <option value="5">5 (Hard Max)</option>
+                  </select>
+                </div>
+              </div>
+              <div style="display: flex; gap: 1.5rem; margin-bottom: 0.75rem; font-size: 0.75rem; flex-wrap: wrap;">
+                <div class="checkbox-group">
+                  <input type="checkbox" id="batch-test-dry-run" checked>
+                  <label for="batch-test-dry-run">Dry Run (No live calling)</label>
+                </div>
+                <div class="checkbox-group">
+                  <input type="checkbox" id="batch-test-allow-now">
+                  <label for="batch-test-allow-now">Allow Current Time (Window Override)</label>
+                </div>
+                <div class="checkbox-group">
+                  <input type="checkbox" id="batch-test-require-turns" checked>
+                  <label for="batch-test-require-turns">Require Turns</label>
+                </div>
+                <div class="checkbox-group">
+                  <input type="checkbox" id="batch-test-require-export" checked>
+                  <label for="batch-test-require-export">Require Export</label>
+                </div>
+                <div class="checkbox-group">
+                  <input type="checkbox" id="batch-test-run-intake" checked>
+                  <label for="batch-test-run-intake">Run Intake After Export</label>
+                </div>
+                <div class="checkbox-group">
+                  <input type="checkbox" id="batch-test-interactive">
+                  <label for="batch-test-interactive">Interactive Mode</label>
+                </div>
+              </div>
+              <div class="form-group" style="margin-bottom: 0.75rem;">
+                <label for="batch-test-confirm">Type <strong>LIVE CALL</strong> to confirm:</label>
+                <input type="text" id="batch-test-confirm" class="form-control" placeholder="Type LIVE CALL here">
+              </div>
+              <button type="submit" id="btn-run-batch-test" class="btn btn-primary" style="width: 100%;">🚀 Run Batch Campaign Test</button>
+            </form>
+            <div id="batch-test-results" style="font-size: 0.75rem; color: var(--text-secondary); line-height: 1.4; margin-top: 1rem; display: none;">
+              <h4 style="color: var(--text-primary); margin-bottom: 0.5rem;">Batch Results Summary</h4>
+              <div id="batch-test-checklist" style="margin-bottom: 0.75rem; background: var(--bg-surface); padding: 0.75rem; border-radius: 4px; border: 1px solid var(--border);"></div>
+              <h4 style="color: var(--text-primary); margin-bottom: 0.25rem;">Raw Output Log</h4>
+              <pre id="batch-test-output-json" style="background: rgba(0,0,0,0.2); padding: 0.5rem; border-radius: 4px; overflow-x: auto; max-height: 250px; font-family: monospace;"></pre>
+            </div>
+          </section>
+
+          <!-- G. Live Campaign Monitor Card (Span 2) -->
+          <section class="card" style="grid-column: span 2;" id="live-monitor-card">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+              <div class="card-title" style="margin-bottom: 0;">Live Campaign Monitor</div>
+              <button id="btn-refresh-monitor" class="btn btn-secondary" style="width: auto; padding: 0.25rem 0.5rem; font-size: 0.75rem;">🔄 Refresh</button>
+            </div>
+            <p style="font-size: 0.75rem; color: var(--text-secondary); margin-bottom: 0.5rem;">
+              Real-time monitoring of campaign states, active calls, DID rotation, and safety blockers.
+            </p>
+            <div id="monitor-content" style="font-size: 0.75rem; line-height: 1.4; color: var(--text-secondary);">
+              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1rem;">
+                <div style="background: var(--bg-surface); padding: 0.75rem; border-radius: 4px; border: 1px solid var(--border);">
+                  <h4 style="color: var(--text-primary); margin-bottom: 0.5rem; border-bottom: 1px solid var(--border); padding-bottom: 0.25rem;">System & Safety Status</h4>
+                  <div id="monitor-safety-status">No safety blockers detected.</div>
+                </div>
+                <div style="background: var(--bg-surface); padding: 0.75rem; border-radius: 4px; border: 1px solid var(--border);">
+                  <h4 style="color: var(--text-primary); margin-bottom: 0.5rem; border-bottom: 1px solid var(--border); padding-bottom: 0.25rem;">Active Campaigns & DID Rotation</h4>
+                  <div id="monitor-campaigns-dids">No active campaigns.</div>
+                </div>
+              </div>
+              <div style="background: var(--bg-surface); padding: 0.75rem; border-radius: 4px; border: 1px solid var(--border); margin-bottom: 1rem;">
+                <h4 style="color: var(--text-primary); margin-bottom: 0.5rem; border-bottom: 1px solid var(--border); padding-bottom: 0.25rem;">Active Calls & Sessions</h4>
+                <div id="monitor-active-calls">No active calls or sessions.</div>
+              </div>
+              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+                <div style="background: var(--bg-surface); padding: 0.75rem; border-radius: 4px; border: 1px solid var(--border);">
+                  <h4 style="color: var(--text-primary); margin-bottom: 0.5rem; border-bottom: 1px solid var(--border); padding-bottom: 0.25rem;">Recent Turns & Transcripts</h4>
+                  <div id="monitor-recent-turns">No recent transcripts.</div>
+                </div>
+                <div style="background: var(--bg-surface); padding: 0.75rem; border-radius: 4px; border: 1px solid var(--border);">
+                  <h4 style="color: var(--text-primary); margin-bottom: 0.5rem; border-bottom: 1px solid var(--border); padding-bottom: 0.25rem;">Recent Post-Call Exports</h4>
+                  <div id="monitor-recent-exports">No recent exports.</div>
+                </div>
+              </div>
+            </div>
+          </section>
+
         </div>
 
         <!-- Caller ID Pool & Reputation Manager -->

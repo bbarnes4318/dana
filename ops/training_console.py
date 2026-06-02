@@ -2020,6 +2020,74 @@ class TrainingOperationsConsole:
                 error=str(e)
             )
 
+    async def run_live_batch_campaign_test(
+        self,
+        phone_numbers: List[str],
+        operator: str,
+        confirm: str,
+        allow_now: bool = False,
+        dry_run: bool = True,
+        max_leads: int = 3,
+        require_turns: bool = True,
+        require_post_call_export: bool = True,
+        run_intake_after_export: bool = True,
+        min_agent_turns: int = 1,
+        min_prospect_turns: int = 0,
+        interactive: bool = False,
+    ) -> ConsoleActionResult:
+        try:
+            from telephony.live_batch_campaign_test import ControlledBatchCampaignTester, LiveBatchTestConfig
+            tester = ControlledBatchCampaignTester(repository=self.repository)
+            config = LiveBatchTestConfig(
+                phone_numbers=phone_numbers,
+                operator=operator,
+                confirm=confirm,
+                allow_now=allow_now,
+                dry_run=dry_run,
+                max_leads=max_leads,
+                require_turns=require_turns,
+                require_post_call_export=require_post_call_export,
+                run_intake_after_export=run_intake_after_export,
+                min_agent_turns=min_agent_turns,
+                min_prospect_turns=min_prospect_turns,
+                interactive=interactive,
+            )
+            res = await tester.run(config)
+            return ConsoleActionResult(
+                action="run_live_batch_campaign_test",
+                success=res.success,
+                message="Live batch campaign test executed.",
+                data=res.model_dump(mode="json"),
+                warnings=res.warnings,
+                report_json_path=res.report_json_path,
+                report_markdown_path=res.report_markdown_path
+            )
+        except Exception as e:
+            return ConsoleActionResult(
+                action="run_live_batch_campaign_test",
+                success=False,
+                message="Failed to execute batch campaign test.",
+                error=str(e)
+            )
+
+    async def get_live_campaign_monitor_snapshot(self, campaign_id: Optional[str] = None) -> ConsoleActionResult:
+        try:
+            from telephony.live_campaign_monitor import get_live_campaign_monitor_snapshot
+            snapshot = await get_live_campaign_monitor_snapshot(self.repository, campaign_id=campaign_id)
+            return ConsoleActionResult(
+                action="get_live_campaign_monitor_snapshot",
+                success=True,
+                message="Live campaign monitor snapshot retrieved.",
+                data=snapshot
+            )
+        except Exception as e:
+            return ConsoleActionResult(
+                action="get_live_campaign_monitor_snapshot",
+                success=False,
+                message="Failed to retrieve live campaign monitor snapshot.",
+                error=str(e)
+            )
+
 
 
 

@@ -2598,6 +2598,301 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
+  // Safe Batch Live Campaign Test Form submission
+  const batchTestForm = document.getElementById("batch-test-form");
+  if (batchTestForm) {
+    batchTestForm.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const phonesText = document.getElementById("batch-test-phones").value.trim();
+      const operator = document.getElementById("batch-test-operator").value.trim();
+      const confirmInput = document.getElementById("batch-test-confirm").value.trim();
+      const dryRun = document.getElementById("batch-test-dry-run").checked;
+      const allowNow = document.getElementById("batch-test-allow-now").checked;
+      const maxLeads = parseInt(document.getElementById("batch-test-max-leads").value || "3", 10);
+      const requireTurns = document.getElementById("batch-test-require-turns").checked;
+      const requireExport = document.getElementById("batch-test-require-export").checked;
+      const runIntake = document.getElementById("batch-test-run-intake").checked;
+      const interactive = document.getElementById("batch-test-interactive").checked;
+      
+      const btn = document.getElementById("btn-run-batch-test");
+      const text = btn.innerText;
+
+      if (!phonesText) {
+        alert("Phone Numbers are required!");
+        return;
+      }
+      if (!operator) {
+        alert("Operator is required!");
+        return;
+      }
+
+      if (!dryRun && confirmInput !== "LIVE CALL") {
+        alert("You must type LIVE CALL to confirm placing live campaign calls!");
+        return;
+      }
+
+      const phoneNumbers = phonesText.split(/[\n,]+/).map(p => p.trim()).filter(p => p.length > 0);
+      if (phoneNumbers.length === 0) {
+        alert("No valid phone numbers parsed!");
+        return;
+      }
+      if (phoneNumbers.length > maxLeads) {
+        alert(`You entered ${phoneNumbers.length} numbers, which exceeds the max leads limit of ${maxLeads}!`);
+        return;
+      }
+      if (phoneNumbers.length > 5) {
+        alert(`You entered ${phoneNumbers.length} numbers, which exceeds the hard maximum limit of 5!`);
+        return;
+      }
+
+      setButtonState(btn, true, "🚀 Running Batch Test...");
+      log(`Starting controlled batch campaign test for ${phoneNumbers.length} leads (dry-run: ${dryRun})...`);
+
+      const payload = {
+        phone_numbers: phoneNumbers,
+        operator: operator,
+        confirm: confirmInput,
+        dry_run: dryRun,
+        allow_now: allowNow,
+        max_leads: maxLeads,
+        require_turns: requireTurns,
+        require_post_call_export: requireExport,
+        run_intake_after_export: runIntake,
+        min_agent_turns: 1,
+        min_prospect_turns: interactive ? 1 : 0,
+        interactive: interactive
+      };
+
+      try {
+        const response = await fetch("/api/telephony/live/batch-campaign-test", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+        const data = await response.json();
+        
+        const resultsBox = document.getElementById("batch-test-results");
+        const jsonBox = document.getElementById("batch-test-output-json");
+        const checklistBox = document.getElementById("batch-test-checklist");
+        
+        if (resultsBox && jsonBox) {
+          resultsBox.style.display = "block";
+          jsonBox.innerText = JSON.stringify(data, null, 2);
+        }
+
+        const result = data.data || data;
+
+        if (checklistBox) {
+          let html = "<ul style='list-style-type: none; padding: 0; margin: 0; line-height: 1.8; font-size: 0.75rem;'>";
+          
+          const overallSuccess = result.success;
+          html += `<li>${overallSuccess ? "🟢" : "🔴"} <strong>Batch Outcome:</strong> ${overallSuccess ? "Passed" : "Failed / Blocked"}</li>`;
+          html += `<li>📦 <strong>Campaign ID:</strong> <code>${result.campaign_id || "N/A"}</code></li>`;
+          html += `<li>📊 <strong>Stats:</strong> Requested: ${result.requested_leads}, Attempted: ${result.attempted_calls || 0}, Completed: ${result.completed_calls || 0}, Failed: ${result.failed_calls || 0}</li>`;
+          html += `<li>🛑 <strong>Campaign Stopped Post-Run:</strong> ${result.campaign_stopped ? "Yes" : "No"}</li>`;
+
+          if (result.calls && result.calls.length > 0) {
+            html += "<li style='margin-top: 0.5rem;'><strong>Individual Call Details:</strong></li>";
+            result.calls.forEach((c, idx) => {
+              const callOk = c.call_outcome === "completed" && !c.failure_reason;
+              html += `<li style='margin-left: 0.75rem; border-left: 2px solid ${callOk ? "#2e7d32" : "#c62828"}; padding-left: 0.5rem;'>`;
+              html += `${callOk ? "🟢" : "🔴"} Call ${idx + 1}: <strong>${c.phone_number_masked}</strong><br>`;
+              html += `&nbsp;&nbsp;• Attempt ID: <code>${c.call_attempt_id || "N/A"}</code><br>`;
+              html += `&nbsp;&nbsp;• DID: <code>${c.selected_did || "N/A"}</code> (${c.caller_id_source || "N/A"})<br>`;
+              html += `&nbsp;&nbsp;• Turns: ${c.turn_count} (Agent: ${c.agent_turn_count}, Prospect: ${c.prospect_turn_count})<br>`;
+              html += `&nbsp;&nbsp;• Phone Rang: ${c.phone_rang ? "Yes" : "No"}, Answered: ${c.answered ? "Yes" : "No"}, Dana Spoke: ${c.dana_spoke ? "Yes" : "No"}<br>`;
+              html += `&nbsp;&nbsp;• Export Path: <code>${c.post_call_export_path || "N/A"}</code><br>`;
+              if (c.failure_reason) {
+                html += `&nbsp;&nbsp;• <strong style="color: #ff8f00;">Halt/Failure Reason:</strong> ${c.failure_reason}<br>`;
+              }
+              html += `</li>`;
+            });
+          }
+
+          if (result.failures && result.failures.length > 0) {
+            html += "<li style='margin-top: 0.5rem; color: #ff1744;'><strong>Critical Blockers/Failures:</strong></li>";
+            result.failures.forEach(f => {
+              html += `<li style='margin-left: 0.75rem; color: #ff1744;'>❌ ${f}</li>`;
+            });
+          }
+          if (result.warnings && result.warnings.length > 0) {
+            html += "<li style='margin-top: 0.5rem; color: #ffeb3b;'><strong>Warnings:</strong></li>";
+            result.warnings.forEach(w => {
+              html += `<li style='margin-left: 0.75rem; color: #ffeb3b;'>⚠️ ${w}</li>`;
+            });
+          }
+
+          html += "</ul>";
+          checklistBox.innerHTML = html;
+        }
+
+        if (response.ok && data.success) {
+          showStatus("Batch Campaign Test Passed", data.message || "Controlled batch campaign test finished successfully.");
+          log(`Batch campaign test succeeded! Report paths: JSON: ${data.report_json_path}, MD: ${data.report_markdown_path}`, "success");
+        } else {
+          const msg = data.error || data.message || "Controlled batch campaign test failed.";
+          showStatus("Batch Campaign Test Result", msg, true);
+          log(`Batch campaign test error: ${msg}`, "error");
+        }
+
+      } catch (err) {
+        showStatus("Network Error", err.message, true);
+        log(`Batch test network error: ${err.message}`, "error");
+      } finally {
+        setButtonState(btn, false, text);
+      }
+    });
+  }
+
+  // Live Campaign Monitor refresh and display
+  const btnRefreshMonitor = document.getElementById("btn-refresh-monitor");
+  async function refreshCampaignMonitor() {
+    const safetyBox = document.getElementById("monitor-safety-status");
+    const campaignsBox = document.getElementById("monitor-campaigns-dids");
+    const activeCallsBox = document.getElementById("monitor-active-calls");
+    const recentTurnsBox = document.getElementById("monitor-recent-turns");
+    const recentExportsBox = document.getElementById("monitor-recent-exports");
+
+    try {
+      const response = await fetch("/api/telephony/live/monitor");
+      const data = await response.json();
+      const snapshot = data.data || data;
+
+      // Render safety status
+      if (safetyBox) {
+        let blockers = snapshot.safety_blockers || [];
+        let warnings = snapshot.warnings || [];
+        let html = "";
+        if (blockers.length === 0 && warnings.length === 0) {
+          html = "<div style='color: #4caf50;'>🟢 System is ready. No safety blockers or warnings.</div>";
+        } else {
+          if (blockers.length > 0) {
+            html += "<div style='color: #ff1744; font-weight: bold; margin-bottom: 0.5rem;'>❌ SAFETY BLOCKERS:</div>";
+            blockers.forEach(b => {
+              html += `<div style='color: #ff1744; margin-left: 0.5rem;'>• ${b}</div>`;
+            });
+          }
+          if (warnings.length > 0) {
+            html += "<div style='color: #ffeb3b; font-weight: bold; margin-top: 0.5rem; margin-bottom: 0.25rem;'>⚠️ WARNINGS:</div>";
+            warnings.forEach(w => {
+              html += `<div style='color: #ffeb3b; margin-left: 0.5rem;'>• ${w}</div>`;
+            });
+          }
+        }
+        safetyBox.innerHTML = html;
+      }
+
+      // Render campaigns & DIDs
+      if (campaignsBox) {
+        let activeCamps = snapshot.active_campaigns || [];
+        let didUsage = snapshot.did_usage || [];
+        let html = "";
+
+        if (activeCamps.length === 0) {
+          html += "<div>⚪ No active campaigns.</div>";
+        } else {
+          html += "<div style='margin-bottom: 0.5rem;'><strong>Active Campaigns:</strong></div>";
+          activeCamps.forEach(c => {
+            html += `<div style='margin-left: 0.5rem; border-left: 2px solid var(--border); padding-left: 0.5rem;'>`;
+            html += `• ID: <code>${c.campaign_id}</code> (${c.name})<br>`;
+            html += `• Status: <span style="color: #4caf50;">${c.status}</span><br>`;
+            html += `• Pacing: Max concurrent: ${c.max_concurrent_calls}, Daily cap: ${c.daily_call_cap}<br>`;
+            html += `</div>`;
+          });
+        }
+
+        if (didUsage.length > 0) {
+          html += "<div style='margin-top: 0.75rem; margin-bottom: 0.25rem;'><strong>Caller ID (DID) Usage:</strong></div>";
+          didUsage.forEach(d => {
+            html += `<div style='margin-left: 0.5rem;'>• <code>${d.caller_id}</code>: ${d.active_calls} active call(s)</div>`;
+          });
+        } else {
+          html += "<div style='margin-top: 0.75rem; color: var(--text-secondary);'>No caller IDs currently in use.</div>";
+        }
+
+        campaignsBox.innerHTML = html;
+      }
+
+      // Render active calls & sessions
+      if (activeCallsBox) {
+        let activeCalls = snapshot.active_calls || [];
+        let liveSessions = snapshot.live_sessions || [];
+        let html = "";
+
+        if (activeCalls.length === 0 && liveSessions.length === 0) {
+          html = "<div>⚪ No active calls or Voice worker sessions.</div>";
+        } else {
+          if (activeCalls.length > 0) {
+            html += "<div style='margin-bottom: 0.5rem;'><strong>Active Call Placements:</strong></div>";
+            activeCalls.forEach(c => {
+              html += `<div style='margin-left: 0.5rem; border-left: 2px solid #29b6f6; padding-left: 0.5rem; margin-bottom: 0.4rem;'>`;
+              html += `• Attempt ID: <code>${c.call_attempt_id}</code><br>`;
+              html += `• Phone: <strong>${c.phone_number_masked}</strong> | DID: <code>${c.selected_did}</code><br>`;
+              html += `• Status: <span style="background: rgba(0,191,255,0.1); padding: 0.1rem 0.3rem; border-radius: 3px;">${c.status}</span> | Room: <code>${c.livekit_room_name}</code><br>`;
+              html += `</div>`;
+            });
+          }
+          if (liveSessions.length > 0) {
+            html += "<div style='margin-top: 0.75rem; margin-bottom: 0.5rem;'><strong>Active Voice Sessions:</strong></div>";
+            liveSessions.forEach(s => {
+              html += `<div style='margin-left: 0.5rem; border-left: 2px solid #66bb6a; padding-left: 0.5rem; margin-bottom: 0.4rem;'>`;
+              html += `• Session ID: <code>${s.session_id}</code><br>`;
+              html += `• Status: <span style="color: #66bb6a;">${s.status}</span> | Stage: <code>${s.current_stage || "None"}</code><br>`;
+              html += `• Room: <code>${s.livekit_room_name}</code><br>`;
+              html += `</div>`;
+            });
+          }
+        }
+        activeCallsBox.innerHTML = html;
+      }
+
+      // Render recent turns
+      if (recentTurnsBox) {
+        let recentTurns = snapshot.recent_turns || [];
+        if (recentTurns.length === 0) {
+          recentTurnsBox.innerHTML = "<div>⚪ No recent call transcripts.</div>";
+        } else {
+          let html = "<ul style='list-style-type: none; padding: 0; margin: 0;'>";
+          recentTurns.forEach(t => {
+            html += `<li style='margin-bottom: 0.4rem;'>`;
+            html += `• Attempt: <code>${t.call_attempt_id.substring(0, 8)}...</code> (<strong>${t.phone_number_masked}</strong>)<br>`;
+            html += `&nbsp;&nbsp;Turns: <strong>${t.turn_count}</strong> (Agent: ${t.agent_turn_count}, Prospect: ${t.prospect_turn_count})`;
+            html += `</li>`;
+          });
+          html += "</ul>";
+          recentTurnsBox.innerHTML = html;
+        }
+      }
+
+      // Render recent exports
+      if (recentExportsBox) {
+        let recentExports = snapshot.recent_exports || [];
+        if (recentExports.length === 0) {
+          recentExportsBox.innerHTML = "<div>⚪ No recent post-call exports.</div>";
+        } else {
+          let html = "<ul style='list-style-type: none; padding: 0; margin: 0;'>";
+          recentExports.forEach(e => {
+            html += `<li style='margin-bottom: 0.4rem;'>`;
+            html += `• Attempt: <code>${e.call_attempt_id.substring(0, 8)}...</code> (<strong>${e.phone_number_masked}</strong>)<br>`;
+            html += `&nbsp;&nbsp;Export: <code>${e.post_call_export_path}</code>`;
+            html += `</li>`;
+          });
+          html += "</ul>";
+          recentExportsBox.innerHTML = html;
+        }
+      }
+
+    } catch (err) {
+      log(`Failed to refresh campaign monitor: ${err.message}`, "error");
+    }
+  }
+
+  if (btnRefreshMonitor) {
+    btnRefreshMonitor.addEventListener("click", refreshCampaignMonitor);
+    refreshCampaignMonitor();
+    setInterval(refreshCampaignMonitor, 5000);
+  }
+
   // Caller ID Pool Management
   const btnRefreshDids = document.getElementById("btn-refresh-dids");
   const didsTableBody = document.getElementById("dids-table-body");

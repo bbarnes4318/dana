@@ -736,6 +736,50 @@ class TrainingWebConsoleServer(ThreadingHTTPServer):
                 )
                 return (200 if res.success else 400, res.model_dump(mode="json"))
 
+            elif route == "/api/telephony/live/batch-campaign-test" and method == "POST":
+                if not body:
+                    return (400, {"success": False, "error": "JSON body is required."})
+                phone_numbers = body.get("phone_numbers")
+                operator = body.get("operator")
+                confirm = body.get("confirm")
+                allow_now = bool(body.get("allow_now", False))
+                dry_run = bool(body.get("dry_run", True))
+                max_leads = int(body.get("max_leads", 3))
+                require_turns = bool(body.get("require_turns", True))
+                require_post_call_export = bool(body.get("require_post_call_export", True))
+                run_intake_after_export = bool(body.get("run_intake_after_export", True))
+                min_agent_turns = int(body.get("min_agent_turns", 1))
+                min_prospect_turns = int(body.get("min_prospect_turns", 0))
+                interactive = bool(body.get("interactive", False))
+
+                if not phone_numbers:
+                    return (400, {"success": False, "error": "phone_numbers parameter is required."})
+                if not isinstance(phone_numbers, list):
+                    return (400, {"success": False, "error": "phone_numbers must be a list."})
+                if not operator:
+                    return (400, {"success": False, "error": "operator parameter is required."})
+
+                res = await self.console.run_live_batch_campaign_test(
+                    phone_numbers=phone_numbers,
+                    operator=operator,
+                    confirm=confirm or "",
+                    allow_now=allow_now,
+                    dry_run=dry_run,
+                    max_leads=max_leads,
+                    require_turns=require_turns,
+                    require_post_call_export=require_post_call_export,
+                    run_intake_after_export=run_intake_after_export,
+                    min_agent_turns=min_agent_turns,
+                    min_prospect_turns=min_prospect_turns,
+                    interactive=interactive,
+                )
+                return (200 if res.success else 400, res.model_dump(mode="json"))
+
+            elif route == "/api/telephony/live/monitor" and method == "GET":
+                campaign_id = query_params.get("campaign_id", [None])[0]
+                res = await self.console.get_live_campaign_monitor_snapshot(campaign_id=campaign_id)
+                return (200 if res.success else 400, res.model_dump(mode="json"))
+
 
             elif route == "/api/telephony/calls/live" and method == "GET":
                 campaign_id = query_params.get("campaign_id", [None])[0]
