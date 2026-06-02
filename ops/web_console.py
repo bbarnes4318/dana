@@ -706,6 +706,15 @@ class TrainingWebConsoleServer(ThreadingHTTPServer):
                 confirm = body.get("confirm")
                 allow_now = bool(body.get("allow_now", False))
                 dry_run = bool(body.get("dry_run", True))
+                
+                require_turns = bool(body.get("require_turns", False))
+                require_post_call_export = bool(body.get("require_post_call_export", False))
+                run_intake_after_export = bool(body.get("run_intake_after_export", False))
+                min_agent_turns = int(body.get("min_agent_turns", 1))
+                min_prospect_turns = body.get("min_prospect_turns")
+                if min_prospect_turns is not None:
+                    min_prospect_turns = int(min_prospect_turns)
+                interactive = bool(body.get("interactive", False))
 
                 if not to:
                     return (400, {"success": False, "error": "to parameter is required."})
@@ -718,8 +727,15 @@ class TrainingWebConsoleServer(ThreadingHTTPServer):
                     confirm=confirm or "",
                     allow_now=allow_now,
                     dry_run=dry_run,
+                    require_turns=require_turns,
+                    require_post_call_export=require_post_call_export,
+                    run_intake_after_export=run_intake_after_export,
+                    min_agent_turns=min_agent_turns,
+                    min_prospect_turns=min_prospect_turns,
+                    interactive=interactive,
                 )
                 return (200 if res.success else 400, res.model_dump(mode="json"))
+
 
             elif route == "/api/telephony/calls/live" and method == "GET":
                 campaign_id = query_params.get("campaign_id", [None])[0]

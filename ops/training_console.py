@@ -1974,16 +1974,33 @@ class TrainingOperationsConsole:
         confirm: str,
         allow_now: bool = False,
         dry_run: bool = True,
+        require_turns: bool = False,
+        require_post_call_export: bool = False,
+        run_intake_after_export: bool = False,
+        min_agent_turns: int = 1,
+        min_prospect_turns: Optional[int] = None,
+        interactive: bool = False,
     ) -> ConsoleActionResult:
         try:
             from telephony.one_lead_live_campaign_test import ControlledCampaignTester, ControlledCampaignTestConfig
             tester = ControlledCampaignTester(repository=self.repository)
+            
+            min_prospect = min_prospect_turns
+            if min_prospect is None:
+                min_prospect = 1 if interactive else 0
+                
             config = ControlledCampaignTestConfig(
                 to=to,
                 operator=operator,
                 confirm=confirm,
                 allow_now=allow_now,
                 dry_run=dry_run,
+                require_turns=require_turns,
+                require_post_call_export=require_post_call_export,
+                run_intake_after_export=run_intake_after_export,
+                min_agent_turns=min_agent_turns,
+                min_prospect_turns=min_prospect,
+                interactive=interactive,
             )
             res = await tester.run(config)
             return ConsoleActionResult(
@@ -2002,6 +2019,7 @@ class TrainingOperationsConsole:
                 message="Failed to execute controlled campaign test.",
                 error=str(e)
             )
+
 
 
 

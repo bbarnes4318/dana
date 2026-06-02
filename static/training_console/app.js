@@ -2438,6 +2438,16 @@ document.addEventListener("DOMContentLoaded", () => {
   // One-Lead Live Campaign Test Form submission
   const campaignTestForm = document.getElementById("campaign-test-form");
   if (campaignTestForm) {
+    const interactiveCb = document.getElementById("campaign-test-interactive");
+    if (interactiveCb) {
+      interactiveCb.addEventListener("change", (e) => {
+        const prospectTurnsInput = document.getElementById("campaign-test-min-prospect-turns");
+        if (prospectTurnsInput) {
+          prospectTurnsInput.value = e.target.checked ? "1" : "0";
+        }
+      });
+    }
+
     campaignTestForm.addEventListener("submit", async (e) => {
       e.preventDefault();
       const to = document.getElementById("campaign-test-phone").value.trim();
@@ -2445,6 +2455,13 @@ document.addEventListener("DOMContentLoaded", () => {
       const confirmInput = document.getElementById("campaign-test-confirm").value.trim();
       const dryRun = document.getElementById("campaign-test-dry-run").checked;
       const allowNow = document.getElementById("campaign-test-allow-now").checked;
+      
+      const requireTurns = document.getElementById("campaign-test-require-turns").checked;
+      const requireExport = document.getElementById("campaign-test-require-export").checked;
+      const runIntake = document.getElementById("campaign-test-run-intake").checked;
+      const interactive = document.getElementById("campaign-test-interactive").checked;
+      const minAgentTurns = parseInt(document.getElementById("campaign-test-min-agent-turns").value || "1", 10);
+      const minProspectTurns = parseInt(document.getElementById("campaign-test-min-prospect-turns").value || "0", 10);
       
       const btn = document.getElementById("btn-run-campaign-test");
       const text = btn.innerText;
@@ -2471,7 +2488,13 @@ document.addEventListener("DOMContentLoaded", () => {
         operator: operator,
         confirm: confirmInput,
         dry_run: dryRun,
-        allow_now: allowNow
+        allow_now: allowNow,
+        require_turns: requireTurns,
+        require_post_call_export: requireExport,
+        run_intake_after_export: runIntake,
+        min_agent_turns: minAgentTurns,
+        min_prospect_turns: minProspectTurns,
+        interactive: interactive
       };
 
       try {
@@ -2486,6 +2509,7 @@ document.addEventListener("DOMContentLoaded", () => {
         const resultsBox = document.getElementById("campaign-test-results");
         const jsonBox = document.getElementById("campaign-test-output-json");
         const checklistBox = document.getElementById("campaign-test-checklist");
+        const transcriptPreviewBox = document.getElementById("campaign-test-transcript-preview");
         
         if (resultsBox && jsonBox) {
           resultsBox.style.display = "block";
@@ -2494,6 +2518,14 @@ document.addEventListener("DOMContentLoaded", () => {
 
         // Parse result object (console wraps action result)
         const result = data.data || data;
+
+        if (transcriptPreviewBox) {
+          if (result.transcript_preview) {
+            transcriptPreviewBox.innerText = result.transcript_preview;
+          } else {
+            transcriptPreviewBox.innerText = "No turns captured.";
+          }
+        }
 
         if (checklistBox) {
           let html = "<ul style='list-style-type: none; padding: 0; margin: 0; line-height: 1.8; font-size: 0.75rem;'>";
@@ -2526,10 +2558,28 @@ document.addEventListener("DOMContentLoaded", () => {
           const campaignStopped = result.campaign_stopped;
           html += `<li>${campaignStopped ? "🟢" : "🔴"} <strong>Post-Test Shutdown:</strong> ${campaignStopped ? "Campaign safely stopped" : "Failed to stop campaign"}</li>`;
           
+          // Turn Counts (Prompt 38)
+          const turnCount = result.turn_count || 0;
+          const agentTurns = result.agent_turn_count || 0;
+          const prospectTurns = result.prospect_turn_count || 0;
+          html += `<li>📊 <strong>Turn Counts:</strong> Total: ${turnCount} (Agent: ${agentTurns}, Prospect: ${prospectTurns})</li>`;
+
+          // Call Outcome (Prompt 38)
+          const callOutcome = result.call_outcome || "unknown";
+          html += `<li>📞 <strong>Call Outcome:</strong> <span style="background: var(--bg-surface); padding: 0.1rem 0.4rem; border-radius: 4px; border: 1px solid var(--border);">${callOutcome}</span></li>`;
+
+          // Post-Call Export Path (Prompt 38)
+          const exportPath = result.post_call_export_path;
+          html += `<li>💾 <strong>Post-Call Export Path:</strong> ${exportPath ? `<code style='font-family: monospace;'>${exportPath}</code>` : "None"}</li>`;
+
+          // Intake Status (Prompt 38)
+          const intakeRun = result.intake_run;
+          html += `<li>📦 <strong>Intake Run:</strong> ${intakeRun === "yes" ? "🟢 Yes" : "⚪ No"}</li>`;
+
           html += "</ul>";
-          
           checklistBox.innerHTML = html;
         }
+
 
         if (response.ok && data.success) {
           showStatus("Campaign Test Passed", data.message || "Controlled one-lead campaign test finished successfully.");

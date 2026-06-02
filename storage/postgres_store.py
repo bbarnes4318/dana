@@ -24,7 +24,11 @@ TABLE_COLUMNS: dict[str, set[str]] = {
     "campaigns": {"id", "campaign_id", "name", "status", "config", "created_at", "updated_at"},
     "leads": {"id", "lead_id", "phone_e164", "campaign_id", "consent_artifact_id", "source_vendor", "created_at", "updated_at", "status", "payload", "attempts", "last_attempt_at", "retry_after", "lock_holder_id", "locked_at", "callback_time", "priority"},
     "calls": {"id", "call_id", "lead_id", "campaign_id", "phone_e164", "caller_id", "started_at", "answered_at", "ended_at", "duration_seconds", "outcome", "recording_url", "transcript", "qualification", "compliance_flags", "latency_summary", "qa_score", "created_at", "updated_at", "amd_result", "retry_after", "dry_run"},
-    "call_turns": {"id", "call_id", "turn_number", "speaker", "text", "stage", "created_at"},
+    "call_turns": {
+        "id", "call_id", "turn_number", "speaker", "text", "stage", "created_at",
+        "call_attempt_id", "campaign_id", "lead_id", "livekit_room_name", "participant_id",
+        "compliance_warnings", "latency_metrics", "selected_did", "caller_id_source"
+    },
     "call_events": {"id", "call_id", "event_type", "payload", "created_at"},
     "tool_events": {"id", "call_id", "tool_name", "params", "result", "success", "created_at"},
     "transfers": {"id", "call_id", "lead_id", "transfer_mode", "agent_id", "target_phone", "success", "failure_reason", "provider_call_id", "summary", "created_at"},

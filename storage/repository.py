@@ -185,6 +185,19 @@ class Repository:
         """
         if "created_at" in kwargs and "timestamp" not in kwargs:
             kwargs["timestamp"] = kwargs["created_at"]
+            
+        call_id = kwargs.get("call_id")
+        turn_number = kwargs.get("turn_number")
+        if call_id and turn_number is not None:
+            existing = await self._store.query(_CALL_TURNS, {"call_id": call_id, "turn_number": turn_number})
+            if existing:
+                record = dict(existing[0])
+                record.update({k: v for k, v in kwargs.items() if v is not None})
+                turn = CallTurn(**record)
+                data = turn.model_dump(mode="json")
+                data["id"] = record["id"]
+                return await self._store.save(_CALL_TURNS, data)
+                
         turn = CallTurn(**kwargs)
         data = turn.model_dump(mode="json")
         data.setdefault("id", str(uuid.uuid4()))
@@ -194,6 +207,7 @@ class Repository:
             wb_queue.enqueue(_CALL_TURNS, data)
             return data["id"]
         return await self._store.save(_CALL_TURNS, data)
+
 
     async def save_tool_event(self, **kwargs: Any) -> str:
         """Validate and persist a :class:`ToolEvent`.

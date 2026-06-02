@@ -227,6 +227,7 @@ async def test_stops_campaign_after_test(repo, mock_readiness):
 @pytest.mark.asyncio
 async def test_never_dials_more_than_one(repo, mock_readiness, mock_dial_result):
     """Verify that even if capacity exceeds, dialer tick enforces max calls limit of 1."""
+    import asyncio
     tester = ControlledCampaignTester(repository=repo)
     dt = datetime(2026, 6, 1, 18, 0, 0, tzinfo=timezone.utc)
     config = ControlledCampaignTestConfig(
@@ -238,25 +239,43 @@ async def test_never_dials_more_than_one(repo, mock_readiness, mock_dial_result)
         now=dt
     )
 
-    with patch("telephony.live_telephony_readiness.LiveTelephonyReadinessChecker.run", new_callable=AsyncMock) as mock_ready_run, \
-         patch("telephony.livekit_agent_worker.check_worker_dependencies", return_value={"ready": True}), \
-         patch("telephony.livekit_adapter.LiveKitOutboundAdapter.dial", new_callable=AsyncMock) as mock_dial:
-        mock_ready_run.return_value = mock_readiness
-        mock_dial.return_value = mock_dial_result
-        
-        await repo.save_did(
-            provider="telnyx",
-            phone_number="+15055202898",
-            status="active",
-            source="manual",
-            verified_for_provider=True
-        )
+    original_sleep = asyncio.sleep
+    async def mock_sleep(delay):
+        attempts = await repo.query_call_attempts({})
+        for attempt in attempts:
+            if attempt["status"] != "completed":
+                attempt["status"] = "completed"
+                attempt["outcome"] = "answered"
+                await repo.save_call_attempt(**attempt)
+        await original_sleep(0.001)
 
-        res = await tester.run(config)
-        assert res.success is True
-        
-        # Ensure dial was called exactly once
-        assert mock_dial.call_count == 1
+    with patch.dict(os.environ, {
+        "TELEPHONY_LIVE_MODE": "true",
+        "DANA_CONFIRM_PLACE_CALL": "yes",
+        "LIVEKIT_SIP_OUTBOUND_TRUNK_ID": "ST_dummy"
+    }):
+        with patch("telephony.live_telephony_readiness.LiveTelephonyReadinessChecker.run", new_callable=AsyncMock) as mock_ready_run, \
+             patch("telephony.livekit_agent_worker.check_worker_dependencies", return_value={"ready": True}), \
+             patch("telephony.livekit_adapter.LiveKitOutboundAdapter.dial", new_callable=AsyncMock) as mock_dial, \
+             patch("asyncio.sleep", side_effect=mock_sleep):
+            mock_ready_run.return_value = mock_readiness
+            mock_dial.return_value = mock_dial_result
+            
+            await repo.save_did(
+                provider="telnyx",
+                phone_number="+15055202898",
+                status="active",
+                source="manual",
+                verified_for_provider=True
+            )
+
+            res = await tester.run(config)
+            print("TESTER RESULT ERRORS:", res.errors)
+            print("TESTER RESULT:", res)
+            assert res.success is True
+            
+            # Ensure dial was called exactly once
+            assert mock_dial.call_count == 1
 
 
 @pytest.mark.asyncio

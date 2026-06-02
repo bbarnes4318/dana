@@ -276,16 +276,33 @@ def build_initial_session_state(room_name: str, participant_identity: str | None
     }
 
 
-async def log_agent_turn(session_state: dict, text: str, repository: Repository) -> None:
+async def log_agent_turn(
+    session_state: dict,
+    text: str,
+    repository: Repository,
+    compliance_warnings: Optional[List[str]] = None,
+    latency_metrics: Optional[Dict[str, Any]] = None
+) -> None:
     """Log the agent's turn to both memory state and the repository database."""
     timestamp = datetime.now(timezone.utc).isoformat()
     turn_num = len(session_state["turns"]) + 1
+    stage = session_state.get("stage", "OPENING")
+    
     turn = {
         "speaker": "agent",
         "text": text,
         "timestamp": timestamp,
         "turn_number": turn_num,
-        "stage": session_state.get("stage", "OPENING")
+        "stage": stage,
+        "call_attempt_id": session_state.get("attempt_id"),
+        "campaign_id": session_state.get("campaign_id"),
+        "lead_id": session_state.get("lead_id"),
+        "livekit_room_name": session_state.get("room_name"),
+        "participant_id": session_state.get("participant_id"),
+        "compliance_warnings": compliance_warnings or [],
+        "latency_metrics": latency_metrics or {},
+        "selected_did": session_state.get("selected_did"),
+        "caller_id_source": session_state.get("caller_id_source")
     }
     session_state["turns"].append(turn)
     
@@ -297,7 +314,16 @@ async def log_agent_turn(session_state: dict, text: str, repository: Repository)
                 turn_number=turn_num,
                 speaker="agent",
                 text=text,
-                stage=session_state.get("stage", "OPENING")
+                stage=stage,
+                call_attempt_id=session_state.get("attempt_id"),
+                campaign_id=session_state.get("campaign_id"),
+                lead_id=session_state.get("lead_id"),
+                livekit_room_name=session_state.get("room_name"),
+                participant_id=session_state.get("participant_id"),
+                compliance_warnings=compliance_warnings or [],
+                latency_metrics=latency_metrics or {},
+                selected_did=session_state.get("selected_did"),
+                caller_id_source=session_state.get("caller_id_source")
             )
         except Exception as e:
             logger.error(f"Failed to log agent turn to database: {e}")
@@ -307,12 +333,23 @@ async def log_user_turn(session_state: dict, text: str, repository: Repository) 
     """Log the user's turn to both memory state and the repository database."""
     timestamp = datetime.now(timezone.utc).isoformat()
     turn_num = len(session_state["turns"]) + 1
+    stage = session_state.get("stage", "OPENING")
+    
     turn = {
         "speaker": "prospect",
         "text": text,
         "timestamp": timestamp,
         "turn_number": turn_num,
-        "stage": session_state.get("stage", "OPENING")
+        "stage": stage,
+        "call_attempt_id": session_state.get("attempt_id"),
+        "campaign_id": session_state.get("campaign_id"),
+        "lead_id": session_state.get("lead_id"),
+        "livekit_room_name": session_state.get("room_name"),
+        "participant_id": session_state.get("participant_id"),
+        "compliance_warnings": [],
+        "latency_metrics": {},
+        "selected_did": session_state.get("selected_did"),
+        "caller_id_source": session_state.get("caller_id_source")
     }
     session_state["turns"].append(turn)
     
@@ -324,7 +361,16 @@ async def log_user_turn(session_state: dict, text: str, repository: Repository) 
                 turn_number=turn_num,
                 speaker="prospect",
                 text=text,
-                stage=session_state.get("stage", "OPENING")
+                stage=stage,
+                call_attempt_id=session_state.get("attempt_id"),
+                campaign_id=session_state.get("campaign_id"),
+                lead_id=session_state.get("lead_id"),
+                livekit_room_name=session_state.get("room_name"),
+                participant_id=session_state.get("participant_id"),
+                compliance_warnings=[],
+                latency_metrics={},
+                selected_did=session_state.get("selected_did"),
+                caller_id_source=session_state.get("caller_id_source")
             )
         except Exception as e:
             logger.error(f"Failed to log user turn to database: {e}")
@@ -375,44 +421,61 @@ async def generate_agent_response(user_text: str, session_state: dict, runtime: 
 
 async def export_completed_session_if_possible(session_state: dict, repository: Repository) -> None:
     """Submit completed call session turns payload to post-call exporter."""
-    if os.environ.get("DANA_ENABLE_POST_CALL_TRAINING_EXPORT") != "true":
-        return
-    if not session_state.get("turns"):
-        return
-        
     try:
         from training.post_call_exporter import PostCallExporter, PostCallExportConfig
         
-        ended = datetime.now(timezone.utc)
-        started = datetime.fromisoformat(session_state["started_at"])
-        duration = (ended - started).total_seconds()
+        call_id = session_state.get("call_id")
+        room_name = session_state.get("room_name")
+        turns = session_state.get("turns", [])
         
+        # Determine ended_at/duration if not set
+        ended_at_str = session_state.get("ended_at")
+        if not ended_at_str:
+            ended_at_str = datetime.now(timezone.utc).isoformat()
+            
+        started_at_str = session_state.get("started_at")
+        if not started_at_str:
+            started_at_str = datetime.now(timezone.utc).isoformat()
+            
         payload = {
-            "call_id": session_state.get("call_id"),
-            "room_name": session_state.get("room_name"),
-            "participant_identity": session_state.get("participant_identity"),
-            "turns": session_state.get("turns"),
-            "started_at": session_state["started_at"],
-            "ended_at": ended.isoformat(),
-            "duration_seconds": duration,
-            "outcome": session_state.get("outcome", "ended")
+            "call_id": call_id,
+            "started_at": started_at_str,
+            "ended_at": ended_at_str,
+            "direction": session_state.get("direction", "outbound"),
+            "campaign": session_state.get("campaign_id"),
+            "prospect_phone": session_state.get("participant_identity") or session_state.get("prospect_phone"),
+            "outcome": session_state.get("outcome", "unknown"),
+            "transfer_consent": session_state.get("transfer_consent", False),
+            "turns": turns,
+            "tool_events": session_state.get("tool_events", []),
+            "qa": {},
+            "metadata": session_state.get("metadata", {
+                "exported_by": "worker",
+                "exported_at": datetime.now(timezone.utc).isoformat(),
+            })
         }
         
-        run_sync = os.environ.get("DANA_RUN_SYNC_TRAINING_INTAKE") == "true"
+        run_intake = (
+            os.environ.get("DANA_ENABLE_POST_CALL_TRAINING_EXPORT") == "true"
+            or session_state.get("run_intake_after_export")
+        )
+        run_sync = (
+            os.environ.get("DANA_RUN_SYNC_TRAINING_INTAKE") == "true"
+            or session_state.get("run_intake_after_export")
+        )
+        
         config = PostCallExportConfig(
             enabled=True,
-            run_intake_after_export=True,
+            run_intake_after_export=run_intake,
             intake_sync=run_sync,
-            fail_silently=True,
+            fail_silently=False,
         )
         
         exporter = PostCallExporter(repository=repository)
-        if run_sync:
-            await exporter.safe_export_completed_call(payload, config)
-        else:
-            asyncio.create_task(exporter.safe_export_completed_call(payload, config))
+        await exporter.safe_export_completed_call(payload, config)
     except Exception as e:
         logger.error(f"Failed to export completed session: {e}")
+
 
 
 async def run_room_session(ctx: Any, config: LiveKitAgentWorkerConfig) -> None:
@@ -436,17 +499,58 @@ async def run_room_session(ctx: Any, config: LiveKitAgentWorkerConfig) -> None:
     shared = SharedComponents(vcfg)
     await shared.initialize()
     
-    session_state = build_initial_session_state(ctx.room.name, participant.identity)
-    
-    # Resolve campaign_id
+    # Parse room name to resolve ids
     campaign_id = None
-    try:
-        lead_data = await shared.repository.get_lead_by_phone(participant.identity)
-        if lead_data:
-            campaign_id = lead_data.get("campaign_id")
-            session_state["campaign_id"] = campaign_id
-    except Exception as e:
-        logger.error(f"Failed to lookup lead campaign_id: {e}")
+    lead_id = None
+    attempt_id = None
+    selected_did = None
+    caller_id_source = None
+    
+    room_name = ctx.room.name
+    if room_name and room_name.startswith("dana-"):
+        parts = room_name.split("-")
+        if len(parts) >= 4:
+            campaign_id = parts[1]
+            lead_id = parts[2]
+            attempt_id = parts[3]
+            
+    # Lookup attempt if not resolved or to get DIDs
+    attempt = None
+    if attempt_id:
+        try:
+            attempt = await shared.repository.get_call_attempt(attempt_id)
+        except Exception as e:
+            logger.error(f"Failed to fetch CallAttempt {attempt_id}: {e}")
+            
+    if not attempt and room_name:
+        try:
+            attempts = await shared.repository.query_call_attempts({"livekit_room_name": room_name})
+            if attempts:
+                attempt = attempts[0]
+                attempt_id = attempt.get("id")
+                campaign_id = attempt.get("campaign_id")
+                lead_id = attempt.get("lead_id")
+        except Exception as e:
+            logger.error(f"Failed to query CallAttempts: {e}")
+            
+    if attempt:
+        meta = attempt.get("metadata", {})
+        selected_did = meta.get("selected_caller_id") or attempt.get("caller_id")
+        caller_id_source = meta.get("caller_id_source")
+        
+    session_state = build_initial_session_state(room_name, participant.identity)
+    session_state["campaign_id"] = campaign_id
+    session_state["lead_id"] = lead_id
+    session_state["attempt_id"] = attempt_id
+    session_state["selected_did"] = selected_did
+    session_state["caller_id_source"] = caller_id_source
+    session_state["livekit_room_name"] = room_name
+    session_state["participant_id"] = participant.sid if hasattr(participant, "sid") else participant.identity
+    
+    # Initialize latency recorder
+    from latency_metrics import LatencyRecorder
+    latency_recorder = LatencyRecorder(session_state["call_id"])
+    latency_recorder.mark("call_start")
 
     # Set up runtime
     from core.state_machine import StateMachine
@@ -501,6 +605,28 @@ async def run_room_session(ctx: Any, config: LiveKitAgentWorkerConfig) -> None:
         vad=shared.vad,
         turn_handling=turn_handling
     )
+    
+    # Wire latency and transcription events
+    @session.on("user_state_changed")
+    def on_user_state_changed(ev):
+        state_str = str(ev.new_state).lower()
+        if "speaking" in state_str:
+            latency_recorder.mark("user_speech_start")
+        elif "listening" in state_str or "idle" in state_str:
+            latency_recorder.mark("user_speech_end")
+
+    @session.on("agent_state_changed")
+    def on_agent_state_changed(ev):
+        state_str = str(ev.new_state).lower()
+        if "speaking" in state_str:
+            latency_recorder.mark("agent_speech_started")
+        elif "speaking" in str(ev.old_state).lower():
+            latency_recorder.mark("agent_speech_stopped")
+
+    @session.on("user_input_transcribed")
+    def on_user_input_transcribed(event):
+        if event.is_final:
+            latency_recorder.mark("transcript_final")
 
     # Define minimal dummy agent class compatible with SDK requirements
     from livekit.agents import Agent as LkAgent
@@ -516,9 +642,31 @@ async def run_room_session(ctx: Any, config: LiveKitAgentWorkerConfig) -> None:
             user_msg = chat_ctx.messages[-1] if chat_ctx.messages else None
             user_text = user_msg.content if user_msg else ""
             if user_text:
+                latency_recorder.mark("llm_request_start")
                 await log_user_turn(session_state, user_text, shared.repository)
                 agent_resp = await generate_agent_response(user_text, session_state, runtime)
-                await log_agent_turn(session_state, agent_resp, shared.repository)
+                
+                # Fetch compliance warnings from runtime events
+                compliance_warnings = []
+                from core.runtime_events import ValidationFailedEvent
+                for event in runtime.events:
+                    if isinstance(event, ValidationFailedEvent):
+                        compliance_warnings.extend(event.issues)
+                
+                if compliance_warnings:
+                    session_state.setdefault("compliance_warnings", [])
+                    session_state["compliance_warnings"].extend(compliance_warnings)
+                
+                latency_recorder.mark("llm_done")
+                lat_dict = latency_recorder.to_dict().get("durations", {})
+                
+                await log_agent_turn(
+                    session_state=session_state,
+                    text=agent_resp,
+                    repository=shared.repository,
+                    compliance_warnings=compliance_warnings,
+                    latency_metrics=lat_dict
+                )
                 
                 # yield to TTS
                 from livekit.agents.llm import ChatChunk, Choice, ChoiceDelta
@@ -548,7 +696,187 @@ async def run_room_session(ctx: Any, config: LiveKitAgentWorkerConfig) -> None:
             await asyncio.sleep(1.0)
     finally:
         logger.info(f"Room session closed for call {session_state['call_id']}")
-        await export_completed_session_if_possible(session_state, shared.repository)
+        
+        ended_at = datetime.now(timezone.utc)
+        started_at = datetime.fromisoformat(session_state["started_at"])
+        duration_seconds = int((ended_at - started_at).total_seconds())
+        
+        # Determine outcome
+        outcome = "answered"
+        lead_prof = runtime.state_machine.lead
+        
+        turns = session_state.get("turns", [])
+        agent_turns = sum(1 for t in turns if t["speaker"] == "agent")
+        prospect_turns = sum(1 for t in turns if t["speaker"] == "prospect")
+        
+        # Check tool execution results
+        transfer_successful = False
+        from core.runtime_events import ToolTriggeredEvent
+        for event in runtime.events:
+            if isinstance(event, ToolTriggeredEvent):
+                if event.tool_name in ("feTransfer", "transfer_to_agent") and event.success:
+                    transfer_successful = True
+                    
+        if lead_prof.do_not_call_requested:
+            outcome = "dnc"
+        elif lead_prof.callback_requested:
+            outcome = "callback"
+        elif transfer_successful or lead_prof.is_qualified():
+            outcome = "transferred"
+        elif lead_prof.disqualified_reason:
+            outcome = "completed"
+        elif prospect_turns >= 1:
+            outcome = "completed"
+        elif agent_turns >= 1:
+            outcome = "answered"
+        else:
+            outcome = "unknown"
+            
+        session_state["ended_at"] = ended_at.isoformat()
+        session_state["duration_seconds"] = duration_seconds
+        session_state["outcome"] = outcome
+        
+        transcript_lines = []
+        for t in turns:
+            speaker_label = "Dana" if t["speaker"] == "agent" else "Prospect"
+            transcript_lines.append(f"{speaker_label}: {t['text']}")
+        transcript_summary = " | ".join(transcript_lines)
+        
+        # 1. Update LiveCallSession
+        try:
+            live_session_record = None
+            if attempt_id:
+                sessions = await shared.repository.query_live_call_sessions({"attempt_id": attempt_id})
+                if sessions:
+                    live_session_record = sessions[0]
+            if not live_session_record:
+                sessions = await shared.repository.query_live_call_sessions({"call_id": session_state["call_id"]})
+                if sessions:
+                    live_session_record = sessions[0]
+                    
+            if live_session_record:
+                live_session_record["status"] = "ended"
+                live_session_record["ended_at"] = ended_at.isoformat()
+                live_session_record["outcome"] = outcome
+                live_session_record["current_stage"] = runtime.state_machine.call_state.current_stage.value
+                live_session_record["latest_transcript"] = transcript_summary
+                live_session_record["compliance_warnings"] = session_state.get("compliance_warnings", [])
+                await shared.repository.save_live_call_session(**live_session_record)
+        except Exception as e:
+            logger.error(f"Failed to close LiveCallSession in db: {e}")
+            
+        # 2. Update CallAttempt
+        attempt_record = None
+        try:
+            if attempt_id:
+                attempt_record = await shared.repository.get_call_attempt(attempt_id)
+                if attempt_record:
+                    attempt_record["status"] = "completed"
+                    attempt_record["ended_at"] = ended_at.isoformat()
+                    attempt_record["duration_seconds"] = duration_seconds
+                    attempt_record["outcome"] = outcome
+                    attempt_record.setdefault("metadata", {})
+                    attempt_record["metadata"]["transcript_summary"] = transcript_summary
+                    attempt_record["metadata"]["compliance_warnings"] = session_state.get("compliance_warnings", [])
+                    attempt_record["metadata"]["turn_count"] = len(turns)
+                    attempt_record["metadata"]["agent_turn_count"] = agent_turns
+                    attempt_record["metadata"]["prospect_turn_count"] = prospect_turns
+                    
+                    await shared.repository.save_call_attempt(**attempt_record)
+        except Exception as e:
+            logger.error(f"Failed to update CallAttempt in db: {e}")
+            
+        # 3. Handle post-call export and training intake
+        export_enabled = (
+            os.environ.get("DANA_ENABLE_POST_CALL_TRAINING_EXPORT") == "true"
+            or (attempt_record and attempt_record.get("metadata", {}).get("require_post_call_export"))
+        )
+        run_intake = (
+            os.environ.get("DANA_ENABLE_POST_CALL_TRAINING_EXPORT") == "true"
+            or (attempt_record and attempt_record.get("metadata", {}).get("run_intake_after_export"))
+        )
+        
+        if export_enabled:
+            if not turns:
+                error_msg = "Post-call export skipped because no transcript turns were captured."
+                logger.warning(error_msg)
+                if attempt_record:
+                    attempt_record.setdefault("metadata", {})
+                    attempt_record["metadata"]["post_call_export_error"] = error_msg
+                    await shared.repository.save_call_attempt(**attempt_record)
+            else:
+                try:
+                    from training.post_call_exporter import PostCallExporter, PostCallExportConfig
+                    
+                    lead_phone = None
+                    if lead_id:
+                        lead = await shared.repository.get_campaign_lead(lead_id)
+                        if lead:
+                            lead_phone = lead.get("phone_number")
+                            
+                    tool_events = []
+                    for event in runtime.events:
+                        if getattr(event, "event_type", None) == "tool_triggered":
+                            tool_events.append({
+                                "tool_name": getattr(event, "tool_name", ""),
+                                "success": getattr(event, "success", True),
+                                "result": getattr(event, "result_message", ""),
+                                "timestamp": getattr(event, "timestamp", datetime.now(timezone.utc)).isoformat() if hasattr(event, "timestamp") else None
+                            })
+                            
+                    payload = {
+                        "call_id": attempt_id or session_state["call_id"],
+                        "started_at": session_state["started_at"],
+                        "ended_at": ended_at.isoformat(),
+                        "direction": "outbound",
+                        "campaign": campaign_id,
+                        "prospect_phone": lead_phone or participant.identity,
+                        "outcome": outcome,
+                        "transfer_consent": bool(lead_prof.transfer_consent),
+                        "turns": turns,
+                        "tool_events": tool_events,
+                        "qa": {},
+                        "metadata": {
+                            "lead_id": lead_id,
+                            "exported_by": "worker",
+                            "exported_at": datetime.now(timezone.utc).isoformat(),
+                        }
+                    }
+                    
+                    run_sync = (
+                        os.environ.get("DANA_RUN_SYNC_TRAINING_INTAKE") == "true"
+                        or (attempt_record and attempt_record.get("metadata", {}).get("run_intake_after_export"))
+                    )
+                    
+                    config = PostCallExportConfig(
+                        enabled=True,
+                        run_intake_after_export=run_intake,
+                        intake_sync=run_sync,
+                        fail_silently=False,
+                    )
+                    
+                    exporter = PostCallExporter(repository=shared.repository)
+                    export_res = await exporter.export_completed_call(payload, config)
+                    
+                    if export_res.exported and export_res.output_path:
+                        session_state["post_call_export_path"] = export_res.output_path
+                        if attempt_record:
+                            attempt_record["post_call_export_path"] = export_res.output_path
+                            attempt_record.setdefault("metadata", {})
+                            attempt_record["metadata"]["post_call_export_success"] = True
+                            attempt_record["metadata"]["intake_run"] = export_res.intake_ran
+                            if export_res.intake_result:
+                                attempt_record["metadata"]["intake_result"] = export_res.intake_result
+                            await shared.repository.save_call_attempt(**attempt_record)
+                    else:
+                        logger.error(f"Post-call export failed: {export_res.error}")
+                except Exception as ex:
+                    logger.error(f"Failed to run post-call exporter: {ex}")
+                    if attempt_record:
+                        attempt_record.setdefault("metadata", {})
+                        attempt_record["metadata"]["post_call_export_error"] = str(ex)
+                        await shared.repository.save_call_attempt(**attempt_record)
+
 
 
 def initialize_process(job_proc: Any) -> None:

@@ -37,6 +37,18 @@ class CallTurn(BaseModel):
     text: str
     stage: str
     timestamp: datetime = Field(default_factory=_utcnow)
+    
+    # Extra fields for live call logging (Prompt 38)
+    call_attempt_id: Optional[str] = None
+    campaign_id: Optional[str] = None
+    lead_id: Optional[str] = None
+    livekit_room_name: Optional[str] = None
+    participant_id: Optional[str] = None
+    compliance_warnings: Optional[list[str]] = None
+    latency_metrics: Optional[dict[str, Any]] = None
+    selected_did: Optional[str] = None
+    caller_id_source: Optional[str] = None
+
 
 
 class ToolEvent(BaseModel):

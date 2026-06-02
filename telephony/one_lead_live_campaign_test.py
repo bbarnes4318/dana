@@ -25,6 +25,14 @@ class ControlledCampaignTestConfig(BaseModel):
     dry_run: bool = True
     output_dir: str = "data/telephony_reports"
     now: Optional[datetime] = None
+    
+    # Prompt 38 parameters
+    require_turns: bool = False
+    require_post_call_export: bool = False
+    run_intake_after_export: bool = False
+    min_agent_turns: int = 1
+    min_prospect_turns: int = 0
+    interactive: bool = False
 
 
 class ControlledCampaignTestResult(BaseModel):
@@ -49,6 +57,18 @@ class ControlledCampaignTestResult(BaseModel):
     warnings: List[str] = Field(default_factory=list)
     report_json_path: Optional[str] = None
     report_markdown_path: Optional[str] = None
+    
+    # Prompt 38 result fields
+    turn_count: int = 0
+    agent_turn_count: int = 0
+    prospect_turn_count: int = 0
+    transcript_captured: str = "no"  # yes|no
+    transcript_preview: Optional[str] = None
+    intake_run: str = "no"  # yes|no
+    intake_result: Optional[Any] = None
+    call_outcome: Optional[str] = None
+    ended_at: Optional[str] = None
+    duration_seconds: Optional[int] = None
 
 
 class ControlledCampaignTester:
@@ -113,7 +133,17 @@ class ControlledCampaignTester:
             f"- **Participant ID**: `{result.livekit_participant_id or 'N/A'}`",
             f"- **Phone Rang**: `{result.phone_rang}`",
             f"- **Dana Spoke (Worker joined & initialized)**: `{result.dana_spoke}`",
+            f"",
+            f"## 📝 Turn Logging & Export Closure",
+            f"- **Turn Count**: `{result.turn_count}` (Agent: `{result.agent_turn_count}`, Prospect: `{result.prospect_turn_count}`)",
+            f"- **Transcript Captured**: `{result.transcript_captured}`",
+            f"- **Post-Call Export Path**: `{result.post_call_export_path or 'N/A'}`",
+            f"- **Intake Run**: `{result.intake_run}`",
+            f"- **Call Outcome**: `{result.call_outcome or 'N/A'}`",
+            f"- **Call Ended At**: `{result.ended_at or 'N/A'}`",
+            f"- **Duration**: `{result.duration_seconds or 0} seconds`",
         ]
+
 
         if result.blocker_reason:
             md_lines.extend([
@@ -328,37 +358,119 @@ class ControlledCampaignTester:
             attempt_id = tick_res.attempt_ids[0]
             result.call_attempt_id = attempt_id
 
+            # Save test requirement metadata on CallAttempt so the worker session can read it
+            if not config.dry_run:
+                try:
+                    attempt_record = await self.repository.get_call_attempt(attempt_id)
+                    if attempt_record:
+                        attempt_record.setdefault("metadata", {})
+                        attempt_record["metadata"]["require_post_call_export"] = config.require_post_call_export
+                        attempt_record["metadata"]["run_intake_after_export"] = config.run_intake_after_export
+                        attempt_record["metadata"]["min_agent_turns"] = config.min_agent_turns
+                        attempt_record["metadata"]["min_prospect_turns"] = config.min_prospect_turns
+                        await self.repository.save_call_attempt(**attempt_record)
+                except Exception as e:
+                    result.warnings.append(f"Failed to save testing requirements to CallAttempt: {e}")
+
             # Poll for status transition (especially in live mode)
-            for _ in range(10):
+            max_polls = 90 if (config.interactive and not config.dry_run) else 20
+            for poll_idx in range(max_polls):
                 attempt = await self.repository.get_call_attempt(attempt_id)
                 if attempt:
-                    result.selected_did = attempt.get("metadata", {}).get("selected_caller_id")
+                    result.selected_did = attempt.get("metadata", {}).get("selected_caller_id") or attempt.get("caller_id")
                     result.livekit_room_name = attempt.get("livekit_room_name")
                     result.livekit_sip_call_id = attempt.get("livekit_sip_call_id")
                     result.livekit_participant_id = attempt.get("livekit_participant_id")
                     result.post_call_export_path = attempt.get("post_call_export_path")
+                    result.call_outcome = attempt.get("outcome")
+                    result.ended_at = attempt.get("ended_at")
+                    result.duration_seconds = attempt.get("duration_seconds")
+                    
                     status = attempt.get("status")
-
                     if status in ("ringing", "answered", "in_progress", "completed"):
                         result.phone_rang = True
-                    if status in ("answered", "in_progress", "completed") or attempt.get("answered_at"):
-                        result.success = True
                     if status == "failed":
                         result.errors.append(f"SIP Call placement failed: {attempt.get('failure_reason')}")
                         break
-                
+
+                # Query actual turns from database to report counts
+                try:
+                    turns = await self.repository.query_call_turns({"call_id": attempt_id})
+                    result.turn_count = len(turns)
+                    result.agent_turn_count = sum(1 for t in turns if t.get("speaker") == "agent")
+                    result.prospect_turn_count = sum(1 for t in turns if t.get("speaker") == "prospect")
+                    result.transcript_captured = "yes" if len(turns) > 0 else "no"
+                    
+                    # Construct transcript preview
+                    preview_lines = []
+                    for t in sorted(turns, key=lambda turn: turn.get("turn_number", 0)):
+                        speaker_lbl = "Dana" if t.get("speaker") == "agent" else "Prospect"
+                        preview_lines.append(f"{speaker_lbl}: {t.get('text')}")
+                    result.transcript_preview = "\n".join(preview_lines) if preview_lines else None
+                except Exception as e:
+                    logger.error(f"Failed to query call turns during poll: {e}")
+
                 # Check live session to confirm if Dana joined
-                sessions = await self.repository.query_live_call_sessions({"attempt_id": attempt_id})
-                if sessions:
-                    session = sessions[0]
-                    if session.get("status") == "active" or session.get("current_stage") is not None:
-                        result.dana_spoke = True
+                try:
+                    sessions = await self.repository.query_live_call_sessions({"attempt_id": attempt_id})
+                    if sessions:
+                        session = sessions[0]
+                        if session.get("status") == "active" or session.get("current_stage") is not None:
+                            result.dana_spoke = True
+                except Exception as e:
+                    logger.error(f"Failed to query live call sessions: {e}")
 
                 if config.dry_run:
                     result.success = True
                     break
 
-                await asyncio.sleep(1)
+                # Check if call is completed in DB, wait for worker cleanup, then break
+                if attempt and attempt.get("status") in ("completed", "failed", "cancelled"):
+                    await asyncio.sleep(2.0)  # Wait for worker post-call closure/export to write
+                    # Re-fetch attempt one last time
+                    final_attempt = await self.repository.get_call_attempt(attempt_id)
+                    if final_attempt:
+                        result.post_call_export_path = final_attempt.get("post_call_export_path")
+                        result.call_outcome = final_attempt.get("outcome")
+                        result.ended_at = final_attempt.get("ended_at")
+                        result.duration_seconds = final_attempt.get("duration_seconds")
+                        meta = final_attempt.get("metadata", {})
+                        if meta.get("intake_run"):
+                            result.intake_run = "yes"
+                            result.intake_result = meta.get("intake_result")
+                    break
+
+                await asyncio.sleep(1.0)
+
+            # Strict success validation checks for live mode
+            if not config.dry_run:
+                attempt_ok = False
+                attempt = await self.repository.get_call_attempt(attempt_id)
+                if attempt and attempt.get("status") == "completed" and attempt.get("outcome") not in ("failed", None):
+                    attempt_ok = True
+
+                turns_ok = True
+                if config.require_turns:
+                    if result.agent_turn_count < config.min_agent_turns:
+                        turns_ok = False
+                        result.errors.append(f"Insufficient agent turns: {result.agent_turn_count} < {config.min_agent_turns}")
+                    if result.prospect_turn_count < config.min_prospect_turns:
+                        turns_ok = False
+                        result.errors.append(f"Insufficient prospect turns: {result.prospect_turn_count} < {config.min_prospect_turns}")
+
+                export_ok = True
+                if config.require_post_call_export:
+                    if not result.post_call_export_path:
+                        export_ok = False
+                        result.errors.append("Post-call export path was not generated/saved.")
+
+                intake_ok = True
+                if config.run_intake_after_export:
+                    if result.intake_run != "yes":
+                        intake_ok = False
+                        result.errors.append("Intake failed to run after export.")
+
+                result.success = attempt_ok and turns_ok and export_ok and intake_ok
 
         else:
             is_mock = False
@@ -384,6 +496,7 @@ class ControlledCampaignTester:
                 else:
                     result.blocker_reason = "No call attempt was initiated during the dialer tick."
                 result.errors.append(result.blocker_reason or "DIALER_TICK_BLOCKED")
+
 
         self.write_reports(config, result)
         return result

@@ -32,6 +32,14 @@ async def main_async() -> int:
 
     parser.add_argument("--output-dir", default="data/telephony_reports", help="Directory for reports")
 
+    # Prompt 38 parameters
+    parser.add_argument("--require-turns", action="store_true", help="Require agent/prospect turns to succeed")
+    parser.add_argument("--require-post-call-export", action="store_true", help="Require post-call export file to succeed")
+    parser.add_argument("--run-intake-after-export", action="store_true", help="Trigger training intake after export")
+    parser.add_argument("--min-agent-turns", type=int, default=1, help="Minimum agent turns required")
+    parser.add_argument("--min-prospect-turns", type=int, help="Minimum prospect turns required (default 0 or 1 for interactive)")
+    parser.add_argument("--interactive", action="store_true", help="Run in interactive mode (human answers)")
+
     args = parser.parse_args()
 
     # Required parameters check
@@ -43,6 +51,10 @@ async def main_async() -> int:
         }, indent=2))
         return 1
 
+    min_prospect = args.min_prospect_turns
+    if min_prospect is None:
+        min_prospect = 1 if args.interactive else 0
+
     tester = ControlledCampaignTester()
     config = ControlledCampaignTestConfig(
         to=args.to.strip(),
@@ -50,8 +62,15 @@ async def main_async() -> int:
         confirm=args.confirm or "",
         allow_now=args.allow_now,
         dry_run=args.dry_run,
-        output_dir=args.output_dir
+        output_dir=args.output_dir,
+        require_turns=args.require_turns,
+        require_post_call_export=args.require_post_call_export,
+        run_intake_after_export=args.run_intake_after_export,
+        min_agent_turns=args.min_agent_turns,
+        min_prospect_turns=min_prospect,
+        interactive=args.interactive
     )
+
 
     try:
         res = await tester.run(config)

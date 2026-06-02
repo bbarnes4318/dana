@@ -1284,6 +1284,34 @@
                   <label for="campaign-test-max-calls">Max Calls: 1 (Locked)</label>
                 </div>
               </div>
+              <div style="display: flex; gap: 1.5rem; margin-bottom: 0.75rem; font-size: 0.75rem; flex-wrap: wrap;">
+                <div class="checkbox-group">
+                  <input type="checkbox" id="campaign-test-require-turns">
+                  <label for="campaign-test-require-turns">Require Turns</label>
+                </div>
+                <div class="checkbox-group">
+                  <input type="checkbox" id="campaign-test-require-export">
+                  <label for="campaign-test-require-export">Require Post-Call Export</label>
+                </div>
+                <div class="checkbox-group">
+                  <input type="checkbox" id="campaign-test-run-intake">
+                  <label for="campaign-test-run-intake">Run Intake After Export</label>
+                </div>
+                <div class="checkbox-group">
+                  <input type="checkbox" id="campaign-test-interactive">
+                  <label for="campaign-test-interactive">Interactive Mode (Human Answers)</label>
+                </div>
+              </div>
+              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 0.75rem;">
+                <div class="form-group">
+                  <label for="campaign-test-min-agent-turns">Min Agent Turns</label>
+                  <input type="number" id="campaign-test-min-agent-turns" class="form-control" value="1" min="0">
+                </div>
+                <div class="form-group">
+                  <label for="campaign-test-min-prospect-turns">Min Prospect Turns</label>
+                  <input type="number" id="campaign-test-min-prospect-turns" class="form-control" value="0" min="0">
+                </div>
+              </div>
               <div class="form-group" style="margin-bottom: 0.75rem;">
                 <label for="campaign-test-confirm">Type <strong>LIVE CALL</strong> to confirm:</label>
                 <input type="text" id="campaign-test-confirm" class="form-control" placeholder="Type LIVE CALL here">
@@ -1293,10 +1321,13 @@
             <div id="campaign-test-results" style="font-size: 0.75rem; color: var(--text-secondary); line-height: 1.4; margin-top: 1rem; display: none;">
               <h4 style="color: var(--text-primary); margin-bottom: 0.5rem;">Test Results Summary</h4>
               <div id="campaign-test-checklist" style="margin-bottom: 0.75rem; background: var(--bg-surface); padding: 0.75rem; border-radius: 4px; border: 1px solid var(--border);"></div>
+              <h4 style="color: var(--text-primary); margin-bottom: 0.25rem;">Transcript Preview</h4>
+              <div id="campaign-test-transcript-preview" style="background: rgba(0,0,0,0.2); padding: 0.5rem; border-radius: 4px; overflow-y: auto; max-height: 150px; font-family: monospace; white-space: pre-wrap; font-size: 0.75rem; margin-bottom: 0.75rem;">No turns captured.</div>
               <h4 style="color: var(--text-primary); margin-bottom: 0.25rem;">Raw Output Log</h4>
               <pre id="campaign-test-output-json" style="background: rgba(0,0,0,0.2); padding: 0.5rem; border-radius: 4px; overflow-x: auto; max-height: 250px; font-family: monospace;"></pre>
             </div>
           </section>
+
         </div>
 
         <!-- Caller ID Pool & Reputation Manager -->
