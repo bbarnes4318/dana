@@ -10,7 +10,7 @@ def test_tts_service_imports():
 def test_instantiate_kokoro():
     kokoro = LocallyHostedKokoro()
     assert kokoro is not None
-    assert kokoro.sample_rate == 24000
+    assert kokoro.sample_rate == 16000
 
 def test_sdk_base_classes():
     assert issubclass(LocalTTSStream, tts.SynthesizeStream)

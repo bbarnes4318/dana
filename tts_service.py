@@ -21,8 +21,69 @@ from livekit.agents import tts, APIConnectOptions
 
 logger = logging.getLogger(__name__)
 
+import scipy.signal
+
 # Active Audio Source reference for background thread direct FFI push
 active_audio_source: Optional[rtc.AudioSource] = None
+# Active TTS Stream reference for emergency interruption abort
+active_tts_stream: Optional["LocalTTSStream"] = None
+
+# Design digital filters for senior hearing profile at 16kHz
+# 1. 5th order Butterworth low-pass filter with a cutoff of 3400Hz
+# fs = 16000, Nyquist = 8000. Cutoff = 3400Hz.
+LP_SOS = scipy.signal.butter(5, 3400, btype='low', fs=16000, output='sos')
+
+# 2. 2nd order Butterworth bandpass filter for 150Hz - 500Hz register
+# fs = 16000, registers = [150, 500]
+BP_SOS = scipy.signal.butter(2, [150, 500], btype='bandpass', fs=16000, output='sos')
+
+
+def resample_to_16k(audio: np.ndarray, orig_fs: int = 24000) -> np.ndarray:
+    """Resamples the audio from 24000Hz to 16000Hz using scipy.signal.resample_poly."""
+    if audio.size == 0:
+        return audio
+    if orig_fs == 16000:
+        return audio
+    try:
+        # Use polyphase resampling for speed and quality (24000 -> 16000 is 3 -> 2 decimation)
+        gcd = np.gcd(orig_fs, 16000)
+        up = 16000 // gcd
+        down = orig_fs // gcd
+        return scipy.signal.resample_poly(audio, up, down)
+    except Exception as e:
+        logger.error(f"Failed polyphase resampling: {e}. Falling back to scipy.signal.resample.")
+        # Fallback to standard resample
+        duration = len(audio) / orig_fs
+        new_len = int(duration * 16000)
+        return scipy.signal.resample(audio, new_len)
+
+
+def apply_senior_audio_filters(audio: np.ndarray) -> np.ndarray:
+    """
+    Applies post-synthesis digital audio filtering to enforce tone compliance
+    for an older hearing profile over PSTN lines:
+    1. Low-pass filter rolling off above 3400Hz.
+    2. Boost of the mid-to-low register (150Hz - 500Hz) by +3dB (1.4125 gain, meaning +0.4125 * bandpass).
+    """
+    if audio.size == 0:
+        return audio
+        
+    # Apply low-pass filter
+    audio_lp = scipy.signal.sosfilt(LP_SOS, audio)
+    
+    # Extract the bandpass register (150Hz - 500Hz)
+    bp_filtered = scipy.signal.sosfilt(BP_SOS, audio_lp)
+    
+    # Boost by adding the bandpass filtered component with 0.4125 coefficient (corresponding to +3dB peak boost)
+    # y = x + 0.4125 * bp_filtered
+    equalized = audio_lp + 0.4125 * bp_filtered
+    
+    # Soft clip/limiter to prevent any digital clipping after boosting
+    peak = np.max(np.abs(equalized))
+    if peak > 0.95:
+        equalized = np.clip(equalized, -1.0, 1.0)
+        
+    return equalized
 
 
 @dataclass
@@ -31,7 +92,7 @@ class TTSConfig:
     model_name: str = "kokoro-v1.0"
     voice: str = "af_bella"  # American female voice
     speed: float = 1.0
-    sample_rate: int = 24000
+    sample_rate: int = 16000
     # Phrase buffering for streaming
     min_phrase_chars: int = 10  # Minimum chars before synthesis
     sentence_end_chars: str = ".!?;:"  # Characters that end a phrase
@@ -226,7 +287,9 @@ class LocallyHostedKokoro(tts.TTS):
                 voice=self.config.voice,
                 speed=self.config.speed
             )
-            return audio
+            audio_resampled = resample_to_16k(audio, orig_fs=24000)
+            audio_filtered = apply_senior_audio_filters(audio_resampled)
+            return audio_filtered
         
         audio = await loop.run_in_executor(None, _run_synthesis)
         return audio
@@ -259,7 +322,9 @@ class LocallyHostedKokoro(tts.TTS):
             voice=self.config.voice,
             speed=self.config.speed
         )
-        return audio
+        audio_resampled = resample_to_16k(audio, orig_fs=24000)
+        audio_filtered = apply_senior_audio_filters(audio_resampled)
+        return audio_filtered
     
     def synthesize(
         self,
@@ -319,6 +384,9 @@ class LocalTTSStream(tts.SynthesizeStream):
         )
         self._worker_thread.start()
 
+        global active_tts_stream
+        active_tts_stream = self
+
     @property
     def sample_rate(self) -> int:
         return self._tts.sample_rate
@@ -368,9 +436,9 @@ class LocalTTSStream(tts.SynthesizeStream):
         from livekit.rtc._proto import ffi_pb2 as proto_ffi
         
         prev_time = time.perf_counter()
-        samples_per_frame = 480
+        sample_rate = self.sample_rate
         frame_duration = 0.020 # 20ms
-        sample_rate = 24000
+        samples_per_frame = int(sample_rate * frame_duration)
         num_channels = 1
         
         remaining_audio = np.array([], dtype=np.float32)
@@ -498,6 +566,9 @@ class LocalTTSStream(tts.SynthesizeStream):
         await super().aclose()
         if self._tts._active_stream is self:
             self._tts._active_stream = None
+        global active_tts_stream
+        if active_tts_stream is self:
+            active_tts_stream = None
 
 
 class LocalChunkedStream(tts.ChunkedStream):

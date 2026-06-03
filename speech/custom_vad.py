@@ -16,6 +16,137 @@ from livekit.plugins.silero.vad import _VADOptions
 
 logger = logging.getLogger(__name__)
 
+active_session = None
+
+
+async def execute_emergency_flush(session, agent) -> None:
+    """
+    Perform instant clearing of the outbound WebRTC buffer,
+    cancel any active LLM generation/TTS synthesis,
+    and truncate the conversation memory log to the spoken words.
+    """
+    logger.info("Executing emergency track flush and aborting active generation tasks...")
+    
+    # 1. Clear outbound WebRTC playback buffer
+    audio_output = getattr(session, "output", None) and getattr(session.output, "audio", None)
+    if audio_output:
+        try:
+            audio_output.clear_buffer()
+            audio_output.flush()
+            logger.info("Called clear_buffer() and flush() on session.output.audio")
+        except Exception as e:
+            logger.error(f"Error calling clear_buffer/flush on audio_output: {e}")
+            
+    # Also explicitly clear queue on the active audio source
+    import tts_service
+    if tts_service.active_audio_source:
+        try:
+            tts_service.active_audio_source.clear_queue()
+            logger.info("Cleared tts_service.active_audio_source queue")
+        except Exception as e:
+            logger.error(f"Error clearing active_audio_source: {e}")
+            
+    if audio_output and hasattr(audio_output, "_audio_source") and audio_output._audio_source:
+        try:
+            audio_output._audio_source.clear_queue()
+            logger.info("Cleared audio_output._audio_source queue")
+        except Exception as e:
+            logger.error(f"Error clearing audio_output._audio_source queue: {e}")
+
+    # 2. Abort TTS synthesis
+    if getattr(tts_service, "active_tts_stream", None):
+        try:
+            await tts_service.active_tts_stream.interrupt()
+            logger.info("Interrupted active_tts_stream")
+        except Exception as e:
+            logger.error(f"Error interrupting active_tts_stream: {e}")
+
+    # 3. Call session.interrupt() to abort LLM and LiveKit speech handles
+    try:
+        if asyncio.iscoroutinefunction(session.interrupt):
+            await session.interrupt()
+        else:
+            session.interrupt()
+        logger.info("Called session.interrupt()")
+    except Exception as e:
+        logger.error(f"Error calling session.interrupt(): {e}")
+
+    # 4. Truncate conversation memory log to the exact word index spoken
+    start_time = getattr(agent, "agent_speech_started_time", None)
+    interrupted_at = getattr(agent, "interrupted_at", None) or time.perf_counter()
+    if start_time is not None:
+        dur = max(0.0, interrupted_at - start_time)
+        speed = 1.0
+        if getattr(tts_service, "active_tts_stream", None) and hasattr(tts_service.active_tts_stream, "_tts"):
+            speed = getattr(tts_service.active_tts_stream._tts.config, "speed", 1.0)
+        
+        words_per_second = 2.5 * speed
+        word_index = int(dur * words_per_second)
+        
+        orig_text = getattr(agent, "current_turn_response", "") or ""
+        words = orig_text.split()
+        if words and word_index < len(words):
+            truncated_text = " ".join(words[:word_index])
+            agent.current_turn_response = truncated_text
+            logger.info(f"Truncated response text based on {dur:.2f}s playback: '{truncated_text}' (word index={word_index})")
+            
+            # Update session state turns (in livekit_agent_worker.py context)
+            session_state = getattr(session, "session_state", None)
+            if session_state:
+                turns = session_state.setdefault("turns", [])
+                agent_turns = [t for t in turns if t["speaker"] == "agent"]
+                if agent_turns:
+                    agent_turns[-1]["text"] = truncated_text
+                    
+            # Update ChatContext history
+            for ctx_obj in [getattr(session, "_chat_ctx", None), getattr(agent, "_chat_ctx", None)]:
+                if ctx_obj and hasattr(ctx_obj, "messages"):
+                    for msg in reversed(ctx_obj.messages):
+                        if msg.role == "assistant":
+                            if isinstance(msg.content, str):
+                                msg.content = truncated_text
+                            break
+                            
+            # Update database repository
+            repository = (
+                getattr(session, "repository", None) or 
+                getattr(agent, "repository", None) or 
+                (getattr(agent, "adapter", None) and getattr(agent.adapter, "repository", None))
+            )
+            call_id = (
+                (session_state and session_state.get("call_id")) or 
+                (getattr(agent, "adapter", None) and getattr(agent.adapter, "call_id", None))
+            )
+            
+            if repository and call_id:
+                turn_number = None
+                if session_state:
+                    agent_turns = [t for t in session_state["turns"] if t["speaker"] == "agent"]
+                    if agent_turns:
+                        turn_number = agent_turns[-1].get("turn_number")
+                
+                if turn_number is None and getattr(agent, "adapter", None) and getattr(agent.adapter, "runtime", None):
+                    turn_number = getattr(agent.adapter.runtime.state_machine.call_state, "turn_count", 0) * 2
+                    
+                if turn_number is not None:
+                    try:
+                        stage = "OPENING"
+                        if session_state:
+                            stage = session_state.get("stage", "OPENING")
+                        elif getattr(agent, "adapter", None):
+                            stage = getattr(agent.adapter.runtime.state_machine.current_stage, "value", "OPENING")
+                            
+                        await repository.save_call_turn(
+                            call_id=call_id,
+                            turn_number=turn_number,
+                            speaker="agent",
+                            text=truncated_text,
+                            stage=stage
+                        )
+                        logger.info(f"Updated database turn {turn_number} with truncated response")
+                    except Exception as e:
+                        logger.error(f"Failed to update database turn: {e}")
+
 
 class ElderlySileroVAD(silero.VAD):
     """
@@ -370,6 +501,20 @@ class ElderlySileroVADStream(silero.VADStream):
                             pub_speech_duration = 0.0
                             _reset_write_cursor()
                             
+                    # Interruption check
+                    global active_session
+                    if active_session:
+                        agent_state = getattr(active_session, "agent_state", None)
+                        agent_speaking = agent_state == "speaking" or getattr(agent_state, "value", None) == "speaking"
+                        if agent_speaking:
+                            speech_duration = pub_speech_duration if pub_speaking else speech_threshold_duration
+                            if speech_duration >= 0.12:  # 120ms threshold
+                                agent = getattr(active_session, "_agent", None)
+                                if agent and not getattr(agent, "interrupted_current_turn", False):
+                                    agent.interrupted_current_turn = True
+                                    agent.interrupted_at = time.perf_counter()
+                                    asyncio.create_task(execute_emergency_flush(active_session, agent))
+
                     # In-place shift input_buffer by 512 samples (zero-allocation)
                     self._input_buffer[: self._input_len - 512] = self._input_buffer[512 : self._input_len]
                     self._input_len -= 512

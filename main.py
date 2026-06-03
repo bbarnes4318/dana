@@ -271,6 +271,7 @@ class DanaAgent(Agent):
         self.llm = shared.llm
         self.tts = shared.tts
         self.stt = shared.stt
+        self.prompt_loader = getattr(shared, "prompt_loader", None)
         self._config = shared.config
         self._latency_recorder = latency_recorder
         self.room = None
@@ -316,14 +317,57 @@ class DanaAgent(Agent):
             logger.error("LiveKitRuntimeAdapter is not initialized on the agent!")
             self._latency_recorder.mark("llm_done")
             return
-        
+          
+        def is_user_input_divergent(text: str) -> bool:
+            text_lower = text.lower().strip()
+            relevant_keywords = [
+                "insurance", "expense", "funeral", "burial", "benefit", "coverage", "policy", "premium", "cost", "pay",
+                "hello", "hi", "hey", "yes", "no", "ok", "sure", "correct", "wrong", "right", "state", "live", "age",
+                "year", "old", "born", "date", "birth", "month", "day", "cov", "die", "death", "health", "illness",
+                "medical", "history", "qualify", "program", "plan", "rate", "quote", "price", "dollars", "american",
+                "beneficiary", "senior", "elderly", "pension", "retire", "medicare", "medicaid", "social security", "ssi",
+                "alex", "dana", "who", "what", "why", "how", "where", "when", "tell", "show", "get", "give", "help"
+            ]
+            divergent_keywords = [
+                "weather", "rain", "sunny", "temperature", "sport", "game", "yankees", "baseball", "football",
+                "color", "food", "movie", "song", "joke", "marry", "love", "date", "sing", "dance", "bot", "robot",
+                "ai", "computer", "hack", "trump", "biden", "election", "politics", "president", "news", "stock",
+                "market", "crypto", "bitcoin", "dog", "cat", "pet", "hobby", "hobbies", "holiday", "vacation"
+            ]
+            for word in divergent_keywords:
+                if word in text_lower:
+                    return True
+            words = text_lower.split()
+            if len(words) > 2:
+                has_relevant = any(w in text_lower for w in relevant_keywords)
+                if not has_relevant:
+                    return True
+            return False
+
         # Define clean chat function to call vLLM client directly without re-entering DanaAgent.llm_node
         async def chat_fn(instructions: str) -> str:
             new_ctx = llm.ChatContext()
             
             # Prepend static system prompt prefix (personality and compliance parameters)
-            static_prompt = self.prompt_loader.build_system_prompt()
-            combined_prompt = f"{static_prompt}\n\n{instructions}"
+            loader = self.prompt_loader or (self.adapter and self.adapter.prompt_loader)
+            static_prompt = loader.build_system_prompt() if loader else ""
+            
+            # Check for irrelevant or divergent topics
+            is_divergent = is_user_input_divergent(user_text)
+            if is_divergent:
+                combined_prompt = (
+                    f"{static_prompt}\n\n"
+                    f"### SYSTEM CONTEXT ENFORCEMENT WARNING ###\n"
+                    f"The user has introduced an irrelevant or divergent topic. You must NOT discuss this topic.\n"
+                    f"Use this explicit internal logic pathway: Acknowledge politely, do not engage in the divergent topic, "
+                    f"and gently but firmly redirect the user back to the primary qualifying data points (age, state of residence, "
+                    f"and current coverage status).\n"
+                    f"Example: 'I hear you, but let's get back to the final expense benefits. To see if you qualify, how old are you?'\n"
+                    f"##########################################\n\n"
+                    f"{instructions}"
+                )
+            else:
+                combined_prompt = f"{static_prompt}\n\n{instructions}"
             
             # Add compiled instructions as the system prompt
             new_ctx.messages.append(llm.ChatMessage(
@@ -344,10 +388,10 @@ class DanaAgent(Agent):
             from metrics.model_cost_metrics import estimate_llm_tokens
             self.prompt_tokens += estimate_llm_tokens(prompt_str)
 
-            # Run LLM chat directly
+            # Run LLM chat directly - hardcoding temperature to 0.2
             stream = self.llm.chat(
                 chat_ctx=new_ctx,
-                temperature=self._config.temperature,
+                temperature=0.2,
                 top_p=self._config.top_p,
                 max_tokens=self._config.max_tokens,
                 frequency_penalty=0.15,
@@ -670,6 +714,7 @@ async def entrypoint(ctx: JobContext):
             # Reset flags
             agent.interrupted_current_turn = False
             agent.current_turn_response = ""
+            agent.agent_speech_started_time = None
 
             if getattr(agent, "should_disconnect", False):
                 logger.info("Agent stopped speaking and should_disconnect is True. Disconnecting...")
@@ -776,6 +821,10 @@ async def entrypoint(ctx: JobContext):
             text_input=room_io.TextInputOptions(enabled=False),
         ),
     )
+    
+    import speech.custom_vad
+    speech.custom_vad.active_session = session
+    session.repository = shared.repository
     
     # Store the audio source for the direct FFI background playback
     if hasattr(session, "_room_io") and session._room_io:

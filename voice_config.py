@@ -78,7 +78,7 @@ class VoiceConfig:
     vllm_base_url: str = field(default_factory=lambda: env_str("VLLM_BASE_URL", "http://vllm-server:8000/v1"))
     llm_model: str = field(default_factory=lambda: env_str("DANA_LLM_MODEL", "meta-llama/Llama-3.1-8B-Instruct"))
     max_tokens: int = field(default_factory=lambda: env_int("DANA_MAX_TOKENS", 70))
-    temperature: float = field(default_factory=lambda: env_float("DANA_TEMPERATURE", 0.45))
+    temperature: float = field(default_factory=lambda: env_float("DANA_TEMPERATURE", 0.2))
     top_p: float = field(default_factory=lambda: env_float("DANA_TOP_P", 0.9))
 
     # ---- Agent Identity ----

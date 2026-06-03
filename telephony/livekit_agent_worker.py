@@ -382,6 +382,32 @@ async def log_user_turn(session_state: dict, text: str, repository: Repository) 
 async def generate_agent_response(user_text: str, session_state: dict, runtime: AgentRuntime) -> str:
     """Submit user utterance to AgentRuntime with compliance filter checking."""
     
+    def is_user_input_divergent(text: str) -> bool:
+        text_lower = text.lower().strip()
+        relevant_keywords = [
+            "insurance", "expense", "funeral", "burial", "benefit", "coverage", "policy", "premium", "cost", "pay",
+            "hello", "hi", "hey", "yes", "no", "ok", "sure", "correct", "wrong", "right", "state", "live", "age",
+            "year", "old", "born", "date", "birth", "month", "day", "cov", "die", "death", "health", "illness",
+            "medical", "history", "qualify", "program", "plan", "rate", "quote", "price", "dollars", "american",
+            "beneficiary", "senior", "elderly", "pension", "retire", "medicare", "medicaid", "social security", "ssi",
+            "alex", "dana", "who", "what", "why", "how", "where", "when", "tell", "show", "get", "give", "help"
+        ]
+        divergent_keywords = [
+            "weather", "rain", "sunny", "temperature", "sport", "game", "yankees", "baseball", "football",
+            "color", "food", "movie", "song", "joke", "marry", "love", "date", "sing", "dance", "bot", "robot",
+            "ai", "computer", "hack", "trump", "biden", "election", "politics", "president", "news", "stock",
+            "market", "crypto", "bitcoin", "dog", "cat", "pet", "hobby", "hobbies", "holiday", "vacation"
+        ]
+        for word in divergent_keywords:
+            if word in text_lower:
+                return True
+        words = text_lower.split()
+        if len(words) > 2:
+            has_relevant = any(w in text_lower for w in relevant_keywords)
+            if not has_relevant:
+                return True
+        return False
+
     # 1. Provide an OpenAI-based LLM chat dispatcher function
     async def chat_fn(instructions: str) -> str:
         try:
@@ -391,7 +417,24 @@ async def generate_agent_response(user_text: str, session_state: dict, runtime: 
             
             # System instructions prefixed with static prompt loader context
             static_prompt = runtime.prompt_loader.build_system_prompt()
-            combined_prompt = f"{static_prompt}\n\n{instructions}"
+            
+            # Check for irrelevant or divergent topics
+            is_divergent = is_user_input_divergent(user_text)
+            if is_divergent:
+                combined_prompt = (
+                    f"{static_prompt}\n\n"
+                    f"### SYSTEM CONTEXT ENFORCEMENT WARNING ###\n"
+                    f"The user has introduced an irrelevant or divergent topic. You must NOT discuss this topic.\n"
+                    f"Use this explicit internal logic pathway: Acknowledge politely, do not engage in the divergent topic, "
+                    f"and gently but firmly redirect the user back to the primary qualifying data points (age, state of residence, "
+                    f"and current coverage status).\n"
+                    f"Example: 'I hear you, but let's get back to the final expense benefits. To see if you qualify, how old are you?'\n"
+                    f"##########################################\n\n"
+                    f"{instructions}"
+                )
+            else:
+                combined_prompt = f"{static_prompt}\n\n{instructions}"
+                
             chat_ctx.messages.append(llm.ChatMessage(role="system", content=combined_prompt))
             
             # Dialogue history
@@ -402,7 +445,7 @@ async def generate_agent_response(user_text: str, session_state: dict, runtime: 
             # Append current turn
             chat_ctx.messages.append(llm.ChatMessage(role="user", content=user_text))
             
-            stream = llm.chat(chat_ctx=chat_ctx)
+            stream = llm.chat(chat_ctx=chat_ctx, temperature=0.2)
             response_text = ""
             async for chunk in stream:
                 content = chunk.choices[0].delta.content if chunk.choices else ""
@@ -723,10 +766,16 @@ async def run_room_session(ctx: Any, config: LiveKitAgentWorkerConfig) -> None:
     @session.on("agent_state_changed")
     def on_agent_state_changed(ev):
         state_str = str(ev.new_state).lower()
+        old_state_str = str(ev.old_state).lower()
+        import time
         if "speaking" in state_str:
             latency_recorder.mark("agent_speech_started")
-        elif "speaking" in str(ev.old_state).lower():
+            agent_instance.agent_speech_started_time = time.perf_counter()
+        elif "speaking" in old_state_str:
             latency_recorder.mark("agent_speech_stopped")
+            agent_instance.interrupted_current_turn = False
+            agent_instance.current_turn_response = ""
+            agent_instance.agent_speech_started_time = None
 
     @session.on("user_input_transcribed")
     def on_user_input_transcribed(event):
@@ -743,6 +792,10 @@ async def run_room_session(ctx: Any, config: LiveKitAgentWorkerConfig) -> None:
                 tts=shared.tts,
                 stt=shared.stt
             )
+            self.current_turn_response = ""
+            self.agent_speech_started_time = None
+            self.interrupted_current_turn = False
+            self.interrupted_at = None
 
         async def llm_node(self, chat_ctx, tools, model_settings):
             # Read last turn and process it
@@ -763,6 +816,8 @@ async def run_room_session(ctx: Any, config: LiveKitAgentWorkerConfig) -> None:
                 if compliance_warnings:
                     session_state.setdefault("compliance_warnings", [])
                     session_state["compliance_warnings"].extend(compliance_warnings)
+                
+                self.current_turn_response = agent_resp
                 
                 latency_recorder.mark("llm_done")
                 lat_dict = latency_recorder.to_dict().get("durations", {})
@@ -790,6 +845,20 @@ async def run_room_session(ctx: Any, config: LiveKitAgentWorkerConfig) -> None:
             text_input=False,
         )
     )
+
+    import speech.custom_vad
+    speech.custom_vad.active_session = session
+    session.repository = shared.repository
+    session.session_state = session_state
+
+    # Store the audio source for the direct FFI background playback
+    if hasattr(session, "_room_io") and session._room_io:
+        audio_output = session._room_io.audio_output
+        if hasattr(audio_output, "_audio_source"):
+            import tts_service
+            tts_service.active_audio_source = audio_output._audio_source
+            audio_output._bypass_main_loop = True
+            logger.info("Direct audio source registered in tts_service and main-loop bypass enabled.")
 
     # Speak Greeting if enabled
     if config.greeting_enabled and config.greeting_text:
