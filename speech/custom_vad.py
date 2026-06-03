@@ -16,8 +16,6 @@ from livekit.plugins.silero.vad import _VADOptions
 
 logger = logging.getLogger(__name__)
 
-active_session = None
-
 
 async def execute_emergency_flush(session, agent) -> None:
     """
@@ -187,16 +185,30 @@ class ElderlySileroVAD(silero.VAD):
         )
         return cls(session=session, opts=opts)
 
-    def stream(self) -> ElderlySileroVADStream:
+    def bind(self, session, agent) -> ElderlySileroVAD:
+        """
+        Return a copy or wrapper of this VAD bound to a specific session and agent context.
+        """
+        import copy
+        bound = copy.copy(self)
+        bound._session = session
+        bound._agent = agent
+        return bound
+
+    def stream(self, session=None, agent=None) -> ElderlySileroVADStream:
         """
         Create a new ElderlySileroVADStream for processing audio data.
         """
+        sess = session or getattr(self, "_session", None)
+        agt = agent or getattr(self, "_agent", None)
         stream = ElderlySileroVADStream(
             self,
             self._opts,
             onnx_model.OnnxModel(
                 onnx_session=self._onnx_session, sample_rate=self._opts.sample_rate
             ),
+            session=sess,
+            agent=agt,
         )
         self._streams.add(stream)
         return stream
@@ -208,8 +220,17 @@ class ElderlySileroVADStream(silero.VADStream):
     resampling, and VAD inference evaluation.
     """
     
-    def __init__(self, vad: ElderlySileroVAD, opts: _VADOptions, model: onnx_model.OnnxModel) -> None:
+    def __init__(
+        self,
+        vad: ElderlySileroVAD,
+        opts: _VADOptions,
+        model: onnx_model.OnnxModel,
+        session=None,
+        agent=None
+    ) -> None:
         super().__init__(vad, opts, model)
+        self._session = session
+        self._agent = agent
         
         # Pre-allocate frames pool (no allocations on hot path)
         self._pool_size = 32
@@ -476,6 +497,20 @@ class ElderlySileroVADStream(silero.VADStream):
                                         speaking=True
                                     )
                                 )
+                                
+                                # Notify active STT stream for this call
+                                call_id = None
+                                if self._session:
+                                    if hasattr(self._session, "session_state") and self._session.session_state:
+                                        call_id = self._session.session_state.get("call_id")
+                                if not call_id:
+                                    from speech.context_registry import get_current_call_id
+                                    call_id = get_current_call_id() or "default"
+                                
+                                from stt_service import LocallyHostedSTT
+                                stt_stream = LocallyHostedSTT._active_streams.get(call_id)
+                                if stt_stream:
+                                    stt_stream.on_speech_start()
                     else:
                         silence_threshold_duration += window_duration
                         speech_threshold_duration = 0.0
@@ -501,19 +536,32 @@ class ElderlySileroVADStream(silero.VADStream):
                             pub_speech_duration = 0.0
                             _reset_write_cursor()
                             
+                            # Notify active STT stream for this call
+                            call_id = None
+                            if self._session:
+                                if hasattr(self._session, "session_state") and self._session.session_state:
+                                    call_id = self._session.session_state.get("call_id")
+                            if not call_id:
+                                from speech.context_registry import get_current_call_id
+                                call_id = get_current_call_id() or "default"
+                                
+                            from stt_service import LocallyHostedSTT
+                            stt_stream = LocallyHostedSTT._active_streams.get(call_id)
+                            if stt_stream:
+                                stt_stream.on_speech_end()
+                            
                     # Interruption check
-                    global active_session
-                    if active_session:
-                        agent_state = getattr(active_session, "agent_state", None)
+                    if self._session:
+                        agent_state = getattr(self._session, "agent_state", None)
                         agent_speaking = agent_state == "speaking" or getattr(agent_state, "value", None) == "speaking"
                         if agent_speaking:
                             speech_duration = pub_speech_duration if pub_speaking else speech_threshold_duration
                             if speech_duration >= 0.12:  # 120ms threshold
-                                agent = getattr(active_session, "_agent", None)
+                                agent = self._agent
                                 if agent and not getattr(agent, "interrupted_current_turn", False):
                                     agent.interrupted_current_turn = True
                                     agent.interrupted_at = time.perf_counter()
-                                    asyncio.create_task(execute_emergency_flush(active_session, agent))
+                                    asyncio.create_task(execute_emergency_flush(self._session, agent))
 
                     # In-place shift input_buffer by 512 samples (zero-allocation)
                     self._input_buffer[: self._input_len - 512] = self._input_buffer[512 : self._input_len]

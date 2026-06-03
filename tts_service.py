@@ -33,9 +33,10 @@ active_tts_stream: Optional["LocalTTSStream"] = None
 # fs = 16000, Nyquist = 8000. Cutoff = 3400Hz.
 LP_SOS = scipy.signal.butter(5, 3400, btype='low', fs=16000, output='sos')
 
-# 2. 2nd order Butterworth bandpass filter for 150Hz - 500Hz register
-# fs = 16000, registers = [150, 500]
-BP_SOS = scipy.signal.butter(2, [150, 500], btype='bandpass', fs=16000, output='sos')
+# 2. Peaking EQ filter to boost vocal frequencies between 150Hz and 500Hz by precisely +3dB
+# Designed at fs=16000, f0=273.86 (geometric mean), Q=0.7825, gain=+3dB
+PEAK_B = np.array([1.022507865796964, -1.8799566127255005, 0.8683730196383409])
+PEAK_A = np.array([1.0, -1.8799566127255005, 0.8908808854353051])
 
 
 def resample_to_16k(audio: np.ndarray, orig_fs: int = 24000) -> np.ndarray:
@@ -63,7 +64,7 @@ def apply_senior_audio_filters(audio: np.ndarray) -> np.ndarray:
     Applies post-synthesis digital audio filtering to enforce tone compliance
     for an older hearing profile over PSTN lines:
     1. Low-pass filter rolling off above 3400Hz.
-    2. Boost of the mid-to-low register (150Hz - 500Hz) by +3dB (1.4125 gain, meaning +0.4125 * bandpass).
+    2. Boost of the mid-to-low register (150Hz - 500Hz) by precisely +3dB.
     """
     if audio.size == 0:
         return audio
@@ -71,12 +72,8 @@ def apply_senior_audio_filters(audio: np.ndarray) -> np.ndarray:
     # Apply low-pass filter
     audio_lp = scipy.signal.sosfilt(LP_SOS, audio)
     
-    # Extract the bandpass register (150Hz - 500Hz)
-    bp_filtered = scipy.signal.sosfilt(BP_SOS, audio_lp)
-    
-    # Boost by adding the bandpass filtered component with 0.4125 coefficient (corresponding to +3dB peak boost)
-    # y = x + 0.4125 * bp_filtered
-    equalized = audio_lp + 0.4125 * bp_filtered
+    # Apply peaking EQ filter
+    equalized = scipy.signal.lfilter(PEAK_B, PEAK_A, audio_lp)
     
     # Soft clip/limiter to prevent any digital clipping after boosting
     peak = np.max(np.abs(equalized))

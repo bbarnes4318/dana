@@ -835,6 +835,7 @@ async def run_room_session(ctx: Any, config: LiveKitAgentWorkerConfig) -> None:
                 yield ChatChunk(choices=[Choice(delta=ChoiceDelta(content=agent_resp))])
 
     agent_instance = SimpleAgent()
+    session._vad = shared.vad.bind(session, agent_instance)
     await session.start(
         room=ctx.room,
         agent=agent_instance,
@@ -846,8 +847,6 @@ async def run_room_session(ctx: Any, config: LiveKitAgentWorkerConfig) -> None:
         )
     )
 
-    import speech.custom_vad
-    speech.custom_vad.active_session = session
     session.repository = shared.repository
     session.session_state = session_state
 

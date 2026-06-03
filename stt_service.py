@@ -38,61 +38,14 @@ class STTConfig:
     min_silence_ms: int = 200
 
 
-class SileroVAD:
-    """
-    Silero VAD v5 wrapper for speech activity detection.
-    """
-    
-    def __init__(self, threshold: float = 0.5, sample_rate: int = 16000):
-        self.threshold = threshold
-        self.sample_rate = sample_rate
-        self._model = None
-        self._utils = None
-        self._initialized = False
-        
-    async def initialize(self):
-        if self._initialized:
-            return
-            
-        loop = asyncio.get_event_loop()
-        await loop.run_in_executor(None, self._load_model)
-        self._initialized = True
-        logger.info("Silero VAD initialized successfully")
-        
-    def _load_model(self):
-        self._model, self._utils = torch.hub.load(
-            repo_or_dir='snakers4/silero-vad',
-            model='silero_vad',
-            force_reload=False,
-            trust_repo=True
-        )
-        self._model.eval()
-        
-    def detect_speech(self, audio_chunk: np.ndarray) -> float:
-        if not self._initialized:
-            raise RuntimeError("VAD not initialized. Call initialize() first.")
-            
-        audio_tensor = torch.from_numpy(audio_chunk).float()
-        if audio_tensor.dim() == 1:
-            audio_tensor = audio_tensor.unsqueeze(0)
-            
-        with torch.no_grad():
-            speech_prob = self._model(audio_tensor, self.sample_rate)
-            
-        return float(speech_prob.item())
-    
-    def is_speech(self, audio_chunk: np.ndarray) -> bool:
-        return self.detect_speech(audio_chunk) > self.threshold
-    
-    def reset(self):
-        if self._model is not None:
-            self._model.reset_states()
+
 
 
 class LocallyHostedSTT(stt.STT):
     """
     Custom STT implementation using faster-whisper.
     """
+    _active_streams: dict[str, 'LocalSTTStream'] = {}
     
     def __init__(self, config: Optional[STTConfig] = None):
         super().__init__(
@@ -103,10 +56,6 @@ class LocallyHostedSTT(stt.STT):
         )
         self.config = config or STTConfig()
         self._model: Optional[WhisperModel] = None
-        self._vad = SileroVAD(
-            threshold=self.config.vad_threshold,
-            sample_rate=self.config.sample_rate
-        )
         self._initialized = False
         self._lock = asyncio.Lock()
         
@@ -127,8 +76,6 @@ class LocallyHostedSTT(stt.STT):
                     compute_type=self.config.compute_type
                 )
             )
-            
-            await self._vad.initialize()
             
             load_time = time.time() - start_time
             logger.info(f"STT initialized in {load_time:.2f}s")
@@ -210,6 +157,11 @@ class LocalSTTStream(stt.SpeechStream):
         self._speech_end_time: Optional[float] = None
         self._silence_frames = 0
         
+        # Register in the active streams
+        from speech.context_registry import get_current_call_id
+        self._call_id = get_current_call_id() or "default"
+        LocallyHostedSTT._active_streams[self._call_id] = self
+
         # Buffer sizes: 30 seconds at 16kHz
         self._buffer_size = int(self._stt.config.sample_rate * self._stt.config.max_speech_duration_s)
         self._rolling_buffer = np.zeros(self._buffer_size, dtype=np.float32)
@@ -219,6 +171,23 @@ class LocalSTTStream(stt.SpeechStream):
         self._early_emitted = False
         self._data_event = asyncio.Event()
         self._closed = False
+
+    def on_speech_start(self):
+        if not self._is_speaking:
+            self._is_speaking = True
+            self._speech_finalized = False
+            self._early_emitted = False
+            self._speech_start_time = time.time()
+            logger.info(f"STT: Speech start hook triggered at {self._speech_start_time}, write_cursor={self._write_cursor}")
+            self._data_event.set()
+
+    def on_speech_end(self):
+        if self._is_speaking:
+            self._is_speaking = False
+            self._speech_finalized = True
+            self._speech_end_time = time.time()
+            logger.info(f"STT: Speech end hook triggered at {self._speech_end_time}")
+            self._data_event.set()
 
     @property
     def speech_start_time(self) -> Optional[float]:
@@ -385,34 +354,23 @@ class LocalSTTStream(stt.SpeechStream):
         if n_samples == 0:
             return
             
-        # Determine min_silence_frames dynamically based on frame size
-        frame_duration_ms = (n_samples / self._stt.config.sample_rate) * 1000
-        min_silence_ms = self._stt.config.min_silence_ms
-        min_silence_frames = max(1, int(min_silence_ms / frame_duration_ms))
-        
         # Zero-allocation normalization and copy to rolling buffer
         write_len = min(n_samples, self._buffer_size - self._write_cursor)
         if write_len > 0:
-            np.divide(samples[:write_len], 32768.0, out=self._rolling_buffer[self._write_cursor : self._write_cursor + write_len])
+            if not self._is_speaking:
+                # Keep only the last 300ms (4800 samples) of audio history as prefix padding
+                keep_samples = 4800
+                if self._write_cursor + write_len > keep_samples:
+                    # Shift buffer to make room
+                    shift = (self._write_cursor + write_len) - keep_samples
+                    self._rolling_buffer[:keep_samples - write_len] = self._rolling_buffer[shift : self._write_cursor]
+                    self._write_cursor = keep_samples - write_len
             
-            # Run VAD on the slice of new samples (zero allocation view)
-            is_speech = self._stt._vad.is_speech(self._rolling_buffer[self._write_cursor : self._write_cursor + write_len])
+            np.divide(samples[:write_len], 32768.0, out=self._rolling_buffer[self._write_cursor : self._write_cursor + write_len])
             self._write_cursor += write_len
             
-            if is_speech:
-                if not self._is_speaking:
-                    self._is_speaking = True
-                    self._speech_finalized = False
-                    self._early_emitted = False
-                    self._speech_start_time = time.time()
-                    # Copy the frame that triggered speech to the beginning of the rolling buffer
-                    self._rolling_buffer[:write_len] = self._rolling_buffer[self._write_cursor - write_len : self._write_cursor]
-                    self._rolling_buffer[write_len:].fill(0.0)
-                    self._write_cursor = write_len
-                    logger.debug(f"STT: Speech start detected at {self._speech_start_time}")
-                
-                self._silence_frames = 0
-                
+            if self._is_speaking:
+                # Check if maximum speech duration is exceeded
                 if self._speech_start_time and (time.time() - self._speech_start_time > self._stt.config.max_speech_duration_s):
                     self._is_speaking = False
                     self._speech_finalized = True
@@ -420,21 +378,12 @@ class LocalSTTStream(stt.SpeechStream):
                     logger.debug(f"STT: Speech max duration exceeded, end detected at {self._speech_end_time}")
                 
                 self._data_event.set()
-            else:
-                if self._is_speaking:
-                    self._silence_frames += 1
-                    
-                    if self._silence_frames >= min_silence_frames:
-                        self._is_speaking = False
-                        self._speech_finalized = True
-                        self._speech_end_time = time.time()
-                        logger.debug(f"STT: Speech end detected at {self._speech_end_time} after {self._silence_frames} silence frames")
-                    
-                    self._data_event.set()
     
     async def aclose(self):
         self._closed = True
         self._data_event.set()
+        # Clean up from active_streams
+        LocallyHostedSTT._active_streams.pop(self._call_id, None)
 
 
 def create_stt(config: VoiceConfig) -> stt.STT:

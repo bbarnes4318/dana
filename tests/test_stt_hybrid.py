@@ -549,11 +549,6 @@ def test_local_stt_stream_rolling_and_early_emit() -> None:
     
     stt_mock._ensure_initialized = AsyncMock()
     
-    # Mock VAD
-    vad_mock = MagicMock()
-    vad_mock.is_speech.return_value = True
-    stt_mock._vad = vad_mock
-    
     # 2. Instantiate stream
     from stt_service import LocalSTTStream
     stream = LocalSTTStream(stt_mock)
@@ -563,7 +558,8 @@ def test_local_stt_stream_rolling_and_early_emit() -> None:
     assert len(stream._rolling_buffer) == 480000
     assert stream._write_cursor == 0
     
-    # 3. Simulate push_frame with speech data (30ms frame at 16kHz = 480 samples = 960 bytes)
+    # 3. Simulate VAD speech start and push_frame with speech data (30ms frame at 16kHz = 480 samples = 960 bytes)
+    stream.on_speech_start()
     frame_data = b"\x00" * 960
     frame = rtc.AudioFrame(data=frame_data, sample_rate=16000, num_channels=1, samples_per_channel=480)
     

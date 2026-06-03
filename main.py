@@ -649,6 +649,7 @@ async def entrypoint(ctx: JobContext):
     
     agent = DanaAgent(shared, latency_recorder)
     agent.room = ctx.room
+    session._vad = shared.vad.bind(session, agent)
     
     # Set up session event hooks
     @session.on("user_state_changed")
@@ -822,8 +823,6 @@ async def entrypoint(ctx: JobContext):
         ),
     )
     
-    import speech.custom_vad
-    speech.custom_vad.active_session = session
     session.repository = shared.repository
     
     # Store the audio source for the direct FFI background playback
