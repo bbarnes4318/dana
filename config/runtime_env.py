@@ -1,3 +1,10 @@
+"""Runtime environment checks for the Dana voice platform.
+
+Reads environment variables to determine whether the application is running
+in development, test, or production mode, and whether mock/dummy TTS is allowed.
+Also loads environment variables and returns a unified/normalized configuration dictionary.
+"""
+
 import os
 from typing import Optional
 from config.env_loader import load_environment
@@ -227,3 +234,35 @@ def get_runtime_env() -> dict:
         "kokoro_model_path": kokoro_model_path,
         "kokoro_voices_path": kokoro_voices_path,
     }
+
+
+def get_runtime_mode() -> str:
+    """Returns the current runtime mode (development, test, or production).
+
+    Defaults to 'development'.
+    """
+    env = os.getenv("DANA_RUNTIME_ENV", "development").strip().lower()
+    if env in ("production", "prod"):
+        return "production"
+    if env in ("test", "testing"):
+        return "test"
+    return "development"
+
+
+def is_production() -> bool:
+    """Returns True if the application is running in production mode."""
+    return get_runtime_mode() == "production"
+
+
+def is_test() -> bool:
+    """Returns True if the application is running in test mode."""
+    return get_runtime_mode() == "test"
+
+
+def allow_mock_tts() -> bool:
+    """Returns True if mock TTS is explicitly allowed in the current environment.
+
+    Defaults to False. Truthy values: true, 1, yes.
+    """
+    val = os.getenv("DANA_ALLOW_MOCK_TTS", "false").strip().lower()
+    return val in ("true", "1", "yes")

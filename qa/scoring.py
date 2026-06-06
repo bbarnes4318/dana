@@ -340,6 +340,7 @@ class CallScorer:
         scores["talk_listen_balance"] = self._score_balance(record, issues)
         scores["latency_readiness"] = self._score_latency_readiness(record, issues)
         scores["close_probability"] = self._score_close_probability(record, issues)
+        scores["bot_likeness"] = self._score_bot_likeness(record, issues)
 
         overall = QARubric.compute_overall(scores)
 
@@ -697,3 +698,82 @@ class CallScorer:
             return 0.0
         
         return round(confirmed_count * 1.5, 1)
+
+    def _score_bot_likeness(self, record: CallRecord, issues: list[str]) -> float:
+        """Score based on absence of robotic phrasing, phrase repetitions, and use of repair language."""
+        deductions = 0.0
+        agent_turns = record.agent_turns
+        if not agent_turns:
+            return 10.0
+
+        # 1. Repetitive overused phrases count
+        overused_phrases = ["perfect", "gotcha", "understood", "absolutely", "no problem", "great question"]
+        phrase_counts = {p: 0 for p in overused_phrases}
+        
+        # Build normalized turn texts for analysis
+        normalized_texts = []
+        for turn in agent_turns:
+            text_lower = turn.text.lower()
+            normalized_texts.append(text_lower)
+            for phrase in overused_phrases:
+                # Use word boundaries for counting
+                count = len(re.findall(r"\b" + re.escape(phrase) + r"\b", text_lower))
+                phrase_counts[phrase] += count
+
+        for phrase, count in phrase_counts.items():
+            if count > 2:
+                overuse_times = count - 2
+                deductions += overuse_times * 2.0
+                issues.append(f"bot likeness: overused phrase '{phrase}' spoken {count} times (limit is 2)")
+
+        # 2. Duplicate sentences of length >= 3 words
+        spoken_sentences = {}
+        for turn in agent_turns:
+            # split into sentences
+            sentences = re.split(r"(?<=[.!?])\s+", turn.text.strip())
+            for s in sentences:
+                clean_s = s.strip()
+                if not clean_s:
+                    continue
+                words = clean_s.split()
+                if len(words) >= 3:
+                    norm_s = re.sub(r"[^a-z0-9]", "", clean_s.lower())
+                    spoken_sentences[norm_s] = spoken_sentences.get(norm_s, 0) + 1
+
+        for norm_s, count in spoken_sentences.items():
+            if count > 1:
+                duplicate_times = count - 1
+                deductions += duplicate_times * 3.0
+                # find a sample of the sentence to report
+                sample = ""
+                for turn in agent_turns:
+                    for s in re.split(r"(?<=[.!?])\s+", turn.text.strip()):
+                        if re.sub(r"[^a-z0-9]", "", s.lower()) == norm_s:
+                            sample = s.strip()
+                            break
+                    if sample:
+                        break
+                issues.append(f"bot likeness: duplicate sentence spoken {count} times: '{sample}'")
+
+        # 3. Chatbot phrases
+        chatbot_phrases = ["as an ai", "virtual assistant", "computer program", "chatbot", "artificial intelligence", "synthetic voice"]
+        for phrase in chatbot_phrases:
+            for turn in agent_turns:
+                text_lower = turn.text.lower()
+                if phrase in text_lower:
+                    deductions += 2.0
+                    issues.append(f"bot likeness: chatbot phrase detected: '{phrase}'")
+
+        # 4. Repair language after interruptions
+        for turn in record.turns:
+            if turn.speaker == "agent" and getattr(turn, "interrupted", False):
+                text_lower = turn.text.lower()
+                has_repair = any(
+                    p in text_lower 
+                    for p in ["sorry, go ahead", "sorry go ahead", "didn't mean to cut you off", "did not mean to cut you off", "keep it quick"]
+                )
+                if not has_repair:
+                    deductions += 3.0
+                    issues.append("bot likeness: missing repair language after interruption")
+
+        return max(10.0 - deductions, 0.0)

@@ -16,6 +16,7 @@ from livekit.agents import (
     AutoSubscribe,
     JobContext,
     JobProcess,
+    JobRequest,
     WorkerOptions,
     cli,
     llm,
@@ -169,14 +170,29 @@ class SharedComponents:
         if hasattr(self.stt, "initialize"):
             await self.stt.initialize()
             
-        # 2. Initialize local TTS
+        # 2. Initialize local TTS & run healthcheck
         from tts_service import LocallyHostedKokoro, TTSConfig
+        from voice.tts_healthcheck import run_tts_healthcheck
+        from config.runtime_env import is_production, get_runtime_env, allow_mock_tts
+        from voice.voice_provider_registry import get_voice_profile
+        
         tts_config = TTSConfig(
             voice=self.config.tts_voice,
             speed=self.config.tts_speed,
         )
         local_tts = LocallyHostedKokoro(tts_config)
-        await local_tts.initialize()
+        
+        local_tts_healthy = False
+        health_error = None
+        try:
+            await local_tts.initialize()
+            health_result = await run_tts_healthcheck(local_tts)
+            if health_result.is_healthy:
+                local_tts_healthy = True
+            else:
+                health_error = health_result.error_message
+        except Exception as e:
+            health_error = str(e)
         
         # Initialize cloud TTS lazily
         cloud_tts = None
@@ -205,6 +221,59 @@ class SharedComponents:
                 logger.error(f"Failed to initialize cloud TTS provider: {e}")
                 if cloud_tts_required:
                     raise RuntimeError(f"Cloud TTS requested but failed to load: {e}")
+
+        # Post-healthcheck routing safety logic
+        if not local_tts_healthy:
+            if is_production():
+                if cloud_tts is not None:
+                    logger.warning(f"Local TTS failed healthcheck: {health_error}. Routing to cloud TTS fallback.")
+                    self.router.local_tts_available = False
+                else:
+                    logger.error(f"FATAL: Local TTS failed healthcheck: {health_error}. No cloud TTS configured/available.")
+                    raise RuntimeError(f"Local TTS healthcheck failed and cloud TTS is not available: {health_error}")
+            else:
+                logger.warning(f"Local TTS healthcheck failed in non-production mode: {health_error}. Proceeding with fallback mode.")
+                # Also mark local tts unavailable for the router so it can route to cloud if possible
+                if cloud_tts is not None:
+                    self.router.local_tts_available = False
+
+        # Get voice profile info
+        profile = get_voice_profile(self.config.voice_profile)
+        profile_name = self.config.voice_profile
+        
+        # Determine active TTS mode for logs
+        if not local_tts_healthy:
+            active_tts_mode = "cloud (fallback)" if cloud_tts else "failed"
+        else:
+            active_tts_mode = self.config.tts_routing_mode
+            
+        # Production safety status for logs
+        env = get_runtime_env()
+        if env == "production":
+            if allow_mock_tts():
+                safety_status = "WARNING: Mock TTS allowed in production"
+            else:
+                safety_status = "production-safe (strict)"
+        else:
+            safety_status = f"development/test bypass ({env})"
+
+        logger.info(
+            f"\n"
+            f"============================================================\n"
+            f"DANA WORKER STARTUP - TTS STACK STATUS\n"
+            f"------------------------------------------------------------\n"
+            f"  Environment:             {env}\n"
+            f"  Safety Status:           {safety_status}\n"
+            f"  Active TTS Mode:         {active_tts_mode}\n"
+            f"  Voice Profile Name:      {profile_name}\n"
+            f"  Profile Provider:        {profile.provider if profile else 'unknown'}\n"
+            f"  Profile Voice Name:      {profile.voice_name if profile else 'unknown'}\n"
+            f"  Profile Quality:         {profile.quality_tier if profile else 'unknown'}\n"
+            f"  Profile Cost:            {profile.estimated_cost_tier if profile else 'unknown'}\n"
+            f"  Allowed in Production:   {profile.allowed_in_production if profile else 'unknown'}\n"
+            f"  Local TTS Status:        {'HEALTHY' if local_tts_healthy else 'FAILED'}\n"
+            f"============================================================"
+        )
 
         # 3. Initialize local LLM
         local_llm = lk_openai.LLM(
@@ -304,6 +373,10 @@ class DanaAgent(Agent):
 
         self._latency_recorder.mark("llm_request_start")
         
+        # Capture and reset interruption flag
+        interrupted = self.interrupted_current_turn
+        self.interrupted_current_turn = False
+        
         # Get the latest user message
         user_msg = chat_ctx.messages[-1] if chat_ctx.messages else None
         user_text = user_msg.content if user_msg else ""
@@ -317,7 +390,7 @@ class DanaAgent(Agent):
             logger.error("LiveKitRuntimeAdapter is not initialized on the agent!")
             self._latency_recorder.mark("llm_done")
             return
-          
+
         def is_user_input_divergent(text: str) -> bool:
             text_lower = text.lower().strip()
             relevant_keywords = [
@@ -344,6 +417,158 @@ class DanaAgent(Agent):
                     return True
             return False
 
+        # Check if streaming mode is enabled
+        is_streaming_enabled = os.getenv("DANA_ENABLE_STREAMING_RESPONSE", "false").lower() == "true"
+        if is_streaming_enabled:
+            self._latency_recorder.streaming_mode_enabled = True
+            
+            # Define clean chat stream function to call vLLM client directly
+            async def chat_stream_fn(instructions: str) -> AsyncIterable[str]:
+                new_ctx = llm.ChatContext()
+                
+                # Prepend static system prompt prefix (personality and compliance parameters)
+                loader = self.prompt_loader or (self.adapter and self.adapter.prompt_loader)
+                static_prompt = loader.build_system_prompt() if loader else ""
+                
+                # Check for irrelevant or divergent topics
+                is_divergent = is_user_input_divergent(user_text)
+                if is_divergent:
+                    combined_prompt = (
+                        f"{static_prompt}\n\n"
+                        f"### SYSTEM CONTEXT ENFORCEMENT WARNING ###\n"
+                        f"The user has introduced an irrelevant or divergent topic. You must NOT discuss this topic.\n"
+                        f"Use this explicit internal logic pathway: Acknowledge politely, do not engage in the divergent topic, "
+                        f"and gently but firmly redirect the user back to the primary qualifying data points (age, state of residence, "
+                        f"and current coverage status).\n"
+                        f"Example: 'I hear you, but let's get back to the final expense benefits. To see if you qualify, how old are you?'\n"
+                        f"##########################################\n\n"
+                        f"{instructions}"
+                    )
+                else:
+                    combined_prompt = f"{static_prompt}\n\n{instructions}"
+                
+                # Add compiled instructions as the system prompt
+                new_ctx.messages.append(llm.ChatMessage(
+                    role="system",
+                    content=combined_prompt
+                ))
+                
+                # Copy conversation history (user and assistant messages only)
+                for msg in chat_ctx.messages:
+                    if msg.role in ("user", "assistant"):
+                        new_ctx.messages.append(llm.ChatMessage(
+                            role=msg.role,
+                            content=msg.content
+                        ))
+                
+                # Estimate prompt tokens
+                prompt_str = instructions + "".join(m.content for m in new_ctx.messages if m.content)
+                from metrics.model_cost_metrics import estimate_llm_tokens
+                self.prompt_tokens += estimate_llm_tokens(prompt_str)
+
+                # Run LLM chat directly - hardcoding temperature to 0.2
+                stream = self.llm.chat(
+                    chat_ctx=new_ctx,
+                    temperature=0.2,
+                    top_p=self._config.top_p,
+                    max_tokens=self._config.max_tokens,
+                    frequency_penalty=0.15,
+                )
+                
+                first_token = True
+                async for chunk in stream:
+                    content = chunk.choices[0].delta.content if chunk.choices else ""
+                    if content:
+                        if first_token:
+                            first_token = False
+                            self._latency_recorder.mark("llm_first_token")
+                        yield content
+
+            try:
+                first_chunk = True
+                # Process user turn via the adapter exactly once using stream
+                async for chunk in self.adapter.process_user_turn_stream(
+                    user_text, chat_stream_fn, latency_recorder=self._latency_recorder, interrupted=interrupted
+                ):
+                    if first_chunk:
+                        delay = self.adapter.runtime.conversational_timing.get_pre_speech_delay(
+                            self.adapter.state_machine.call_state.current_stage.value
+                        )
+                        if delay > 0:
+                            logger.info(f"Applying pre-speech delay of {delay}s before streaming TTS")
+                            await asyncio.sleep(delay)
+                        first_chunk = False
+                    yield chunk
+            except asyncio.CancelledError:
+                logger.info("llm_node: Generation cancelled due to user barge-in.")
+                raise
+
+            # Get the final streaming result from adapter
+            result = getattr(self.adapter, "last_streaming_result", None)
+            if result:
+                self.current_turn_response = result.agent_response or ""
+                
+                # Update stage in registry
+                from speech.context_registry import update_call_stage
+                update_call_stage(self.adapter.call_id, result.stage)
+
+                # Estimate completion tokens
+                from metrics.model_cost_metrics import estimate_llm_tokens
+                self.completion_tokens += estimate_llm_tokens(self.current_turn_response)
+
+                # Safely apply adaptive endpointing
+                if self._config.endpoint_mode == "adaptive" and getattr(self, "session", None):
+                    from speech.endpoint_tuner import get_endpoint_delays, safe_update_endpointing
+                    is_objection = False
+                    for ev in self.adapter.runtime.events:
+                        from core.runtime_events import ObjectionDetectedEvent
+                        if isinstance(ev, ObjectionDetectedEvent) and getattr(ev, "utterance", None) == user_text:
+                            is_objection = True
+                            break
+                    min_d, max_d = get_endpoint_delays(result.stage, is_objection_or_confusion=is_objection)
+                    safe_update_endpointing(self.session, min_d, max_d)
+
+                # Handle disconnect timing based on outcome
+                if result.should_end_call:
+                    is_warm_bridge = False
+                    for ev in self.adapter.runtime.events:
+                        from core.runtime_events import ToolTriggeredEvent
+                        if isinstance(ev, ToolTriggeredEvent) and ev.tool_name in ("feTransfer", "transfer_to_agent") and ev.success:
+                            if "warm" in ev.result_message.lower() or os.getenv("DANA_TRANSFER_MODE", "").lower() == "warm_bridge":
+                                is_warm_bridge = True
+                                break
+                    if is_warm_bridge:
+                        logger.info("Warm bridge transfer succeeded. Dana will mute and leave later.")
+                        self.should_disconnect = False
+                        self.warm_bridge_active = True
+                        
+                        async def warm_bridge_leave():
+                            await asyncio.sleep(15.0)
+                            logger.info("warm_bridge_active_dana_suppressed: Dana leaving agent session only.")
+                            if getattr(self, "session", None):
+                                try:
+                                    await self.session.aclose()
+                                except Exception as e:
+                                    logger.error(f"Error closing agent session during warm bridge: {e}")
+                        asyncio.create_task(warm_bridge_leave())
+                    else:
+                        self.should_disconnect = True
+                        if self.fallback_disconnect_task:
+                            self.fallback_disconnect_task.cancel()
+                        
+                        async def disconnect_after_delay(delay: float = 8.0):
+                            try:
+                                await asyncio.sleep(delay)
+                                if self.room and self.room.is_connected():
+                                    logger.info("Fallback: Disconnecting room after delay...")
+                                    await self.room.disconnect()
+                            except asyncio.CancelledError:
+                                logger.info("Fallback disconnect task cancelled.")
+                        self.fallback_disconnect_task = asyncio.create_task(disconnect_after_delay())
+            
+            self._latency_recorder.mark("llm_done")
+            return
+        
         # Define clean chat function to call vLLM client directly without re-entering DanaAgent.llm_node
         async def chat_fn(instructions: str) -> str:
             new_ctx = llm.ChatContext()
@@ -408,8 +633,13 @@ class DanaAgent(Agent):
             return response_text
 
         # Process user turn via the adapter exactly once
-        result = await self.adapter.process_user_turn(user_text, chat_fn)
+        result = await self.adapter.process_user_turn(user_text, chat_fn, interrupted=interrupted)
         self.current_turn_response = result.agent_response or ""
+        
+        delay = getattr(result, "pre_speech_delay", 0.0)
+        if delay > 0:
+            logger.info(f"Applying pre-speech delay of {delay}s before playing TTS")
+            await asyncio.sleep(delay)
         
         # Update stage in registry
         from speech.context_registry import update_call_stage
@@ -606,6 +836,8 @@ async def run_amd_worker(track: rtc.Track, session: AgentSession, agent: any, ro
 
 
 async def entrypoint(ctx: JobContext):
+    from ops.worker_capacity import WorkerCapacity
+    WorkerCapacity.increment_calls()
     logger.info(f"New connection: room={ctx.room.name}")
     
     # Retrieve prewarmed components
@@ -713,7 +945,6 @@ async def entrypoint(ctx: JobContext):
                 agent.tts_characters += len(getattr(agent, "current_turn_response", ""))
             
             # Reset flags
-            agent.interrupted_current_turn = False
             agent.current_turn_response = ""
             agent.agent_speech_started_time = None
 
@@ -728,6 +959,24 @@ async def entrypoint(ctx: JobContext):
     def on_user_input_transcribed(event):
         if event.is_final:
             latency_recorder.mark("transcript_final")
+        else:
+            enable_semantic = os.getenv("DANA_ENABLE_SEMANTIC_TURN_DETECTION", "false").strip().lower() in ("true", "1", "yes")
+            if enable_semantic and shared.config.endpoint_mode == "adaptive":
+                from speech.semantic_turn_detector import SemanticTurnDetector
+                from speech.context_registry import get_current_call_stage
+                from speech.endpoint_tuner import safe_update_endpointing
+                
+                detector = SemanticTurnDetector()
+                stage = get_current_call_stage() or "OPENING"
+                partial_text = ""
+                if hasattr(event, "text") and event.text:
+                    partial_text = event.text
+                elif hasattr(event, "alternatives") and event.alternatives:
+                    partial_text = event.alternatives[0].text
+                
+                if partial_text:
+                    res = detector.process_transcript(partial_text, stage=stage)
+                    safe_update_endpointing(session, res.recommended_min_delay, res.recommended_max_delay)
             
     # Connect to room (audio only)
     await ctx.connect(auto_subscribe=AutoSubscribe.AUDIO_ONLY)
@@ -864,6 +1113,8 @@ async def entrypoint(ctx: JobContext):
         while ctx.room.is_connected():
             await asyncio.sleep(1.0)
     finally:
+        from ops.worker_capacity import WorkerCapacity
+        WorkerCapacity.decrement_calls()
         latency_recorder.log_summary()
         from speech.context_registry import unregister_call
         unregister_call(call_id)
@@ -912,7 +1163,8 @@ async def entrypoint(ctx: JobContext):
                     speaker="agent" if t.get("speaker") == "agent" else "prospect",
                     text=t.get("text", ""),
                     stage=t.get("stage", ""),
-                    timestamp=parse_dt(t.get("timestamp") or t.get("created_at")) or datetime.now(timezone.utc)
+                    timestamp=parse_dt(t.get("timestamp") or t.get("created_at")) or datetime.now(timezone.utc),
+                    interrupted=t.get("interrupted", False)
                 ))
             
             # Load tools
@@ -1027,6 +1279,7 @@ async def entrypoint(ctx: JobContext):
             elif "openai" in voice_lower:
                 tts_prov = "openai"
                 
+            # Save model costs (legacy call_costs records)
             await calculate_and_save_costs(
                 repository=shared.repository,
                 call_id=call_id,
@@ -1043,7 +1296,109 @@ async def entrypoint(ctx: JobContext):
                 dry_run=is_dry_run,
                 llm_tokens_estimated=True
             )
-            await save_outcome_for_call(shared.repository, call_id, campaign_id, outcome, cost=0.0)
+
+            # Save turn latency spans & GPU runtime allocations based on latency recorder
+            try:
+                from datetime import datetime, timezone, timedelta
+                from metrics.gpu_cost_allocator import allocate_gpu_cost
+                from routing.model_router import ModelRouter
+
+                lat_dict = latency_recorder.to_dict()
+                durs = lat_dict.get("durations", {})
+                now = datetime.now(timezone.utc)
+                
+                # STT latency span & GPU allocation
+                stt_ms = durs.get("stt_latency")
+                if stt_ms is not None:
+                    stt_start = now - timedelta(milliseconds=stt_ms)
+                    await shared.repository.save_turn_latency_span(
+                        call_id=call_id,
+                        turn_number=agent.turn_number if hasattr(agent, "turn_number") else 1,
+                        component="stt",
+                        start_time=stt_start,
+                        end_time=now,
+                        latency_ms=float(stt_ms)
+                    )
+                    stt_provider, _ = ModelRouter.get_last_decision(call_id, "stt")
+                    if stt_provider in ("local", "whisper"):
+                        await allocate_gpu_cost(
+                            repository=shared.repository,
+                            call_id=call_id,
+                            component="stt",
+                            runtime_seconds=float(stt_ms) / 1000.0
+                        )
+                
+                # LLM latency span & GPU allocation
+                llm_ms = durs.get("llm_duration")
+                if llm_ms is not None:
+                    llm_start = now - timedelta(milliseconds=llm_ms)
+                    await shared.repository.save_turn_latency_span(
+                        call_id=call_id,
+                        turn_number=agent.turn_number if hasattr(agent, "turn_number") else 1,
+                        component="llm",
+                        start_time=llm_start,
+                        end_time=now,
+                        latency_ms=float(llm_ms)
+                    )
+                    llm_provider, _ = ModelRouter.get_last_decision(call_id, "llm")
+                    if llm_provider in ("local", "vllm", "llama"):
+                        await allocate_gpu_cost(
+                            repository=shared.repository,
+                            call_id=call_id,
+                            component="llm",
+                            runtime_seconds=float(llm_ms) / 1000.0
+                        )
+
+                # TTS latency span & GPU allocation
+                tts_ms = durs.get("tts_synthesis_start_latency")
+                if tts_ms is not None:
+                    tts_start = now - timedelta(milliseconds=tts_ms)
+                    await shared.repository.save_turn_latency_span(
+                        call_id=call_id,
+                        turn_number=agent.turn_number if hasattr(agent, "turn_number") else 1,
+                        component="tts",
+                        start_time=tts_start,
+                        end_time=now,
+                        latency_ms=float(tts_ms)
+                    )
+                    tts_provider, _ = ModelRouter.get_last_decision(call_id, "tts")
+                    if tts_provider in ("local", "kokoro", "bella"):
+                        await allocate_gpu_cost(
+                            repository=shared.repository,
+                            call_id=call_id,
+                            component="tts",
+                            runtime_seconds=float(tts_ms) / 1000.0
+                        )
+            except Exception as e:
+                logger.error(f"Error saving turn latency spans/GPU allocations: {e}")
+
+            # Reconcile all call costs and compute breakdown
+            reconciled_total_cost = 0.0
+            try:
+                from metrics.provider_cost_reconciler import reconcile_call_costs
+                reconciled = await reconcile_call_costs(
+                    repository=shared.repository,
+                    call_id=call_id,
+                    campaign_id=campaign_id,
+                    duration_seconds=duration,
+                    stt_seconds=agent.stt_seconds,
+                    prompt_tokens=agent.prompt_tokens,
+                    completion_tokens=agent.completion_tokens,
+                    tts_characters=agent.tts_characters,
+                    outcome=outcome
+                )
+                reconciled_total_cost = float(reconciled.get("total_cost") or 0.0)
+            except Exception as e:
+                logger.error(f"Error during cost reconciliation: {e}")
+
+            await save_outcome_for_call(shared.repository, call_id, campaign_id, outcome, cost=reconciled_total_cost)
+            
+            # Rollup campaign costs
+            try:
+                from metrics.cost_per_outcome import recompute_campaign_rollups
+                await recompute_campaign_rollups(shared.repository, campaign_id)
+            except Exception as e:
+                logger.error(f"Error recomputing campaign rollups: {e}")
             
             # Cleanup call routing context/health state
             try:
@@ -1162,10 +1517,22 @@ def prewarm(proc: JobProcess):
     asyncio.run(_prewarm())
 
 
+async def request_fnc(req: JobRequest) -> None:
+    logger.info(f"Received job request {req.id}")
+    from ops.worker_capacity import WorkerCapacity
+    if not WorkerCapacity.has_capacity():
+        logger.warning(f"Rejecting job request {req.id} due to capacity limits")
+        await req.reject()
+    else:
+        logger.info(f"Accepting job request {req.id}")
+        await req.accept()
+
+
 if __name__ == "__main__":
     cli.run_app(
         WorkerOptions(
             entrypoint_fnc=entrypoint,
             prewarm_fnc=prewarm,
+            request_fnc=request_fnc,
         ),
     )

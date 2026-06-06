@@ -1,0 +1,90 @@
+dana_local:
+  name: "Dana Local (Fully Offline/Edge)"
+  cost_per_connected_minute: 0.01
+  cost_per_qualified_transfer: 0.00
+  p50_turn_latency_ms: 380.0
+  p95_turn_latency_ms: 720.0
+  transcript_final_to_first_audio_ms: 380.0
+  llm_first_token_ms: 180.0
+  tts_first_audio_ms: 150.0
+  barge_in_stop_audio_ms: 120.0
+  compliance_hard_fail_rate: 0.00
+  humanlikeness_score: 88.0
+
+dana_hybrid:
+  name: "Dana Hybrid (Edge STT/TTS, Cloud LLM)"
+  cost_per_connected_minute: 0.05
+  cost_per_qualified_transfer: 0.00
+  p50_turn_latency_ms: 420.0
+  p95_turn_latency_ms: 800.0
+  transcript_final_to_first_audio_ms: 420.0
+  llm_first_token_ms: 220.0
+  tts_first_audio_ms: 160.0
+  barge_in_stop_audio_ms: 140.0
+  compliance_hard_fail_rate: 0.00
+  humanlikeness_score: 92.0
+
+dana_premium:
+  name: "Dana Premium (Low-Latency Cloud / Custom Fine-Tuned)"
+  cost_per_connected_minute: 0.12
+  cost_per_qualified_transfer: 0.05
+  p50_turn_latency_ms: 350.0
+  p95_turn_latency_ms: 680.0
+  transcript_final_to_first_audio_ms: 350.0
+  llm_first_token_ms: 150.0
+  tts_first_audio_ms: 140.0
+  barge_in_stop_audio_ms: 110.0
+  compliance_hard_fail_rate: 0.00
+  humanlikeness_score: 96.0
+
+retell_reference:
+  name: "Retell AI Reference Profile"
+  cost_per_connected_minute: 0.18
+  cost_per_qualified_transfer: 0.20
+  p50_turn_latency_ms: 600.0
+  p95_turn_latency_ms: 1100.0
+  transcript_final_to_first_audio_ms: 600.0
+  llm_first_token_ms: 280.0
+  tts_first_audio_ms: 250.0
+  barge_in_stop_audio_ms: 220.0
+  compliance_hard_fail_rate: 0.02
+  humanlikeness_score: 85.0
+
+vapi_reference:
+  name: "Vapi Reference Profile"
+  cost_per_connected_minute: 0.15
+  cost_per_qualified_transfer: 0.15
+  p50_turn_latency_ms: 550.0
+  p95_turn_latency_ms: 950.0
+  transcript_final_to_first_audio_ms: 550.0
+  llm_first_token_ms: 260.0
+  tts_first_audio_ms: 220.0
+  barge_in_stop_audio_ms: 210.0
+  compliance_hard_fail_rate: 0.03
+  humanlikeness_score: 84.0
+
+bland_reference:
+  name: "Bland AI Reference Profile"
+  cost_per_connected_minute: 0.09
+  cost_per_qualified_transfer: 0.10
+  p50_turn_latency_ms: 1200.0
+  p95_turn_latency_ms: 2200.0
+  transcript_final_to_first_audio_ms: 1200.0
+  llm_first_token_ms: 450.0
+  tts_first_audio_ms: 350.0
+  barge_in_stop_audio_ms: 400.0
+  compliance_hard_fail_rate: 0.08
+  humanlikeness_score: 72.0
+
+generic_cloud_reference:
+  name: "Generic Cloud Provider Reference Profile"
+  cost_per_connected_minute: 0.25
+  cost_per_qualified_transfer: 0.50
+  p50_turn_latency_ms: 900.0
+  p95_turn_latency_ms: 1700.0
+  transcript_final_to_first_audio_ms: 900.0
+  llm_first_token_ms: 350.0
+  tts_first_audio_ms: 300.0
+  barge_in_stop_audio_ms: 300.0
+  compliance_hard_fail_rate: 0.05
+  humanlikeness_score: 78.0

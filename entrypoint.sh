@@ -52,6 +52,10 @@ until curl -s -f http://${VLLM_HOST:-vllm-server}:8000/health > /dev/null 2>&1; 
 done
 echo "✓ vLLM server is ready"
 
+# Run readiness checks
+echo "Running system readiness checks..."
+python -m ops.readiness
+
 echo ""
 echo "Starting LiveKit Agent..."
 exec "$@"

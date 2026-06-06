@@ -215,3 +215,15 @@ def test_explicit_consent_does_trigger_transfer() -> None:
     assert result.next_stage == CallStage.TRANSFER_READY
     assert result.extracted_data.get("transfer_consent_confirmed") is True
     assert "Perfect. Stay right there for me." in result.response_guidance
+
+
+def test_topic_redirect_responses_are_canonical() -> None:
+    from safety.topic_redirect_policy import TopicRedirectPolicy
+    policy = TopicRedirectPolicy()
+    
+    # Check that age range redirect matches our safe copy and does not contain "qualify"
+    age_resp = policy.get_redirect_response(CallStage.AGE_RANGE)
+    assert "forty" in age_resp
+    assert "eighty-five" in age_resp
+    assert "qualify" not in age_resp.lower()
+

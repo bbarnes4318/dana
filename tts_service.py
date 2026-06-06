@@ -241,6 +241,13 @@ class LocallyHostedKokoro(tts.TTS):
             model_path = os.environ.get("KOKORO_MODEL_PATH", "/root/.cache/kokoro/kokoro-v1.0.onnx")
             voices_path = os.environ.get("KOKORO_VOICES_PATH", "/root/.cache/kokoro/voices-v1.0.bin")
             
+            from config.runtime_env import is_production
+            if is_production():
+                if not os.path.exists(model_path) and not os.path.exists("models/kokoro-v1.0.onnx"):
+                    raise FileNotFoundError(f"Production Kokoro model file not found at {model_path} or models/kokoro-v1.0.onnx")
+                if not os.path.exists(voices_path) and not os.path.exists("models/voices-v1.0.bin"):
+                    raise FileNotFoundError(f"Production Kokoro voices file not found at {voices_path} or models/voices-v1.0.bin")
+
             # Local fallback for tests
             if not os.path.exists(model_path):
                 if os.path.exists("models/kokoro-v1.0.onnx"):
@@ -608,3 +615,33 @@ class LocalChunkedStream(tts.ChunkedStream):
         except Exception as e:
             logger.error(f"Error in TTS chunked stream _run: {e}")
             raise
+
+
+class MockKokoro(LocallyHostedKokoro):
+    """
+    Mock implementation of Kokoro ONNX TTS for tests/local development.
+    Generates dummy non-silent audio so it passes healthchecks and unit tests.
+    """
+    def __init__(self, config: Optional[TTSConfig] = None):
+        from config.runtime_env import is_production, allow_mock_tts
+        if is_production() and not allow_mock_tts():
+            raise RuntimeError("MockKokoro is prohibited in production mode unless DANA_ALLOW_MOCK_TTS=true.")
+        if is_production() and allow_mock_tts():
+            logger.warning("WARNING: MockKokoro is running in PRODUCTION mode because DANA_ALLOW_MOCK_TTS=true is set.")
+            
+        super().__init__(config)
+        self._initialized = True
+
+    async def initialize(self):
+        self._initialized = True
+        logger.info("MockKokoro initialized (mock bypass)")
+
+    async def _synthesize_audio(self, text: str) -> np.ndarray:
+        if not text.strip():
+            return np.array([], dtype=np.float32)
+        # Generate dummy 24kHz sine wave audio (0.2s duration)
+        sample_rate = self.config.sample_rate
+        duration = 0.2
+        t = np.linspace(0, duration, int(sample_rate * duration), endpoint=False)
+        audio = 0.5 * np.sin(2 * np.pi * 440 * t)
+        return audio.astype(np.float32)

@@ -37,7 +37,6 @@ class CallTurn(BaseModel):
     text: str
     stage: str
     timestamp: datetime = Field(default_factory=_utcnow)
-    
     # Extra fields for live call logging (Prompt 38)
     call_attempt_id: Optional[str] = None
     campaign_id: Optional[str] = None
@@ -48,7 +47,7 @@ class CallTurn(BaseModel):
     latency_metrics: Optional[dict[str, Any]] = None
     selected_did: Optional[str] = None
     caller_id_source: Optional[str] = None
-
+    interrupted: bool = False
 
 
 class ToolEvent(BaseModel):
@@ -494,6 +493,22 @@ class CallerIdNumber(BaseModel):
     updated_at: datetime = Field(default_factory=_utcnow)
 
 
+class CostRateCard(BaseModel):
+    """Pydantic schema for cost rate cards."""
+
+    id: Optional[str] = None
+    provider: str
+    component: str
+    model: Optional[str] = None
+    unit_rate: Decimal
+    usage_unit: str
+    effective_from: datetime = Field(default_factory=_utcnow)
+    effective_to: Optional[datetime] = None
+    is_active: bool = True
+    created_at: datetime = Field(default_factory=_utcnow)
+    updated_at: datetime = Field(default_factory=_utcnow)
+
+
 class CallerIdSelectionConfig(BaseModel):
     """Configuration options for selecting a caller ID from the pool."""
 
@@ -519,4 +534,77 @@ class CallerIdSelectionResult(BaseModel):
     candidate_count: int = 0
     eligible_count: int = 0
 
+
+class ProviderDecision(BaseModel):
+    """Pydantic schema for provider routing decisions."""
+
+    id: Optional[str] = None
+    call_id: str
+    component: str
+    selected_provider: str
+    decision_reason: str
+    latency_ms: Optional[float] = None
+    created_at: datetime = Field(default_factory=_utcnow)
+
+
+class TurnLatencySpan(BaseModel):
+    """Pydantic schema for turn latency spans."""
+
+    id: Optional[str] = None
+    call_id: str
+    turn_number: int
+    component: str
+    start_time: datetime
+    end_time: datetime
+    latency_ms: float
+    created_at: datetime = Field(default_factory=_utcnow)
+
+
+class GpuRuntimeAllocation(BaseModel):
+    """Pydantic schema for GPU runtime allocations."""
+
+    id: Optional[str] = None
+    call_id: str
+    component: str
+    gpu_device_id: Optional[str] = None
+    runtime_seconds: float
+    hourly_rate: Decimal
+    allocated_cost: Decimal
+    created_at: datetime = Field(default_factory=_utcnow)
+
+
+class CallOutcomeCost(BaseModel):
+    """Pydantic schema for call outcome costs."""
+
+    id: Optional[str] = None
+    call_id: str
+    campaign_id: str
+    outcome: str
+    telephony_cost: Decimal = Decimal("0.0")
+    stt_cost: Decimal = Decimal("0.0")
+    llm_cost: Decimal = Decimal("0.0")
+    tts_cost: Decimal = Decimal("0.0")
+    gpu_cost: Decimal = Decimal("0.0")
+    total_cost: Decimal = Decimal("0.0")
+    is_estimated: bool = False
+    created_at: datetime = Field(default_factory=_utcnow)
+
+
+class CampaignCostRollup(BaseModel):
+    """Pydantic schema for campaign cost rollups."""
+
+    id: Optional[str] = None
+    campaign_id: str
+    outcome: str
+    total_calls: int = 0
+    total_duration_seconds: float = 0.0
+    total_telephony_cost: Decimal = Decimal("0.0")
+    total_stt_cost: Decimal = Decimal("0.0")
+    total_llm_cost: Decimal = Decimal("0.0")
+    total_tts_cost: Decimal = Decimal("0.0")
+    total_gpu_cost: Decimal = Decimal("0.0")
+    total_cost: Decimal = Decimal("0.0")
+    average_call_cost: Decimal = Decimal("0.0")
+    rollup_timestamp: datetime = Field(default_factory=_utcnow)
+    created_at: datetime = Field(default_factory=_utcnow)
 

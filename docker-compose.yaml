@@ -201,7 +201,7 @@ services:
               count: 1
               capabilities: [gpu]
     healthcheck:
-      test: ["CMD-SHELL", "python -c \"import faster_whisper; import kokoro_onnx; print('OK')\""]
+      test: ["CMD", "python", "-m", "ops.healthcheck"]
       interval: 30s
       timeout: 10s
       retries: 3

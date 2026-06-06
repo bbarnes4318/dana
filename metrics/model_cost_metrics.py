@@ -3,6 +3,7 @@ import os
 from decimal import Decimal
 from typing import Optional, Any
 from storage.repository import Repository
+from metrics.rate_card import get_rate, get_llm_rates
 
 # Default rates (snapshot snapshot/rate lookup based on names)
 DEFAULT_DEEPGRAM_RATE = Decimal("0.000072")      # $0.0043 per minute -> $0.000072/sec
@@ -23,8 +24,7 @@ def estimate_llm_tokens(text: str) -> int:
 
 
 def get_stt_rate_and_source(provider: str) -> tuple[Decimal, str]:
-    """Get STT rate per second and its source."""
-    # Check env override first
+    """Get STT rate per second and its source (kept for backward compatibility)."""
     env_rate = os.getenv("DANA_COST_STT_RATE_PER_SECOND")
     if env_rate:
         return Decimal(env_rate), "env_override"
@@ -35,7 +35,6 @@ def get_stt_rate_and_source(provider: str) -> tuple[Decimal, str]:
     elif provider == "local" or provider == "whisper":
         infra_rate = os.getenv("DANA_COST_LOCAL_STT_INFRA_PER_MINUTE")
         if infra_rate:
-            # Convert per minute to per second
             return Decimal(infra_rate) / Decimal("60.0"), "local_infra_rate"
         return Decimal("0.0"), "default_local_rate"
         
@@ -43,14 +42,13 @@ def get_stt_rate_and_source(provider: str) -> tuple[Decimal, str]:
 
 
 def get_llm_rates_and_source(model: str) -> tuple[Decimal, Decimal, str]:
-    """Get LLM prompt and completion rates per token and its source."""
+    """Get LLM prompt and completion rates per token and its source (kept for backward compatibility)."""
     env_prompt = os.getenv("DANA_COST_LLM_PROMPT_RATE_PER_TOKEN")
     env_completion = os.getenv("DANA_COST_LLM_COMPLETION_RATE_PER_TOKEN")
     if env_prompt and env_completion:
         return Decimal(env_prompt), Decimal(env_completion), "env_override"
         
     model = model.lower()
-    # Check if local model
     is_local = "llama" in model or "vllm" in model or "local" in model
     if is_local:
         infra_rate = os.getenv("DANA_COST_LOCAL_LLM_INFRA_PER_1K_TOKENS")
@@ -59,7 +57,6 @@ def get_llm_rates_and_source(model: str) -> tuple[Decimal, Decimal, str]:
             return rate, rate, "local_infra_rate"
         return DEFAULT_LLM_PROMPT_RATE, DEFAULT_LLM_COMPLETION_RATE, "default_local_rate"
         
-    # Standard cloud models pricing (as defaults)
     if "gpt-4o-mini" in model:
         return Decimal("0.00000015"), Decimal("0.00000060"), "default_rate"
     elif "gpt-4o" in model:
@@ -73,7 +70,7 @@ def get_llm_rates_and_source(model: str) -> tuple[Decimal, Decimal, str]:
 
 
 def get_tts_rate_and_source(provider: str) -> tuple[Decimal, str]:
-    """Get TTS rate per character and its source."""
+    """Get TTS rate per character and its source (kept for backward compatibility)."""
     env_rate = os.getenv("DANA_COST_TTS_RATE_PER_CHARACTER")
     if env_rate:
         return Decimal(env_rate), "env_override"
@@ -93,7 +90,7 @@ def get_tts_rate_and_source(provider: str) -> tuple[Decimal, str]:
 
 
 def get_telephony_rate_and_source(provider: str) -> tuple[Decimal, str]:
-    """Get telephony rate per minute and its source."""
+    """Get telephony rate per minute and its source (kept for backward compatibility)."""
     env_rate = os.getenv("DANA_COST_TELEPHONY_RATE_PER_MINUTE")
     if env_rate:
         return Decimal(env_rate), "env_override"
@@ -144,11 +141,10 @@ async def calculate_and_save_costs(
     total_cost = Decimal("0.0")
 
     # 1. Telephony component
-    tele_rate_per_min, tele_source = get_telephony_rate_and_source(telephony_provider)
+    tele_rate_per_min, _, tele_source, tele_est = await get_rate(repository, telephony_provider, "telephony")
     tele_qty = Decimal(str(telephony_seconds))
     tele_cost = Decimal("0.0")
     if not dry_run and telephony_seconds > 0:
-        # Cost calculated as: (seconds / 60) * rate_per_minute
         tele_cost = (tele_qty / Decimal("60.0")) * tele_rate_per_min
     
     await repository.save_call_cost(
@@ -163,13 +159,13 @@ async def calculate_and_save_costs(
         estimated_cost=tele_cost,
         currency=currency,
         rate_source=tele_source,
-        estimated=True,
+        estimated=tele_est,
         dry_run=dry_run
     )
     total_cost += tele_cost
 
     # 2. STT component
-    stt_rate_per_sec, stt_source = get_stt_rate_and_source(stt_provider)
+    stt_rate_per_sec, _, stt_source, stt_est = await get_rate(repository, stt_provider, "stt")
     if stt_provider == "deepgram" and stt_reason not in ("normal", "local_forced"):
         stt_source = f"{stt_source} (fallback: {stt_reason})"
     stt_qty = Decimal(str(stt_seconds))
@@ -189,13 +185,14 @@ async def calculate_and_save_costs(
         estimated_cost=stt_cost,
         currency=currency,
         rate_source=stt_source,
-        estimated=True,
+        estimated=stt_est,
         dry_run=dry_run
     )
     total_cost += stt_cost
 
     # 3. LLM component (split input/output costs)
-    llm_prompt_rate, llm_compl_rate, llm_source = get_llm_rates_and_source(llm_model)
+    llm_provider = "vllm" if "vllm" in llm_model.lower() or "llama" in llm_model.lower() or "local" in llm_model.lower() else "openai"
+    llm_prompt_rate, llm_compl_rate, llm_source, llm_est = await get_llm_rates(repository, llm_provider, llm_model)
     if routed_llm == "openai" and llm_reason not in ("normal", "local_forced"):
         llm_source = f"{llm_source} (fallback: {llm_reason})"
     
@@ -207,7 +204,7 @@ async def calculate_and_save_costs(
         call_id=call_id,
         campaign_id=campaign_id,
         component="llm",
-        provider="vllm" if "vllm" in llm_model.lower() else "openai",
+        provider=llm_provider,
         model=llm_model or "unknown",
         usage_unit="prompt_tokens",
         usage_quantity=Decimal(prompt_tokens),
@@ -215,7 +212,7 @@ async def calculate_and_save_costs(
         estimated_cost=prompt_cost,
         currency=currency,
         rate_source=llm_source,
-        estimated=llm_tokens_estimated,
+        estimated=llm_est or llm_tokens_estimated,
         dry_run=dry_run
     )
     total_cost += prompt_cost
@@ -228,7 +225,7 @@ async def calculate_and_save_costs(
         call_id=call_id,
         campaign_id=campaign_id,
         component="llm",
-        provider="vllm" if "vllm" in llm_model.lower() else "openai",
+        provider=llm_provider,
         model=llm_model + "/completion",
         usage_unit="completion_tokens",
         usage_quantity=Decimal(completion_tokens),
@@ -236,13 +233,13 @@ async def calculate_and_save_costs(
         estimated_cost=completion_cost,
         currency=currency,
         rate_source=llm_source,
-        estimated=llm_tokens_estimated,
+        estimated=llm_est or llm_tokens_estimated,
         dry_run=dry_run
     )
     total_cost += completion_cost
 
     # 4. TTS component
-    tts_rate_per_char, tts_source = get_tts_rate_and_source(tts_provider)
+    tts_rate_per_char, _, tts_source, tts_est = await get_rate(repository, tts_provider, "tts")
     if routed_tts != "local" and tts_reason not in ("normal", "local_forced"):
         tts_source = f"{tts_source} (fallback: {tts_reason})"
     tts_qty = Decimal(str(tts_characters))
@@ -262,7 +259,7 @@ async def calculate_and_save_costs(
         estimated_cost=tts_cost,
         currency=currency,
         rate_source=tts_source,
-        estimated=True,
+        estimated=tts_est,
         dry_run=dry_run
     )
     total_cost += tts_cost

@@ -9,11 +9,20 @@ class LatencyRecorder:
     def __init__(self, call_id: str):
         self.call_id = call_id
         self.events: Dict[str, float] = {}
+        self.streaming_mode_enabled = False
 
     def mark(self, event_name: str):
         """Record the current high-resolution timestamp for an event."""
         self.events[event_name] = time.perf_counter()
         logger.debug(f"Call {self.call_id} marked {event_name}")
+        if event_name == "first_audio_published":
+            turn_lat = self.duration("transcript_final", "first_audio_published")
+            if turn_lat is not None:
+                try:
+                    from ops.worker_capacity import WorkerCapacity
+                    WorkerCapacity.record_turn_latency(turn_lat)
+                except ImportError:
+                    pass
 
     def duration(self, start_event: str, end_event: str) -> Optional[float]:
         """Calculate the duration in milliseconds between two marked events."""
@@ -42,9 +51,14 @@ class LatencyRecorder:
         add_dur("tts_synthesis_start_latency", "tts_first_text", "tts_first_audio")
         add_dur("turn_response_latency", "transcript_final", "first_audio_published")
         add_dur("barge_in_stop_audio_latency", "barge_in_detected", "barge_in_stopped_audio")
+        
+        # Add new streaming specific metrics
+        add_dur("first_safe_clause_ms", "llm_request_start", "first_safe_clause_detected")
+        add_dur("first_streamed_tts_text_ms", "llm_request_start", "first_streamed_tts_text")
 
         return {
             "call_id": self.call_id,
+            "streaming_mode_enabled": self.streaming_mode_enabled,
             "durations": durations,
             "events": {k: round(v, 4) for k, v in self.events.items()}
         }

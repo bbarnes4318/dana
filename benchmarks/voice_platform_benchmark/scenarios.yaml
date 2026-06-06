@@ -1,0 +1,111 @@
+normal_interested:
+  id: "normal_interested"
+  name: "Normal Interested Prospect"
+  description: "Prospect is friendly and qualifies for final expense insurance, giving affirmative responses to all screening questions."
+  starting_utterance: "Hello?"
+  expected_outcome: "transferred"
+  requires_consent: true
+
+not_interested:
+  id: "not_interested"
+  name: "Not Interested"
+  description: "Prospect immediately states they are not interested."
+  starting_utterance: "I'm not interested, thank you."
+  expected_outcome: "ended"
+  requires_consent: false
+
+busy:
+  id: "busy"
+  name: "Busy Prospect"
+  description: "Prospect is busy, driving, or at work, and requests callback."
+  starting_utterance: "I am really busy at work right now, can you call back later?"
+  expected_outcome: "callback"
+  requires_consent: false
+
+asks_price:
+  id: "asks_price"
+  name: "Asks Price"
+  description: "Prospect repeatedly asks how much it costs. The agent must explain and decline to quote specific prices."
+  starting_utterance: "How much does this cost per month?"
+  expected_outcome: "transferred"
+  requires_consent: true
+
+asks_government:
+  id: "asks_government"
+  name: "Asks if Government"
+  description: "Prospect asks if this is a government program or affiliated. The agent must clearly deny government affiliation."
+  starting_utterance: "Are you with the government final expense program?"
+  expected_outcome: "transferred"
+  requires_consent: true
+
+scam_concern:
+  id: "scam_concern"
+  name: "Scam Concern"
+  description: "Prospect expresses concern that the call is a scam or that the agent is a bot."
+  starting_utterance: "Is this a scam? Are you a robot?"
+  expected_outcome: "transferred"
+  requires_consent: true
+
+wrong_number:
+  id: "wrong_number"
+  name: "Wrong Number"
+  description: "Prospect states they are not the requested person / wrong number. The agent must apologize and hang up immediately without pitching."
+  starting_utterance: "No, you have the wrong number. I'm not that person."
+  expected_outcome: "ended"
+  requires_consent: false
+
+dnc:
+  id: "dnc"
+  name: "Remove Me / DNC"
+  description: "Prospect asks to be removed, put on DNC, or stop calling. Agent must comply immediately without selling."
+  starting_utterance: "Stop calling me! Remove me from your list."
+  expected_outcome: "dnc"
+  requires_consent: false
+
+refuses_age:
+  id: "refuses_age"
+  name: "Refuses Age"
+  description: "Prospect refuses to state their age or check range. Agent must try to handle gracefully or decline/end."
+  starting_utterance: "Why do you need my age? I'm not telling you that."
+  expected_outcome: "ended"
+  requires_consent: false
+
+confused_senior:
+  id: "confused_senior"
+  name: "Confused Senior"
+  description: "Prospect is old and confused, asking agent to repeat. Agent must use short simple turns and not overload with questions."
+  starting_utterance: "Hello? Who is this? I can't hear well."
+  expected_outcome: "transferred"
+  requires_consent: true
+
+wants_callback:
+  id: "wants_callback"
+  name: "Wants Callback"
+  description: "Prospect requests a callback at a specific time."
+  starting_utterance: "Can you call me back tomorrow morning?"
+  expected_outcome: "callback"
+  requires_consent: false
+
+wants_agent:
+  id: "wants_agent"
+  name: "Wants Agent Now"
+  description: "Prospect demands to speak to a live human or licensed agent immediately."
+  starting_utterance: "Can I speak to a real person right now? Let me talk to an agent."
+  expected_outcome: "transferred"
+  requires_consent: true
+
+noisy_line:
+  id: "noisy_line"
+  name: "Noisy Line"
+  description: "Call has heavy background noise. Agent must handle repeat/clarification requests cleanly."
+  starting_utterance: "[Noisy background] Hello? Yes, I can hear you, what is this?"
+  expected_outcome: "transferred"
+  requires_consent: true
+
+barge_in:
+  id: "barge_in"
+  name: "Barge-in Interruption"
+  description: "Prospect interrupts/barges in while agent is speaking. Agent must stop speaking instantly."
+  starting_utterance: "Wait, hold on, stop talking for a second. What company are you with?"
+  expected_outcome: "transferred"
+  requires_consent: true

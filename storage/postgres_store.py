@@ -27,7 +27,7 @@ TABLE_COLUMNS: dict[str, set[str]] = {
     "call_turns": {
         "id", "call_id", "turn_number", "speaker", "text", "stage", "created_at",
         "call_attempt_id", "campaign_id", "lead_id", "livekit_room_name", "participant_id",
-        "compliance_warnings", "latency_metrics", "selected_did", "caller_id_source"
+        "compliance_warnings", "latency_metrics", "selected_did", "caller_id_source", "interrupted"
     },
     "call_events": {"id", "call_id", "event_type", "payload", "created_at"},
     "tool_events": {"id", "call_id", "tool_name", "params", "result", "success", "created_at"},
@@ -95,6 +95,24 @@ TABLE_COLUMNS: dict[str, set[str]] = {
         "stir_shaken_attestation", "daily_cap", "hourly_cap", "calls_today", "calls_this_hour",
         "last_used_at", "cooldown_until", "spam_label_status", "complaint_count", "dnc_count",
         "answer_rate", "transfer_rate", "metadata", "created_at", "updated_at"
+    },
+    "cost_rate_cards": {
+        "id", "provider", "component", "model", "unit_rate", "usage_unit", "effective_from", "effective_to", "is_active", "created_at", "updated_at"
+    },
+    "provider_decisions": {
+        "id", "call_id", "component", "selected_provider", "decision_reason", "latency_ms", "created_at"
+    },
+    "turn_latency_spans": {
+        "id", "call_id", "turn_number", "component", "start_time", "end_time", "latency_ms", "created_at"
+    },
+    "gpu_runtime_allocations": {
+        "id", "call_id", "component", "gpu_device_id", "runtime_seconds", "hourly_rate", "allocated_cost", "created_at"
+    },
+    "call_outcome_costs": {
+        "id", "call_id", "campaign_id", "outcome", "telephony_cost", "stt_cost", "llm_cost", "tts_cost", "gpu_cost", "total_cost", "is_estimated", "created_at"
+    },
+    "campaign_cost_rollups": {
+        "id", "campaign_id", "outcome", "total_calls", "total_duration_seconds", "total_telephony_cost", "total_stt_cost", "total_llm_cost", "total_tts_cost", "total_gpu_cost", "total_cost", "average_call_cost", "rollup_timestamp", "created_at"
     }
 }
 
@@ -263,6 +281,7 @@ class PostgresStore(BaseStore):
                 or k == "requested_at"
                 or k == "cooldown_until"
                 or k == "retry_after"
+                or k in ("effective_from", "effective_to", "start_time", "end_time", "rollup_timestamp")
             ):
                 try:
                     mapped[k] = datetime.fromisoformat(v.replace("Z", "+00:00"))

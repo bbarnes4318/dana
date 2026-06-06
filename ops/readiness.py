@@ -1279,3 +1279,150 @@ Our static scans confirmed:
             str(md_file.resolve()).replace("\\", "/"),
             str(exec_file.resolve()).replace("\\", "/")
         )
+
+
+# =====================================================================
+# Production Worker Readiness Checks & CLI
+# =====================================================================
+
+import asyncio
+from config.runtime_env import is_production, allow_mock_tts
+from storage.postgres_store import PostgresStore
+from runtime.hot_state import get_hot_state_store
+
+async def check_livekit() -> tuple[bool, str]:
+    """Check if LiveKit environment variables are present and valid."""
+    url = os.getenv("LIVEKIT_URL")
+    key = os.getenv("LIVEKIT_API_KEY")
+    secret = os.getenv("LIVEKIT_API_SECRET")
+    
+    if not url or url.startswith("wss://replace-me"):
+        return False, "LIVEKIT_URL is not configured"
+    if not key or key == "replace_me":
+        return False, "LIVEKIT_API_KEY is not configured"
+    if not secret or secret == "replace_me":
+        return False, "LIVEKIT_API_SECRET is not configured"
+        
+    return True, "LiveKit credentials configured"
+
+async def check_stt() -> tuple[bool, str]:
+    """Verify STT faster-whisper package and configuration are available."""
+    try:
+        import faster_whisper
+        return True, "STT module (faster-whisper) available"
+    except ImportError as e:
+        return False, f"STT module not available: {e}"
+
+async def check_llm() -> tuple[bool, str]:
+    """Verify vLLM endpoint availability."""
+    vllm_url = os.getenv("VLLM_BASE_URL", "http://vllm-server:8000/v1")
+    health_url = vllm_url.replace("/v1", "/health")
+    
+    if os.getenv("DANA_RUNTIME_ENV") == "test":
+        return True, "vLLM (mocked for tests) available"
+        
+    try:
+        httpx = __import__("httpx")
+        async with httpx.AsyncClient(timeout=2.0) as client:
+            response = await client.get(health_url)
+            if response.status_code == 200:
+                return True, "vLLM server is healthy"
+            return False, f"vLLM server returned unhealthy: {response.status_code}"
+    except Exception as e:
+        return False, f"vLLM server is unreachable at {health_url}: {e}"
+
+async def check_tts() -> tuple[bool, str]:
+    """Verify TTS kokoro-onnx package and mock status."""
+    try:
+        import kokoro_onnx
+    except ImportError as e:
+        return False, f"TTS module not available: {e}"
+
+    if is_production() and allow_mock_tts():
+        return False, "CRITICAL: Mock TTS is enabled in production mode (DANA_ALLOW_MOCK_TTS=true)"
+        
+    return True, "TTS module (kokoro-onnx) available"
+
+async def check_vad() -> tuple[bool, str]:
+    """Verify VAD silero-vad is available."""
+    try:
+        import silero_vad
+        return True, "VAD module (silero-vad) available"
+    except ImportError as e:
+        try:
+            import torch
+            return True, "VAD module (torch/hub) available"
+        except ImportError:
+            return False, f"VAD module not available: {e}"
+
+async def check_storage() -> tuple[bool, str]:
+    """Verify Postgres and Redis connectivity."""
+    if os.getenv("DANA_RUNTIME_ENV") == "test":
+        return True, "Storage (mocked for tests) available"
+
+    db_url = os.getenv("DATABASE_URL")
+    if not db_url:
+        return False, "DATABASE_URL is not set"
+
+    try:
+        store = PostgresStore(db_url)
+        await store._ensure_pool()
+        async with store._pool.acquire() as conn:
+            val = await conn.fetchval("SELECT 1;")
+            if val != 1:
+                return False, "Postgres failed to return test query"
+    except Exception as e:
+        return False, f"Postgres database is unreachable: {e}"
+
+    use_redis = os.getenv("DANA_USE_REDIS_HOT_STATE", "false").lower() in ("true", "1", "yes")
+    if use_redis:
+        try:
+            redis_store = await get_hot_state_store()
+            await redis_store.set_json("dana:readiness_test", {"ok": True}, expiry=5)
+            res = await redis_store.get_json("dana:readiness_test")
+            if not res or not res.get("ok"):
+                return False, "Redis failed write/read check"
+        except Exception as e:
+            return False, f"Redis is unreachable: {e}"
+
+    return True, "Storage connections operational"
+
+async def run_readiness_checks() -> tuple[bool, dict[str, tuple[bool, str]]]:
+    """Execute all readiness checks and return global status."""
+    checks = {
+        "livekit": check_livekit(),
+        "stt": check_stt(),
+        "llm": check_llm(),
+        "tts": check_tts(),
+        "vad": check_vad(),
+        "storage": check_storage(),
+    }
+    
+    results = {}
+    all_ok = True
+    for name, coro in checks.items():
+        ok, msg = await coro
+        results[name] = (ok, msg)
+        if not ok:
+            all_ok = False
+            
+    return all_ok, results
+
+def main():
+    loop = asyncio.get_event_loop()
+    success, check_results = loop.run_until_complete(run_readiness_checks())
+    
+    print("Dana Platform Readiness Report:")
+    for name, (ok, msg) in check_results.items():
+        status_str = "✓" if ok else "✗"
+        print(f"  {status_str} [{name.upper()}]: {msg}")
+        
+    if not success:
+        print("Readiness check FAILED - Worker not ready to accept jobs.")
+        sys.exit(1)
+    else:
+        print("Readiness check PASSED - Worker is fully operational.")
+        sys.exit(0)
+
+if __name__ == "__main__":
+    main()

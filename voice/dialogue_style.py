@@ -10,18 +10,19 @@ import re
 from typing import Optional
 
 STAGE_BREVITY_RULES = {
-    "answered": 30,
-    "opening": 30,
+    "answered": 25,
+    "opening": 20,           # opening: very short
     "interest_check": 30,
-    "age_range": 25,
-    "living_situation": 25,
-    "decision_maker": 25,
-    "transfer_consent": 25,
-    "transfer_ready": 35,
-    "callback": 30,
-    "dnc": 20,
-    "disqualified": 25,
-    "end": 25,
+    "age_range": 20,
+    "living_situation": 20,
+    "decision_maker": 20,
+    "transfer_consent": 20,  # transfer consent: clear and strict
+    "transfer_ready": 25,
+    "callback": 35,
+    "dnc": 12,               # DNC/wrong number: immediate and final
+    "disqualified": 15,
+    "end": 15,
+    "objection": 30,         # objection: short but empathetic
 }
 
 CORPORATE_REPLACEMENTS = {

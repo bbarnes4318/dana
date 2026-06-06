@@ -34,6 +34,7 @@ from safety.compliance_filter import ComplianceFilter
 from safety.output_validator import OutputValidator
 from safety.call_stop_policy import CallStopPolicy
 from safety.pii_redaction import PIIRedactor
+from safety.topic_redirect_policy import TopicRedirectPolicy
 from storage.repository import Repository
 from deployment.canary import PromptResolver
 from core.runtime_events import (
@@ -50,6 +51,9 @@ from voice.dialogue_style import DialogueStyleController
 from voice.repetition_guard import RepetitionGuard
 from voice.prosody_controller import ProsodyController
 from voice.spoken_output_auditor import SpokenOutputAuditor
+from voice.hesitation_policy import HesitationPolicy
+from voice.repair_policy import RepairPolicy
+from voice.conversational_timing import ConversationalTiming
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +68,7 @@ class RuntimeResult:
     tool_results: list[str] = field(default_factory=list)
     compliance_ok: bool = True
     should_end_call: bool = False
+    pre_speech_delay: float = 0.0
 
 
 class AgentRuntime:
@@ -88,6 +93,7 @@ class AgentRuntime:
         pii_redactor: PIIRedactor,
         repository: Optional[Repository] = None,
         event_callback: Optional[Callable[[RuntimeEvent], Any]] = None,
+        topic_redirect_policy: Optional[TopicRedirectPolicy] = None,
     ) -> None:
         self.prompt_loader = prompt_loader
         self.state_machine = state_machine
@@ -101,6 +107,7 @@ class AgentRuntime:
         self.call_stop_policy = call_stop_policy
         self.pii_redactor = pii_redactor
         self.repository = repository or Repository()
+        self.topic_redirect_policy = topic_redirect_policy or TopicRedirectPolicy()
         self.prompt_resolver = PromptResolver(repository=self.repository)
         self.event_callback = event_callback
         self.response_builder = ResponseBuilder()
@@ -113,6 +120,9 @@ class AgentRuntime:
         self.repetition_guard = RepetitionGuard()
         self.prosody_controller = ProsodyController()
         self.spoken_output_auditor = SpokenOutputAuditor()
+        self.hesitation_policy = HesitationPolicy()
+        self.repair_policy = RepairPolicy()
+        self.conversational_timing = ConversationalTiming()
 
         # Lazy-import state handlers to prevent circular dependencies
         from states.opening import OpeningState
@@ -155,6 +165,7 @@ class AgentRuntime:
         self,
         user_text: str,
         chat_fn: Optional[Callable[[str], Awaitable[str]]] = None,
+        interrupted: bool = False,
     ) -> RuntimeResult:
         """Process one user turn through the complete runtime pipeline.
 
@@ -244,6 +255,27 @@ class AgentRuntime:
                 tool_results=tool_results,
                 compliance_ok=True,
                 should_end_call=True,
+                pre_speech_delay=0.0,
+            )
+
+        # Check topic redirect policy
+        divergent_cat = self.topic_redirect_policy.detect_divergent_topic(user_text)
+        if divergent_cat:
+            response_text = self.topic_redirect_policy.get_redirect_response(call_state.current_stage)
+            
+            # Log agent turn and lead snapshot
+            await self._log_agent_turn(lead.call_id, current_turn * 2, response_text, call_state.current_stage.value)
+            await self._save_lead_snapshot(lead.call_id, call_state.current_stage.value)
+
+            await self._check_and_emit_lead_transitions()
+
+            return RuntimeResult(
+                agent_response=response_text,
+                stage=call_state.current_stage.value,
+                tool_results=[],
+                compliance_ok=True,
+                should_end_call=False,
+                pre_speech_delay=0.0,
             )
 
         # 4. Classify objections
@@ -368,15 +400,22 @@ class AgentRuntime:
                     agent_response = LICENSED_RESPONSE
 
         # 11b. Apply Human-likeness layer
-        # A. Prepend backchannel
-        backchannel = self.backchannel_policy.select_backchannel(
-            current_stage=call_state.current_stage.value,
-            user_text=user_text,
-            turn_count=call_state.turn_count,
-            objection_handled=objection_intent is not None,
-        )
-        if backchannel:
-            agent_response = f"{backchannel} {agent_response}"
+        # A. Prepend repair language if interrupted, otherwise backchannel
+        if interrupted:
+            agent_response = self.repair_policy.inject_repair(
+                text=agent_response,
+                stage=call_state.current_stage.value,
+                turn_count=call_state.turn_count,
+            )
+        else:
+            backchannel = self.backchannel_policy.select_backchannel(
+                current_stage=call_state.current_stage.value,
+                user_text=user_text,
+                turn_count=call_state.turn_count,
+                objection_handled=objection_intent is not None,
+            )
+            if backchannel:
+                agent_response = f"{backchannel} {agent_response}"
 
         # B. Clean "Perfect" usage
         is_confused, is_hostile = check_confusion_or_hostility(user_text)
@@ -387,6 +426,15 @@ class AgentRuntime:
             objection_handled=objection_intent is not None,
             is_confused=is_confused,
             is_hostile=is_hostile,
+        )
+
+        # B2. Add hesitations
+        agent_response = self.hesitation_policy.add_hesitation(
+            text=agent_response,
+            stage=call_state.current_stage.value,
+            turn_count=call_state.turn_count,
+            is_objection=objection_intent is not None,
+            deterministic=True,
         )
 
         # C. Dialogue Style and Brevity
@@ -497,13 +545,15 @@ class AgentRuntime:
                 stage=call_state.current_stage.value,
             )
         )
-        await self._log_agent_turn(lead.call_id, current_turn * 2, agent_response, call_state.current_stage.value)
+        await self._log_agent_turn(lead.call_id, current_turn * 2, agent_response, call_state.current_stage.value, interrupted=interrupted)
         await self._save_lead_snapshot(lead.call_id, call_state.current_stage.value)
 
         # Check if the next stage should end the call (DNC, DISQUALIFIED, END)
         should_end = call_state.current_stage in (CallStage.DNC, CallStage.DISQUALIFIED, CallStage.END)
 
         await self._check_and_emit_lead_transitions()
+
+        pre_speech_delay = self.conversational_timing.get_pre_speech_delay(call_state.current_stage.value)
 
         return RuntimeResult(
             agent_response=agent_response,
@@ -512,6 +562,533 @@ class AgentRuntime:
             tool_results=tool_results,
             compliance_ok=compliance_ok,
             should_end_call=should_end,
+            pre_speech_delay=pre_speech_delay,
+        )
+
+    async def prepare_turn(
+        self,
+        user_text: str,
+        interrupted: bool = False,
+    ) -> tuple[Optional[str], Optional[RuntimeResult]]:
+        """
+        Prepare turn by executing preprocessing steps 1-8.
+        If a stop/terminal state is transitioned to immediately, returns (None, RuntimeResult).
+        Otherwise returns (instructions, None).
+        """
+        lead = self.state_machine.lead
+        call_state = self.state_machine.call_state
+
+        # 1. Update turn count
+        call_state.increment_turn()
+        current_turn = call_state.turn_count
+
+        # 2. Publish utterance received event & save to storage
+        self._publish_event(
+            UtteranceReceivedEvent(
+                call_id=lead.call_id,
+                text=user_text,
+                current_stage=call_state.current_stage.value,
+            )
+        )
+        try:
+            await self.repository.save_call_turn(
+                call_id=lead.call_id,
+                turn_number=current_turn * 2 - 1,
+                speaker="user",
+                text=user_text,
+                stage=call_state.current_stage.value,
+            )
+        except Exception as exc:
+            logger.error("Failed to save user turn to repository: %s", exc)
+
+        # 3. Check call stop policy first
+        stop_decision = self.call_stop_policy.should_stop(user_text, call_state)
+        if stop_decision.should_stop:
+            target_stage = CallStage.DNC if stop_decision.stop_type == "dnc" else CallStage.END
+            from_stage = call_state.current_stage
+            
+            # Transition
+            self.state_machine.transition(target_stage.value)
+            self._publish_event(
+                StateTransitionEvent(
+                    call_id=lead.call_id,
+                    from_stage=from_stage.value,
+                    to_stage=target_stage.value,
+                )
+            )
+
+            # Fire DNC/Callback tool immediately if appropriate
+            tool_results = []
+            if target_stage == CallStage.DNC:
+                lead.do_not_call_requested = True
+                tool = self.tool_registry.get_tool("mark_dnc")
+                if tool:
+                    res = await tool.execute({
+                        "phone_number": lead.phone_type or "unknown",
+                        "reason": stop_decision.reason,
+                        "requested_by": "prospect",
+                        "call_id": lead.call_id,
+                    })
+                    tool_results.append(res.message)
+                    await self._log_tool_event(lead.call_id, "mark_dnc", res)
+
+            # Build final message
+            if stop_decision.stop_type == "dnc":
+                response_text = DNC_CLOSE
+            elif stop_decision.stop_type == "wrong_number":
+                response_text = WRONG_NUMBER_CLOSE
+            else:
+                response_text = NOT_INTERESTED_CLOSE
+
+            # Log agent turn and lead snapshot
+            await self._log_agent_turn(lead.call_id, current_turn * 2, response_text, target_stage.value)
+            await self._save_lead_snapshot(lead.call_id, target_stage.value)
+
+            await self._check_and_emit_lead_transitions()
+
+            return None, RuntimeResult(
+                agent_response=response_text,
+                stage=target_stage.value,
+                tool_results=tool_results,
+                compliance_ok=True,
+                should_end_call=True,
+                pre_speech_delay=0.0,
+            )
+
+        # Check topic redirect policy
+        divergent_cat = self.topic_redirect_policy.detect_divergent_topic(user_text)
+        if divergent_cat:
+            response_text = self.topic_redirect_policy.get_redirect_response(call_state.current_stage)
+            
+            # Log agent turn and lead snapshot
+            await self._log_agent_turn(lead.call_id, current_turn * 2, response_text, call_state.current_stage.value)
+            await self._save_lead_snapshot(lead.call_id, call_state.current_stage.value)
+
+            await self._check_and_emit_lead_transitions()
+
+            return None, RuntimeResult(
+                agent_response=response_text,
+                stage=call_state.current_stage.value,
+                tool_results=[],
+                compliance_ok=True,
+                should_end_call=False,
+                pre_speech_delay=0.0,
+            )
+
+        # 4. Classify objections
+        objection_intent = self.objection_classifier.classify(user_text)
+        objection_guidance = None
+        if objection_intent:
+            call_state.increment_objections()
+            objection_guidance = self.objection_policy.get_response_guidance(objection_intent)
+            self._publish_event(
+                ObjectionDetectedEvent(
+                    call_id=lead.call_id,
+                    utterance=user_text,
+                    intent=objection_intent,
+                    confidence=0.8,
+                )
+            )
+
+        # 5. Invoke current state handler
+        current_stage = call_state.current_stage
+        handler = self._state_handlers.get(current_stage)
+        if handler:
+            try:
+                handler_result = handler.handle(user_text, lead, call_state)
+            except Exception as exc:
+                logger.error("Error in handler for %s: %s", current_stage.value, exc)
+                handler_result = StateResult(
+                    response_guidance="Acknowledge politely and ask for details again."
+                )
+        else:
+            handler_result = StateResult(
+                response_guidance="Respond naturally based on the conversation."
+            )
+
+        # Apply handler outcomes to lead profile
+        self.state_machine.apply_result(handler_result)
+
+        # 6. Determine state transition
+        next_stage = handler_result.next_stage
+        
+        # Objection policy stage resolution overrides if it's a DNC/CALLBACK/END transition
+        if objection_guidance:
+            target_stage = self._resolve_target_stage(objection_guidance.next_stage)
+            if objection_guidance.should_end_call or target_stage in (CallStage.DNC, CallStage.CALLBACK, CallStage.END):
+                next_stage = target_stage
+            elif next_stage is None:
+                next_stage = target_stage
+
+        # Apply stage transition
+        if next_stage and next_stage != current_stage:
+            from_stage = call_state.current_stage
+            self.state_machine.transition(next_stage.value)
+            self._publish_event(
+                StateTransitionEvent(
+                    call_id=lead.call_id,
+                    from_stage=from_stage.value,
+                    to_stage=next_stage.value,
+                )
+            )
+
+        # Short-circuit if transitioning to terminal stage
+        terminal_stages = (CallStage.DNC, CallStage.DISQUALIFIED, CallStage.CALLBACK, CallStage.TRANSFER_READY, CallStage.END)
+        if call_state.current_stage in terminal_stages:
+            stage_val = call_state.current_stage
+            if stage_val == CallStage.DNC:
+                agent_response = DNC_CLOSE
+            elif stage_val == CallStage.CALLBACK:
+                agent_response = self._get_stage_fallback("callback")
+            elif stage_val in (CallStage.TRANSFER_READY, CallStage.TRANSFER_CONSENT):
+                agent_response = self._get_stage_fallback("transfer ready")
+            elif stage_val == CallStage.DISQUALIFIED:
+                agent_response = self._get_stage_fallback("disqualified")
+            else:
+                agent_response = self._get_stage_fallback(stage_val.value)
+
+            # Determine and fire recommended actions/tools
+            tool_results = []
+            recommended_actions = self.action_policy.get_recommended_actions(
+                call_state, lead.to_summary_dict()
+            )
+            for action in recommended_actions:
+                try:
+                    tool = self.tool_registry.get_tool(action.tool_name)
+                except KeyError as exc:
+                    logger.error("Recommended action tool '%s' not found: %s", action.tool_name, exc)
+                    continue
+                if tool:
+                    params = {**action.params}
+                    if action.tool_name == "save_lead":
+                        params["lead_profile"] = lead.to_summary_dict()
+                    elif action.tool_name == "transfer_to_agent":
+                        params["call_id"] = lead.call_id
+                        params["lead_summary"] = lead.to_summary_dict()
+                        params["transfer_reason"] = action.reason
+                    elif action.tool_name == "feTransfer":
+                        params["room_name"] = lead.call_id
+                        params["prospect_identity"] = f"{lead.first_name or ''} {lead.last_name or ''}".strip() or "Prospect"
+                        params["licensed_agent_phone_number"] = os.getenv("LICENSED_AGENT_PHONE_NUMBER")
+                        params["call_summary"] = "Lead qualified for final expense options"
+                        params["transfer_reason"] = action.reason
+                        params["lead_profile"] = lead.to_summary_dict()
+                        params["lead_state"] = lead.lead_state
+                        params["call_id"] = lead.call_id
+                    elif action.tool_name == "schedule_callback":
+                        params["call_id"] = lead.call_id
+                        params["lead_name"] = f"{lead.first_name or ''} {lead.last_name or ''}".strip() or "Prospect"
+                        params["callback_time"] = (
+                            datetime.now(timezone.utc).isoformat()
+                        )
+                        params["phone_number"] = lead.phone_type or "unknown"
+                    elif action.tool_name == "mark_dnc":
+                        params["call_id"] = lead.call_id
+                        params["phone_number"] = lead.phone_type or "unknown"
+                        params["reason"] = action.reason
+                    elif action.tool_name == "escalate_to_human":
+                        params["call_id"] = lead.call_id
+                        params["reason"] = action.reason
+                        params["urgency"] = "high"
+                        params["lead_summary"] = lead.to_summary_dict()
+
+                    try:
+                        res = await tool.execute(params)
+                        tool_results.append(res.message)
+                        await self._log_tool_event(lead.call_id, action.tool_name, res)
+                        self._publish_event(
+                            ToolTriggeredEvent(
+                                call_id=lead.call_id,
+                                tool_name=action.tool_name,
+                                params=params,
+                                success=res.success,
+                                result_message=res.message,
+                                error=res.error,
+                            )
+                        )
+
+                        if action.tool_name in ("feTransfer", "transfer_to_agent") and not res.success:
+                            logger.warning("Transfer failed or was not implemented. Transitioning to CALLBACK stage.")
+                            from_stage = call_state.current_stage
+                            self.state_machine.transition(CallStage.CALLBACK.value)
+                            self._publish_event(
+                                StateTransitionEvent(
+                                    call_id=lead.call_id,
+                                    from_stage=from_stage.value,
+                                    to_stage=CallStage.CALLBACK.value,
+                                )
+                            )
+                            agent_response = TRANSFER_FAILURE_CALLBACK
+                    except Exception as exc:
+                        logger.error("Error executing tool %s: %s", action.tool_name, exc)
+                        tool_results.append(str(exc))
+
+            agent_response, compliance_ok = self._finalize_spoken_response(agent_response, call_state.current_stage.value)
+            
+            self._publish_event(
+                ResponseGeneratedEvent(
+                    call_id=lead.call_id,
+                    text=agent_response,
+                    stage=call_state.current_stage.value,
+                )
+            )
+            await self._log_agent_turn(lead.call_id, current_turn * 2, agent_response, call_state.current_stage.value)
+            await self._save_lead_snapshot(lead.call_id, call_state.current_stage.value)
+
+            should_end = call_state.current_stage in (CallStage.DNC, CallStage.DISQUALIFIED, CallStage.END)
+            await self._check_and_emit_lead_transitions()
+
+            return None, RuntimeResult(
+                agent_response=agent_response,
+                stage=call_state.current_stage.value,
+                extracted_data=handler_result.extracted_data,
+                tool_results=tool_results,
+                compliance_ok=compliance_ok,
+                should_end_call=should_end,
+            )
+
+        # 7. Query RAG context
+        rag_query = user_text
+        if objection_guidance:
+            rag_query += f" objection: {objection_guidance.intent}"
+        
+        rag_context = ""
+        try:
+            rag_context = self.context_builder.build_context(
+                query=rag_query,
+                call_stage=call_state.current_stage.value,
+                lead_profile=lead.to_summary_dict(),
+                objection_type=objection_guidance.intent if objection_guidance else None,
+            )
+        except Exception as exc:
+            logger.error("RAG context builder error: %s", exc)
+
+        # 8. Build prompt instructions for LLM
+        instructions = self.response_builder.build_instructions(
+            call_state=call_state,
+            lead_profile=lead,
+            objection_guidance=objection_guidance,
+            rag_context=rag_context,
+            stage_handler_result=handler_result,
+        )
+
+        self._streaming_user_text = user_text
+        self._streaming_handler_result = handler_result
+        self._streaming_objection_guidance = objection_guidance
+        self._streaming_objection_intent = objection_intent
+
+        return instructions, None
+
+    async def finalize_streaming_turn(
+        self,
+        agent_response: str,
+        interrupted: bool = False,
+    ) -> RuntimeResult:
+        """
+        Runs post-processing steps 10-13 on the accumulated agent response.
+        """
+        lead = self.state_machine.lead
+        call_state = self.state_machine.call_state
+        current_turn = call_state.turn_count
+        
+        user_text = getattr(self, "_streaming_user_text", "")
+        handler_result = getattr(self, "_streaming_handler_result", None)
+        objection_guidance = getattr(self, "_streaming_objection_guidance", None)
+        objection_intent = getattr(self, "_streaming_objection_intent", None)
+
+        # 10. Redact PII
+        redacted = self.pii_redactor.redact(agent_response)
+        agent_response = redacted.redacted_text
+
+        # 11. Run output validation and compliance checks
+        compliance_res = self.compliance_filter.check(agent_response)
+        output_val_res = self.output_validator.validate(agent_response, call_state.current_stage.value)
+        
+        compliance_ok = compliance_res.is_safe and output_val_res.is_valid
+        if not compliance_ok:
+            issues = compliance_res.violations + output_val_res.issues
+            self._publish_event(
+                ValidationFailedEvent(
+                    call_id=lead.call_id,
+                    response=agent_response,
+                    validator_type="compliance" if compliance_res.violations else "formatting",
+                    issues=issues,
+                )
+            )
+
+            # Recovery: Fallback to a compliant, safe response if there's a compliance violation
+            if not compliance_res.is_safe:
+                if call_state.current_stage == CallStage.TRANSFER_READY:
+                    agent_response = "Perfect. Stay right there for me."
+                else:
+                    agent_response = LICENSED_RESPONSE
+
+        # 11b. Apply Human-likeness layer
+        # A. Prepend repair language if interrupted, otherwise backchannel
+        if interrupted:
+            agent_response = self.repair_policy.inject_repair(
+                text=agent_response,
+                stage=call_state.current_stage.value,
+                turn_count=call_state.turn_count,
+            )
+        else:
+            backchannel = self.backchannel_policy.select_backchannel(
+                current_stage=call_state.current_stage.value,
+                user_text=user_text,
+                turn_count=call_state.turn_count,
+                objection_handled=objection_intent is not None,
+            )
+            if backchannel and not agent_response.startswith(backchannel):
+                agent_response = f"{backchannel} {agent_response}"
+
+        # B. Clean "Perfect" usage
+        is_confused, is_hostile = check_confusion_or_hostility(user_text)
+        agent_response = self.backchannel_policy.clean_perfect_usage(
+            text=agent_response,
+            current_stage=call_state.current_stage.value,
+            user_text=user_text,
+            objection_handled=objection_intent is not None,
+            is_confused=is_confused,
+            is_hostile=is_hostile,
+        )
+
+        # B2. Add hesitations
+        agent_response = self.hesitation_policy.add_hesitation(
+            text=agent_response,
+            stage=call_state.current_stage.value,
+            turn_count=call_state.turn_count,
+            is_objection=objection_intent is not None,
+            deterministic=True,
+        )
+
+        # C. Dialogue Style and Brevity
+        agent_response = self.dialogue_style_controller.process(
+            text=agent_response,
+            stage=call_state.current_stage.value,
+        )
+
+        # D. Repetition Guard
+        agent_response = self.repetition_guard.filter_response(
+            text=agent_response,
+            is_objection=objection_intent is not None,
+        )
+
+        # E. Prosody Controller (TTS formatting)
+        agent_response = self.prosody_controller.format_for_tts(agent_response)
+
+        # F. Finalize spoken response
+        agent_response, compliance_ok_2 = self._finalize_spoken_response(agent_response, call_state.current_stage.value)
+        compliance_ok = compliance_ok and compliance_ok_2
+
+        # 12. Determine and fire recommended actions/tools
+        tool_results = []
+        recommended_actions = self.action_policy.get_recommended_actions(
+            call_state, lead.to_summary_dict()
+        )
+        for action in recommended_actions:
+            try:
+                tool = self.tool_registry.get_tool(action.tool_name)
+            except KeyError as exc:
+                logger.error("Recommended action tool '%s' not found: %s", action.tool_name, exc)
+                continue
+            if tool:
+                params = {**action.params}
+                if action.tool_name == "save_lead":
+                    params["lead_profile"] = lead.to_summary_dict()
+                elif action.tool_name == "transfer_to_agent":
+                    params["call_id"] = lead.call_id
+                    params["lead_summary"] = lead.to_summary_dict()
+                    params["transfer_reason"] = action.reason
+                elif action.tool_name == "feTransfer":
+                    params["room_name"] = lead.call_id
+                    params["prospect_identity"] = f"{lead.first_name or ''} {lead.last_name or ''}".strip() or "Prospect"
+                    params["licensed_agent_phone_number"] = os.getenv("LICENSED_AGENT_PHONE_NUMBER")
+                    params["call_summary"] = "Lead qualified for final expense options"
+                    params["transfer_reason"] = action.reason
+                    params["lead_profile"] = lead.to_summary_dict()
+                    params["lead_state"] = lead.lead_state
+                    params["call_id"] = lead.call_id
+                elif action.tool_name == "schedule_callback":
+                    params["call_id"] = lead.call_id
+                    params["lead_name"] = f"{lead.first_name or ''} {lead.last_name or ''}".strip() or "Prospect"
+                    params["callback_time"] = (
+                        datetime.now(timezone.utc).isoformat()
+                    )
+                    params["phone_number"] = lead.phone_type or "unknown"
+                elif action.tool_name == "mark_dnc":
+                    params["call_id"] = lead.call_id
+                    params["phone_number"] = lead.phone_type or "unknown"
+                    params["reason"] = action.reason
+                elif action.tool_name == "escalate_to_human":
+                    params["call_id"] = lead.call_id
+                    params["reason"] = action.reason
+                    params["urgency"] = "high"
+                    params["lead_summary"] = lead.to_summary_dict()
+
+                try:
+                    res = await tool.execute(params)
+                    tool_results.append(res.message)
+                    await self._log_tool_event(lead.call_id, action.tool_name, res)
+                    self._publish_event(
+                        ToolTriggeredEvent(
+                            call_id=lead.call_id,
+                            tool_name=action.tool_name,
+                            params=params,
+                            success=res.success,
+                            result_message=res.message,
+                            error=res.error,
+                        )
+                    )
+
+                    if action.tool_name in ("feTransfer", "transfer_to_agent") and not res.success:
+                        logger.warning("Transfer failed or was not implemented. Transitioning to CALLBACK stage.")
+                        from_stage = call_state.current_stage
+                        self.state_machine.transition(CallStage.CALLBACK.value)
+                        self._publish_event(
+                            StateTransitionEvent(
+                                call_id=lead.call_id,
+                                from_stage=from_stage.value,
+                                to_stage=CallStage.CALLBACK.value,
+                            )
+                        )
+                        agent_response = TRANSFER_FAILURE_CALLBACK
+                except Exception as exc:
+                    logger.error("Error executing tool %s: %s", action.tool_name, exc)
+                    tool_results.append(str(exc))
+
+        agent_response, compliance_ok_tool = self._finalize_spoken_response(agent_response, call_state.current_stage.value)
+        compliance_ok = compliance_ok and compliance_ok_tool
+
+        # 13. Publish ResponseGeneratedEvent & Save agent turn and snapshot
+        self._publish_event(
+            ResponseGeneratedEvent(
+                call_id=lead.call_id,
+                text=agent_response,
+                stage=call_state.current_stage.value,
+            )
+        )
+        await self._log_agent_turn(lead.call_id, current_turn * 2, agent_response, call_state.current_stage.value, interrupted=interrupted)
+        await self._save_lead_snapshot(lead.call_id, call_state.current_stage.value)
+
+        should_end = call_state.current_stage in (CallStage.DNC, CallStage.DISQUALIFIED, CallStage.END)
+        await self._check_and_emit_lead_transitions()
+
+        # Clean up temporary streaming fields
+        if hasattr(self, "_streaming_user_text"): del self._streaming_user_text
+        if hasattr(self, "_streaming_handler_result"): del self._streaming_handler_result
+        if hasattr(self, "_streaming_objection_guidance"): del self._streaming_objection_guidance
+        if hasattr(self, "_streaming_objection_intent"): del self._streaming_objection_intent
+
+        pre_speech_delay = self.conversational_timing.get_pre_speech_delay(call_state.current_stage.value)
+
+        return RuntimeResult(
+            agent_response=agent_response,
+            stage=call_state.current_stage.value,
+            extracted_data=handler_result.extracted_data if handler_result else {},
+            tool_results=tool_results,
+            compliance_ok=compliance_ok,
+            should_end_call=should_end,
+            pre_speech_delay=pre_speech_delay,
         )
 
     # ------------------------------------------------------------------
@@ -555,7 +1132,7 @@ class AgentRuntime:
             return objection_guidance.guidance_text.strip()
         return handler_result.response_guidance.strip()
 
-    async def _log_agent_turn(self, call_id: str, turn_number: int, text: str, stage: str) -> None:
+    async def _log_agent_turn(self, call_id: str, turn_number: int, text: str, stage: str, interrupted: bool = False) -> None:
         """Log the agent's turn to the repository."""
         try:
             await self.repository.save_call_turn(
@@ -564,6 +1141,7 @@ class AgentRuntime:
                 speaker="agent",
                 text=text,
                 stage=stage,
+                interrupted=interrupted,
             )
         except Exception as exc:
             logger.error("Failed to log agent turn to repository: %s", exc)

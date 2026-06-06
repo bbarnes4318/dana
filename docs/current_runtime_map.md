@@ -104,17 +104,18 @@ sequenceDiagram
 1. **Increment Turn:** Updates the conversational turn counter in the call state.
 2. **Publish Utterance & Store:** Saves the raw user utterance to the DB via the repository and publishes a `UtteranceReceivedEvent`.
 3. **Stop Policy Check:** Evaluates [CallStopPolicy](file:///C:/Users/jimbo/.gemini/antigravity/worktrees/ultimate-voice/audit-dana-runtime-architecture/safety/call_stop_policy.py#L15) for DNC, wrong numbers, or immediate hangup requests. If triggered, transitions, logs details, and halts further execution.
-4. **Objection Classification:** Detects objection intents and increments counts.
-5. **State Handler Execution:** Invokes the active stage's `handle()` method to extract data and resolve the target stage.
-6. **RAG Context Retrieval:** Builds a query (user text + stage + objection) and retrieves relevant context.
-7. **Instruction Assembly:** Generates prompt instructions via [ResponseBuilder](file:///C:/Users/jimbo/.gemini/antigravity/worktrees/ultimate-voice/audit-dana-runtime-architecture/core/response_builder.py#L17).
-8. **LLM Generation:** Calls the `chat_fn` wrapper to run LLM completion on the assembled prompt.
-9. **PII Redaction:** Scrubs potential sensitive info from the response using [PIIRedactor](file:///C:/Users/jimbo/.gemini/antigravity/worktrees/ultimate-voice/audit-dana-runtime-architecture/safety/pii_redaction.py#L13).
-10. **Formatting & Compliance Check:** Runs validations. If failed, overrides the output with a pre-approved compliant response (e.g. [LICENSED_RESPONSE](file:///C:/Users/jimbo/.gemini/antigravity/worktrees/ultimate-voice/audit-dana-runtime-architecture/core/canonical_responses.py#L15)).
-11. **Human-likeness Tuning:** Applies backchannel insertion, cleans "Perfect" usage, adjusts dialogue brevity/style, enforces repetition guards, and applies prosody TTS formatting.
-12. **Spoken Audit:** Conducts a final check on the finalized string using [SpokenOutputAuditor](file:///C:/Users/jimbo/.gemini/antigravity/worktrees/ultimate-voice/audit-dana-runtime-architecture/voice/spoken_output_auditor.py#L15).
-13. **Action Policy & Tools:** Checks recommended actions (e.g. scheduling a callback, initiating transfer) and executes their associated tools.
-14. **Final Log and Transition Emit:** Saves the final agent response, updates the lead snapshot, and triggers CRM webhooks.
+4. **Topic Redirect Check:** Evaluates `TopicRedirectPolicy` to detect divergent topics (politics, weather, sports, personal questions, jokes, AI/bot, or irrelevant topics). If detected, short-circuits the turn immediately with a compliant, one-sentence redirect response, avoiding LLM generation and RAG retrieval.
+5. **Objection Classification:** Detects objection intents and increments counts.
+6. **State Handler Execution:** Invokes the active stage's `handle()` method to extract data and resolve the target stage.
+7. **RAG Context Retrieval:** Builds a query (user text + stage + objection) and retrieves relevant context.
+8. **Instruction Assembly:** Generates prompt instructions via [ResponseBuilder](file:///C:/Users/jimbo/.gemini/antigravity/worktrees/ultimate-voice/audit-dana-runtime-architecture/core/response_builder.py#L17).
+9. **LLM Generation:** Calls the `chat_fn` wrapper to run LLM completion on the assembled prompt.
+10. **PII Redaction:** Scrubs potential sensitive info from the response using [PIIRedactor](file:///C:/Users/jimbo/.gemini/antigravity/worktrees/ultimate-voice/audit-dana-runtime-architecture/safety/pii_redaction.py#L13).
+11. **Formatting & Compliance Check:** Runs validations. If failed, overrides the output with a pre-approved compliant response (e.g. [LICENSED_RESPONSE](file:///C:/Users/jimbo/.gemini/antigravity/worktrees/ultimate-voice/audit-dana-runtime-architecture/core/canonical_responses.py#L15)).
+12. **Human-likeness Tuning:** Applies backchannel insertion, cleans "Perfect" usage, adjusts dialogue brevity/style, enforces repetition guards, and applies prosody TTS formatting.
+13. **Spoken Audit:** Conducts a final check on the finalized string using [SpokenOutputAuditor](file:///C:/Users/jimbo/.gemini/antigravity/worktrees/ultimate-voice/audit-dana-runtime-architecture/voice/spoken_output_auditor.py#L15).
+14. **Action Policy & Tools:** Checks recommended actions (e.g. scheduling a callback, initiating transfer) and executes their associated tools.
+15. **Final Log and Transition Emit:** Saves the final agent response, updates the lead snapshot, and triggers CRM webhooks.
 
 ---
 

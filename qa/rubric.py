@@ -153,8 +153,19 @@ class QARubric:
         ),
     )
 
+    BOT_LIKENESS = ScoringCriterion(
+        name="bot_likeness",
+        weight=1.0,
+        description="Absence of robotic phrase repetition, chatbot language, and lack of barge-in repair language.",
+        scoring_guide=(
+            "0: Repeating overused robotic phrases or failing to apologize after interruption. "
+            "5: Stiff wording but avoided direct repetition. "
+            "10: Perfect natural conversational flow with repair language used when appropriate."
+        ),
+    )
+
     # ------------------------------------------------------------------
-    # All criteria in evaluation order (Exactly 11 categories)
+    # All criteria in evaluation order (Exactly 12 categories)
     # ------------------------------------------------------------------
 
     ALL_CRITERIA: list[ScoringCriterion] = [
@@ -169,6 +180,7 @@ class QARubric:
         TALK_LISTEN_BALANCE,
         LATENCY_READINESS,
         CLOSE_PROBABILITY,
+        BOT_LIKENESS,
     ]
 
     @classmethod

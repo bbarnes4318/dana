@@ -83,6 +83,7 @@ class ModelRouter:
 
     def __init__(self, config: Optional[VoiceConfig] = None) -> None:
         self.config = config or VoiceConfig()
+        self.local_tts_available = True
 
     def has_credentials(self, provider: str) -> bool:
         """Check if credentials are configured for a cloud provider."""
@@ -119,6 +120,20 @@ class ModelRouter:
             _last_provider[active_cid] = {}
         if active_cid not in _last_reason:
             _last_reason[active_cid] = {}
+
+        # 0. Check if local TTS is marked unavailable
+        if component == "tts" and not getattr(self, "local_tts_available", True):
+            cloud_provider = self._get_cloud_provider(component)
+            if not self.has_credentials(cloud_provider):
+                reason = "local_tts_unavailable:cloud_not_configured"
+                self._record_decision(active_cid, component, "cloud_unavailable", reason)
+                self.log_decision(component, active_cid, active_camp, "cloud_unavailable", reason, fallback_allowed=True)
+                return "cloud_unavailable"
+            reason = "local_tts_unavailable"
+            self._record_decision(active_cid, component, cloud_provider, reason)
+            self.log_decision(component, active_cid, active_camp, cloud_provider, reason, fallback_allowed=True)
+            return cloud_provider
+
 
         # 1. Resolve Mode & Fallback Allowed Flags
         if component == "stt":

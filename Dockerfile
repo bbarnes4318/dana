@@ -88,10 +88,11 @@ ENV LIVEKIT_URL=""
 ENV LIVEKIT_API_KEY=""
 ENV LIVEKIT_API_SECRET=""
 ENV VLLM_BASE_URL="http://vllm-server:8000/v1"
+ENV DANA_RUNTIME_ENV="production"
+ENV DANA_ALLOW_MOCK_TTS="false"
 
-# Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
-    CMD python -c "import faster_whisper; import kokoro_onnx; print('OK')" || exit 1
+    CMD python -m ops.healthcheck
 
 ENTRYPOINT ["/app/entrypoint.sh"]
 CMD ["python", "main.py"]

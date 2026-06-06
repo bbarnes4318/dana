@@ -110,6 +110,9 @@ class VoiceConfig:
     # ---- TTS ----
     tts_voice: str = field(default_factory=lambda: env_str("DANA_TTS_VOICE", "af_bella"))
     tts_speed: float = field(default_factory=lambda: env_float("DANA_TTS_SPEED", 1.03))
+    runtime_env: str = field(default_factory=lambda: env_str("DANA_RUNTIME_ENV", "development"))
+    allow_mock_tts: bool = field(default_factory=lambda: env_bool("DANA_ALLOW_MOCK_TTS", False))
+    voice_profile: str = field(default_factory=lambda: env_str("DANA_VOICE_PROFILE", "fallback_safe"))
 
     # ---- Turn-Taking ----
     turn_min_delay: float = field(default_factory=lambda: env_float("DANA_TURN_MIN_DELAY", 0.15))

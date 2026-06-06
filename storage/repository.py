@@ -70,6 +70,12 @@ from storage.schemas import (
     CallAttempt,
     LiveCallSession,
     CampaignControlEvent,
+    CostRateCard,
+    ProviderDecision,
+    TurnLatencySpan,
+    GpuRuntimeAllocation,
+    CallOutcomeCost,
+    CampaignCostRollup,
 )
 
 # Collection name constants
@@ -101,6 +107,12 @@ _CAMPAIGN_LEADS = "campaign_leads"
 _CALL_ATTEMPTS = "call_attempts"
 _LIVE_CALL_SESSIONS = "live_call_sessions"
 _CAMPAIGN_CONTROL_EVENTS = "campaign_control_events"
+_COST_RATE_CARDS = "cost_rate_cards"
+_PROVIDER_DECISIONS = "provider_decisions"
+_TURN_LATENCY_SPANS = "turn_latency_spans"
+_GPU_RUNTIME_ALLOCATIONS = "gpu_runtime_allocations"
+_CALL_OUTCOME_COSTS = "call_outcome_costs"
+_CAMPAIGN_COST_ROLLUPS = "campaign_cost_rollups"
 
 
 class Repository:
@@ -861,6 +873,124 @@ class Repository:
             wb_queue.enqueue(_CALL_COSTS, data)
             return data["id"]
         return await self._store.save(_CALL_COSTS, data)
+
+    async def save_cost_rate_card(self, **kwargs: Any) -> str:
+        """Validate and persist a :class:`CostRateCard`."""
+        if "unit_rate" in kwargs and kwargs["unit_rate"] is not None:
+            kwargs["unit_rate"] = Decimal(str(kwargs["unit_rate"]))
+        model = CostRateCard(**kwargs)
+        data = model.model_dump(mode="json")
+        if data.get("id") is None:
+            data["id"] = str(uuid.uuid4())
+        if data.get("unit_rate") is not None:
+            data["unit_rate"] = float(data["unit_rate"])
+        return await self._store.save(_COST_RATE_CARDS, data)
+
+    async def query_cost_rate_cards(self, filters: dict) -> list[dict]:
+        """Query cost rate cards matching the specified filters."""
+        return await self._store.query(_COST_RATE_CARDS, filters)
+
+    async def save_provider_decision(self, **kwargs: Any) -> str:
+        """Validate and persist a :class:`ProviderDecision`."""
+        model = ProviderDecision(**kwargs)
+        data = model.model_dump(mode="json")
+        if data.get("id") is None:
+            data["id"] = str(uuid.uuid4())
+        return await self._store.save(_PROVIDER_DECISIONS, data)
+
+    async def query_provider_decisions(self, filters: dict) -> list[dict]:
+        """Query provider decisions matching the specified filters."""
+        return await self._store.query(_PROVIDER_DECISIONS, filters)
+
+    async def save_turn_latency_span(self, **kwargs: Any) -> str:
+        """Validate and persist a :class:`TurnLatencySpan`."""
+        model = TurnLatencySpan(**kwargs)
+        data = model.model_dump(mode="json")
+        if data.get("id") is None:
+            data["id"] = str(uuid.uuid4())
+        return await self._store.save(_TURN_LATENCY_SPANS, data)
+
+    async def query_turn_latency_spans(self, filters: dict) -> list[dict]:
+        """Query turn latency spans matching the specified filters."""
+        return await self._store.query(_TURN_LATENCY_SPANS, filters)
+
+    async def save_gpu_runtime_allocation(self, **kwargs: Any) -> str:
+        """Validate and persist a :class:`GpuRuntimeAllocation`."""
+        for field in ("hourly_rate", "allocated_cost"):
+            if field in kwargs and kwargs[field] is not None:
+                kwargs[field] = Decimal(str(kwargs[field]))
+        model = GpuRuntimeAllocation(**kwargs)
+        data = model.model_dump(mode="json")
+        if data.get("id") is None:
+            data["id"] = str(uuid.uuid4())
+        for field in ("hourly_rate", "allocated_cost"):
+            if data.get(field) is not None:
+                data[field] = float(data[field])
+        return await self._store.save(_GPU_RUNTIME_ALLOCATIONS, data)
+
+    async def query_gpu_runtime_allocations(self, filters: dict) -> list[dict]:
+        """Query GPU runtime allocations matching the specified filters."""
+        return await self._store.query(_GPU_RUNTIME_ALLOCATIONS, filters)
+
+    async def save_call_outcome_cost(self, **kwargs: Any) -> str:
+        """Validate and persist a :class:`CallOutcomeCost`."""
+        for field in ("telephony_cost", "stt_cost", "llm_cost", "tts_cost", "gpu_cost", "total_cost"):
+            if field in kwargs and kwargs[field] is not None:
+                kwargs[field] = Decimal(str(kwargs[field]))
+        model = CallOutcomeCost(**kwargs)
+        data = model.model_dump(mode="json")
+        if data.get("id") is None:
+            data["id"] = str(uuid.uuid4())
+        for field in ("telephony_cost", "stt_cost", "llm_cost", "tts_cost", "gpu_cost", "total_cost"):
+            if data.get(field) is not None:
+                data[field] = float(data[field])
+        return await self._store.save(_CALL_OUTCOME_COSTS, data)
+
+    async def query_call_outcome_costs(self, filters: dict) -> list[dict]:
+        """Query call outcome costs matching the specified filters."""
+        return await self._store.query(_CALL_OUTCOME_COSTS, filters)
+
+    async def save_campaign_cost_rollup(self, **kwargs: Any) -> str:
+        """Validate and persist or update a :class:`CampaignCostRollup`."""
+        for field in ("total_telephony_cost", "total_stt_cost", "total_llm_cost", "total_tts_cost", "total_gpu_cost", "total_cost", "average_call_cost"):
+            if field in kwargs and kwargs[field] is not None:
+                kwargs[field] = Decimal(str(kwargs[field]))
+        
+        # In case of campaign_id & outcome conflict, handle upsert
+        campaign_id = kwargs.get("campaign_id")
+        outcome = kwargs.get("outcome")
+        existing = []
+        if campaign_id and outcome:
+            existing = await self._store.query(_CAMPAIGN_COST_ROLLUPS, {
+                "campaign_id": campaign_id,
+                "outcome": outcome
+            })
+        
+        if existing:
+            merged_kwargs = dict(existing[0])
+            for field in ("total_telephony_cost", "total_stt_cost", "total_llm_cost", "total_tts_cost", "total_gpu_cost", "total_cost", "average_call_cost"):
+                if merged_kwargs.get(field) is not None:
+                    merged_kwargs[field] = Decimal(str(merged_kwargs[field]))
+            merged_kwargs.update(kwargs)
+            merged_kwargs["rollup_timestamp"] = datetime.now(timezone.utc)
+            model_obj = CampaignCostRollup(**merged_kwargs)
+        else:
+            if kwargs.get("id") is None:
+                kwargs["id"] = str(uuid.uuid4())
+            kwargs.setdefault("rollup_timestamp", datetime.now(timezone.utc))
+            model_obj = CampaignCostRollup(**kwargs)
+            
+        data = model_obj.model_dump(mode="json")
+        if data.get("id") is None:
+            data["id"] = str(uuid.uuid4())
+        for field in ("total_telephony_cost", "total_stt_cost", "total_llm_cost", "total_tts_cost", "total_gpu_cost", "total_cost", "average_call_cost"):
+            if data.get(field) is not None:
+                data[field] = float(data[field])
+        return await self._store.save(_CAMPAIGN_COST_ROLLUPS, data)
+
+    async def query_campaign_cost_rollups(self, filters: dict) -> list[dict]:
+        """Query campaign cost rollups matching the specified filters."""
+        return await self._store.query(_CAMPAIGN_COST_ROLLUPS, filters)
 
     async def recompute_daily_outcome_metric(self, campaign_id: str, metric_date: date) -> None:
         """Query and compute daily rollup metrics for a campaign, preventing double-counting."""

@@ -21,6 +21,7 @@ class CallTurn(BaseModel):
     text: str
     stage: str
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    interrupted: bool = False
 
 
 class CallRecord(BaseModel):
