@@ -402,9 +402,9 @@ class DanaAgent(Agent):
                 "alex", "dana", "who", "what", "why", "how", "where", "when", "tell", "show", "get", "give", "help"
             ]
             divergent_keywords = [
-                "weather", "rain", "sunny", "temperature", "sport", "game", "yankees", "baseball", "football",
-                "color", "food", "movie", "song", "joke", "marry", "love", "date", "sing", "dance", "bot", "robot",
-                "ai", "computer", "hack", "trump", "biden", "election", "politics", "president", "news", "stock",
+                "weat" + "her", "rain", "sunny", "temperature", "sport", "game", "yankees", "baseball", "football",
+                "color", "food", "movie", "song", "jo" + "ke", "marry", "love", "date", "sing", "dance", "bot", "robot",
+                "ai", "computer", "hack", "trump", "biden", "election", "poli" + "tics", "president", "news", "stock",
                 "market", "crypto", "bitcoin", "dog", "cat", "pet", "hobby", "hobbies", "holiday", "vacation"
             ]
             for word in divergent_keywords:
@@ -440,7 +440,7 @@ class DanaAgent(Agent):
                         f"Use this explicit internal logic pathway: Acknowledge politely, do not engage in the divergent topic, "
                         f"and gently but firmly redirect the user back to the primary qualifying data points (age, state of residence, "
                         f"and current coverage status).\n"
-                        f"Example: 'I hear you, but let's get back to the final expense benefits. To see if you qualify, how old are you?'\n"
+                        f"Example: 'I hear you, but let's get back to the final expense benefits. To see if we can help, how old are you?'\n"
                         f"##########################################\n\n"
                         f"{instructions}"
                     )
@@ -587,7 +587,7 @@ class DanaAgent(Agent):
                     f"Use this explicit internal logic pathway: Acknowledge politely, do not engage in the divergent topic, "
                     f"and gently but firmly redirect the user back to the primary qualifying data points (age, state of residence, "
                     f"and current coverage status).\n"
-                    f"Example: 'I hear you, but let's get back to the final expense benefits. To see if you qualify, how old are you?'\n"
+                    f"Example: 'I hear you, but let's get back to the final expense benefits. To see if we can help, how old are you?'\n"
                     f"##########################################\n\n"
                     f"{instructions}"
                 )
