@@ -52,6 +52,10 @@ class TrainingNote(BaseModel):
         default=True,
         description="Whether this note should be used during live calls",
     )
+    status: str = Field(
+        default="pending_review",
+        description="Review state: pending_review, approved, rejected, archived",
+    )
     extracted_at: datetime = Field(
         default_factory=lambda: datetime.now(timezone.utc),
         description="Timestamp when this note was extracted",

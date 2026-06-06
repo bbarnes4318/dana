@@ -38,7 +38,7 @@ TABLE_COLUMNS: dict[str, set[str]] = {
     "qa_reports": {"id", "call_id", "overall_score", "grade", "scores", "issues", "recommendations", "created_at"},
     "latency_metrics": {"id", "call_id", "metric_name", "metric_value_ms", "created_at"},
     "agent_availability": {"id", "agent_id", "name", "phone_number", "licensed_states", "status", "priority", "max_concurrent_calls", "current_call_count", "last_call_at", "browser_join_enabled", "created_at", "updated_at"},
-    "training_notes": {"id", "source", "topic", "sales_lesson", "good_example", "bad_example", "call_stage", "created_at"},
+    "training_notes": {"id", "source", "topic", "sales_lesson", "good_example", "bad_example", "call_stage", "created_at", "objection_type", "compliance_risk", "use_in_live_call", "status"},
     "caller_ids": {"caller_id", "campaign_id", "status", "daily_call_count", "answer_rate", "dnc_rate", "complaint_rate", "stir_shaken_status", "last_used_at", "cooldown_until", "total_calls", "total_answers", "total_dncs", "total_complaints", "created_at", "updated_at"},
     "webhook_events": {"id", "event_type", "event_id", "destination", "payload", "status", "attempt_count", "next_attempt_at", "last_error", "response_status_code", "response_body_preview", "sent_at", "claimed_by", "claimed_at", "created_at", "updated_at"},
     "call_costs": {"id", "call_id", "campaign_id", "component", "provider", "model", "usage_unit", "usage_quantity", "unit_rate", "estimated_cost", "currency", "rate_source", "estimated", "dry_run", "created_at", "updated_at"},
@@ -229,6 +229,20 @@ class PostgresStore(BaseStore):
 
         # Normalize timestamp to created_at if the target table uses created_at
         record_copy = dict(record)
+        if table == "training_notes":
+            if "good_response_example" in record_copy:
+                val = record_copy.pop("good_response_example")
+                if "good_example" not in record_copy or record_copy["good_example"] is None:
+                    record_copy["good_example"] = val
+            if "bad_response_example" in record_copy:
+                val = record_copy.pop("bad_response_example")
+                if "bad_example" not in record_copy or record_copy["bad_example"] is None:
+                    record_copy["bad_example"] = val
+            if "extracted_at" in record_copy:
+                val = record_copy.pop("extracted_at")
+                if "created_at" not in record_copy or record_copy["created_at"] is None:
+                    record_copy["created_at"] = val
+
         if "timestamp" in record_copy:
             if "created_at" in columns and "created_at" not in record_copy:
                 record_copy["created_at"] = record_copy["timestamp"]
@@ -319,6 +333,15 @@ class PostgresStore(BaseStore):
                     if col in row_dict and col != "payload":
                         payload[col] = row_dict[col]
                 return payload
+
+        if table == "training_notes":
+            if "good_example" in row_dict:
+                row_dict["good_response_example"] = row_dict["good_example"]
+            if "bad_example" in row_dict:
+                row_dict["bad_response_example"] = row_dict["bad_example"]
+            if "created_at" in row_dict:
+                row_dict["extracted_at"] = row_dict["created_at"]
+                row_dict["timestamp"] = row_dict["created_at"]
 
         return row_dict
 

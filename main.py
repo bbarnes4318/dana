@@ -835,6 +835,39 @@ async def run_amd_worker(track: rtc.Track, session: AgentSession, agent: any, ro
         logger.info("AMD classification worker finished")
 
 
+async def suggest_lessons_from_call(call_record, scorecard, repository) -> None:
+    """Extract suggested lessons (TrainingNotes) from high-performing call records."""
+    turns = call_record.turns
+    for idx, turn in enumerate(turns[:-1]):
+        if turn.speaker == "prospect":
+            next_turn = turns[idx + 1]
+            if next_turn.speaker == "agent":
+                stage = turn.stage or "general_sales"
+                topic = "objection_handling" if stage == "objection" else stage
+                
+                from training.extract_training_lessons import _detect_objection_type, _detect_compliance_risk
+                obj_type = _detect_objection_type(turn.text) if stage == "objection" else None
+                comp_risk = _detect_compliance_risk(next_turn.text)
+                
+                if stage == "objection":
+                    sales_lesson = f"Handle objection: '{turn.text}'"
+                else:
+                    sales_lesson = f"Response during {stage} stage in high-performing call."
+                
+                await repository.save_training_note(
+                    source=f"call:{call_record.call_id}",
+                    topic=topic,
+                    sales_lesson=sales_lesson,
+                    good_response_example=next_turn.text,
+                    bad_response_example="",
+                    call_stage=stage,
+                    objection_type=obj_type,
+                    compliance_risk=comp_risk,
+                    use_in_live_call=False,
+                    status="pending_review"
+                )
+
+
 async def entrypoint(ctx: JobContext):
     from ops.worker_capacity import WorkerCapacity
     WorkerCapacity.increment_calls()
@@ -1213,6 +1246,18 @@ async def entrypoint(ctx: JobContext):
                 issues=scorecard.issues,
                 recommendations=[]
             )
+
+            # Generate suggested training notes/lessons from high-performing calls
+            if scorecard.overall_score >= 9.0 or scorecard.grade == "A":
+                try:
+                    await suggest_lessons_from_call(
+                        call_record=call_record,
+                        scorecard=scorecard,
+                        repository=shared.repository
+                    )
+                    logger.info("Successfully generated suggested training notes from high-performing call")
+                except Exception as e:
+                    logger.error(f"Failed to generate suggested lessons from high-performing call: {e}", exc_info=True)
 
             # If score is too low or grade is F, emit qa.failed
             if scorecard.overall_score < 7.0 or scorecard.grade == "F":

@@ -1,4 +1,5 @@
 import os
+import sys
 import re
 import json
 import uuid
@@ -1414,8 +1415,8 @@ def main():
     
     print("Dana Platform Readiness Report:")
     for name, (ok, msg) in check_results.items():
-        status_str = "✓" if ok else "✗"
-        print(f"  {status_str} [{name.upper()}]: {msg}")
+        status_str = "PASS" if ok else "FAIL"
+        print(f"  [{status_str}] [{name.upper()}]: {msg}")
         
     if not success:
         print("Readiness check FAILED - Worker not ready to accept jobs.")

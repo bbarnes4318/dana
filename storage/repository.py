@@ -265,7 +265,8 @@ class Repository:
         """
         note = TrainingNote(**kwargs)
         data = note.model_dump(mode="json")
-        data.setdefault("id", str(uuid.uuid4()))
+        if not data.get("id"):
+            data["id"] = str(uuid.uuid4())
         return await self._store.save(_TRAINING_NOTES, data)
 
     async def save_training_source(self, **kwargs: Any) -> str:
@@ -530,6 +531,14 @@ class Repository:
     async def query_training_examples(self, filters: dict) -> list[dict]:
         """Query training examples matching the specified filters."""
         return await self._store.query(_TRAINING_EXAMPLES, filters)
+
+    async def get_training_note(self, note_id: str) -> Optional[dict]:
+        """Retrieve a training note by primary key."""
+        return await self._store.get(_TRAINING_NOTES, note_id)
+
+    async def query_training_notes(self, filters: dict) -> list[dict]:
+        """Query training notes matching the specified filters."""
+        return await self._store.query(_TRAINING_NOTES, filters)
 
     async def get_eval_case(self, case_id: str) -> Optional[dict]:
         """Retrieve an eval case by primary key."""

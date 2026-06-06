@@ -78,8 +78,16 @@ class TrainingNote(BaseModel):
     sales_lesson: str
     good_example: Optional[str] = None
     bad_example: Optional[str] = None
+    good_response_example: Optional[str] = None
+    bad_response_example: Optional[str] = None
     call_stage: Optional[str] = None
+    objection_type: Optional[str] = None
+    compliance_risk: Optional[str] = None
+    use_in_live_call: bool = True
+    status: str = "pending_review"
     timestamp: datetime = Field(default_factory=_utcnow)
+    extracted_at: Optional[datetime] = None
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
 
 
 class Call(BaseModel):
