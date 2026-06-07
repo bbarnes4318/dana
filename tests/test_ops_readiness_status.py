@@ -62,3 +62,27 @@ def test_get_readiness_status_other_combinations():
     assert status["LOCAL_CANARY_READY"] is True
     assert status["LIVE_TELEPHONY_READY"] is False
     assert status["PRODUCTION_READY"] is False
+
+
+def test_readiness_cli_fails_output(capsys):
+    from unittest import mock
+    import sys
+    from ops.readiness import main
+    
+    # Mock run_readiness_checks to return success=False
+    with mock.patch("ops.readiness.run_readiness_checks", return_value=(False, {
+        "livekit": (False, "unconfigured"),
+        "stt": (True, "available")
+    })):
+        with mock.patch("sys.argv", ["readiness.py"]):
+            with pytest.raises(SystemExit) as exc:
+                main()
+            assert exc.value.code == 1
+            
+    captured = capsys.readouterr()
+    assert "LIVE_TELEPHONY_READY=false" in captured.out
+    assert "PRODUCTION_READY=false" in captured.out
+    assert "BENCHMARK_READY=unknown" in captured.out
+    assert "EVAL_READY=unknown" in captured.out
+    assert "LOCAL_CANARY_READY=unknown" in captured.out
+

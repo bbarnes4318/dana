@@ -1434,6 +1434,22 @@ async def run_readiness_checks() -> tuple[bool, dict[str, tuple[bool, str]]]:
     return all_ok, results
 
 def main():
+    import argparse
+    parser = argparse.ArgumentParser(description="Dana Worker Readiness CLI")
+    parser.add_argument("--benchmark-ready", choices=["true", "false"], default=None, help="State of benchmark validation")
+    parser.add_argument("--eval-ready", choices=["true", "false"], default=None, help="State of compliance evals")
+    parser.add_argument("--canary-ready", choices=["true", "false"], default=None, help="State of canary execution")
+    args = parser.parse_args()
+
+    def parse_arg_bool(val: str | None) -> bool | None:
+        if val is None:
+            return None
+        return val.lower() == "true"
+
+    benchmark_arg = parse_arg_bool(args.benchmark_ready)
+    eval_arg = parse_arg_bool(args.eval_ready)
+    canary_arg = parse_arg_bool(args.canary_ready)
+
     loop = asyncio.get_event_loop()
     success, check_results = loop.run_until_complete(run_readiness_checks())
     
@@ -1442,6 +1458,46 @@ def main():
         status_str = "PASS" if ok else "FAIL"
         print(f"  [{status_str}] [{name.upper()}]: {msg}")
         
+    # Calculate statuses
+    readiness_ok = success
+    healthcheck_ok = readiness_ok
+    
+    status = get_readiness_status(
+        healthcheck_ok=healthcheck_ok,
+        readiness_ok=readiness_ok,
+        canary_ok=canary_arg if canary_arg is not None else False,
+        evals_ok=eval_arg if eval_arg is not None else False,
+        quality_gate_ok=benchmark_arg if benchmark_arg is not None else False
+    )
+    
+    def fmt_val(val: bool | None, is_supplied: bool) -> str:
+        if not is_supplied and val is False:
+            return "false"
+        if not is_supplied:
+            return "unknown"
+        return "true" if val else "false"
+
+    benchmark_str = fmt_val(benchmark_arg, benchmark_arg is not None)
+    eval_str = fmt_val(eval_arg, eval_arg is not None)
+    canary_str = fmt_val(canary_arg, canary_arg is not None)
+    
+    live_telephony_ok = status["LIVE_TELEPHONY_READY"]
+    all_supplied_and_true = (
+        healthcheck_ok and readiness_ok and
+        canary_arg is True and eval_arg is True and benchmark_arg is True
+    )
+    production_ok = all_supplied_and_true
+    
+    live_telephony_str = "true" if live_telephony_ok else "false"
+    production_str = "true" if production_ok else "false"
+
+    print("\nReadiness Status Flags:")
+    print(f"BENCHMARK_READY={benchmark_str}")
+    print(f"EVAL_READY={eval_str}")
+    print(f"LOCAL_CANARY_READY={canary_str}")
+    print(f"LIVE_TELEPHONY_READY={live_telephony_str}")
+    print(f"PRODUCTION_READY={production_str}")
+
     if not success:
         print("Readiness check FAILED - Worker not ready to accept jobs.")
         sys.exit(1)
