@@ -1453,8 +1453,21 @@ def main():
     eval_arg = parse_arg_bool(args.eval_ready)
     canary_arg = parse_arg_bool(args.canary_ready)
 
-    loop = asyncio.get_event_loop()
-    success, check_results = loop.run_until_complete(run_readiness_checks())
+    import asyncio
+    coro = run_readiness_checks()
+    if not asyncio.iscoroutine(coro) and not hasattr(coro, "__await__"):
+        async def _wrap():
+            return coro
+        coro = _wrap()
+    try:
+        success, check_results = asyncio.run(coro)
+    except RuntimeError:
+        try:
+            loop = asyncio.get_event_loop()
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+        success, check_results = loop.run_until_complete(coro)
     
     print("Dana Platform Readiness Report:")
     for name, (ok, msg) in check_results.items():

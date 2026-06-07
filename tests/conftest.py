@@ -182,6 +182,8 @@ class DummyAudioFrame:
 rtc_mock = MagicMock()
 rtc_mock.AudioFrame = DummyAudioFrame
 sys.modules['livekit.rtc'] = rtc_mock
+sys.modules['livekit.rtc._ffi_client'] = MagicMock()
+sys.modules['livekit.rtc._proto'] = MagicMock()
 
 class DummyAudioEmitter:
     def __init__(self, *args, **kwargs):

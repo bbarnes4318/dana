@@ -104,6 +104,7 @@ async def test_call_closure_updates_attempt_status():
     mock_ctx.connect = AsyncMock()
     mock_ctx.room.name = "dana-camp-1-lead-1-attempt-1"
     mock_ctx.room.is_connected = MagicMock(side_effect=[True, False]) # Exits loop on second check
+    mock_ctx.room.isconnected = mock_ctx.room.is_connected
     
     mock_participant = MagicMock()
     mock_participant.identity = "+15555550000"
@@ -164,6 +165,7 @@ async def test_call_closure_updates_live_session_status():
     mock_ctx.connect = AsyncMock()
     mock_ctx.room.name = "dana-camp-1-lead-1-attempt-1"
     mock_ctx.room.is_connected = MagicMock(side_effect=[True, False])
+    mock_ctx.room.isconnected = mock_ctx.room.is_connected
     
     mock_participant = MagicMock()
     mock_participant.identity = "+15555550000"
@@ -214,6 +216,7 @@ async def test_post_call_export_created_when_turns_exist():
     mock_ctx.connect = AsyncMock()
     mock_ctx.room.name = "dana-camp-1-lead-1-attempt-1"
     mock_ctx.room.is_connected = MagicMock(side_effect=[True, False])
+    mock_ctx.room.isconnected = mock_ctx.room.is_connected
     
     mock_participant = MagicMock()
     mock_participant.identity = "+15555550000"
@@ -275,6 +278,7 @@ async def test_post_call_export_skipped_when_no_turns():
     mock_ctx.connect = AsyncMock()
     mock_ctx.room.name = "dana-camp-1-lead-1-attempt-1"
     mock_ctx.room.is_connected = MagicMock(side_effect=[True, False])
+    mock_ctx.room.isconnected = mock_ctx.room.is_connected
     
     mock_participant = MagicMock()
     mock_participant.identity = "+15555550000"
@@ -364,7 +368,8 @@ async def test_one_lead_test_reports_turn_counts():
     
     with patch("telephony.one_lead_live_campaign_test.DialerQueue", return_value=mock_dialer), \
          patch("telephony.one_lead_live_campaign_test.LiveTelephonyReadinessChecker") as mock_checker_cls, \
-         patch("telephony.one_lead_live_campaign_test.CampaignLeadImporter") as mock_importer_cls:
+         patch("telephony.one_lead_live_campaign_test.CampaignLeadImporter") as mock_importer_cls, \
+         patch("telephony.livekit_agent_worker.check_worker_dependencies", return_value={"ready": True}):
         
         mock_checker = mock_checker_cls.return_value
         mock_checker.run = AsyncMock(return_value=MagicMock(ready=True))
@@ -440,6 +445,7 @@ async def test_one_lead_test_reports_export_path():
     with patch("telephony.one_lead_live_campaign_test.DialerQueue", return_value=mock_dialer), \
          patch("telephony.one_lead_live_campaign_test.LiveTelephonyReadinessChecker") as mock_checker_cls, \
          patch("telephony.one_lead_live_campaign_test.CampaignLeadImporter") as mock_importer_cls, \
+         patch("telephony.livekit_agent_worker.check_worker_dependencies", return_value={"ready": True}), \
          patch("asyncio.sleep", new_callable=AsyncMock):
         
         mock_checker = mock_checker_cls.return_value
@@ -515,7 +521,8 @@ async def test_interactive_mode_requires_prospect_turn():
     
     with patch("telephony.one_lead_live_campaign_test.DialerQueue", return_value=mock_dialer), \
          patch("telephony.one_lead_live_campaign_test.LiveTelephonyReadinessChecker") as mock_checker_cls, \
-         patch("telephony.one_lead_live_campaign_test.CampaignLeadImporter") as mock_importer_cls:
+         patch("telephony.one_lead_live_campaign_test.CampaignLeadImporter") as mock_importer_cls, \
+         patch("telephony.livekit_agent_worker.check_worker_dependencies", return_value={"ready": True}):
         
         mock_checker = mock_checker_cls.return_value
         mock_checker.run = AsyncMock(return_value=MagicMock(ready=True))
