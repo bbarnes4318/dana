@@ -222,6 +222,12 @@ class DialerQueue:
             live_mode=config.live_mode,
         )
 
+        controlled_live_test = os.getenv("DANA_CONTROLLED_LIVE_TEST", "false").lower() in ("true", "1", "yes")
+        if controlled_live_test:
+            result.blocked_reason = "Campaign dialing is disabled because DANA_CONTROLLED_LIVE_TEST is active."
+            result.warnings.append("Controlled live test mode active - campaign dialing blocked.")
+            return result
+
         # 1. Load Campaign
         campaign = await self.repository.get_outbound_campaign(campaign_id)
         if not campaign:

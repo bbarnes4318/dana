@@ -28,8 +28,8 @@ async def run_healthcheck() -> Tuple[bool, str]:
     # 2. Readiness Checks (skip storage checks in healthcheck to avoid spamming database)
     success, readiness_results = await run_readiness_checks()
     
-    # We require at least LiveKit credentials, STT, LLM, TTS, and VAD to be operational
-    for name in ("livekit", "stt", "llm", "tts", "vad"):
+    # We require at least LiveKit credentials, STT, LLM, TTS, VAD, and Telephony to be operational
+    for name in ("livekit", "stt", "llm", "tts", "vad", "telephony"):
         ok, msg = readiness_results.get(name, (False, "Not checked"))
         if not ok:
             return False, f"Critical readiness component '{name}' failed: {msg}"

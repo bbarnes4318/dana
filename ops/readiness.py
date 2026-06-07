@@ -1300,14 +1300,54 @@ async def check_livekit() -> tuple[bool, str]:
     key = os.getenv("LIVEKIT_API_KEY")
     secret = os.getenv("LIVEKIT_API_SECRET")
     
-    if not url or url.startswith("wss://replace-me"):
-        return False, "LIVEKIT_URL is not configured"
+    if not url or url.startswith("wss://replace-me") or url == "replace_me":
+        return False, "LIVEKIT_URL is missing or placeholder value is used"
     if not key or key == "replace_me":
-        return False, "LIVEKIT_API_KEY is not configured"
+        return False, "LIVEKIT_API_KEY is missing or placeholder value is used"
     if not secret or secret == "replace_me":
-        return False, "LIVEKIT_API_SECRET is not configured"
+        return False, "LIVEKIT_API_SECRET is missing or placeholder value is used"
         
     return True, "LiveKit credentials configured"
+
+async def check_telephony() -> tuple[bool, str]:
+    """Verify Telnyx/SIP configuration readiness."""
+    telnyx_key = os.getenv("TELNYX_API_KEY")
+    connection_id = os.getenv("TELNYX_CONNECTION_ID")
+    
+    if not telnyx_key or telnyx_key == "replace_me":
+        return False, "TELNYX_API_KEY is not configured"
+    if not connection_id or connection_id == "replace_me" or connection_id == "":
+        return False, "TELNYX_CONNECTION_ID is not configured"
+        
+    # Check SIP trunk config documented
+    doc_paths = ["docs/telnyx_livekit_setup.md", "docs/TELNYX_LIVEKIT_SIP_SETUP.md"]
+    doc_ok = any(os.path.exists(path) for path in doc_paths)
+    if not doc_ok:
+        return False, "SIP trunk setup documentation is missing (docs/telnyx_livekit_setup.md)"
+        
+    # Check caller ID pool configured or intentionally empty for test mode
+    is_test_mode = os.getenv("DANA_CONTROLLED_LIVE_TEST", "false").lower() in ("true", "1", "yes")
+    
+    dids = os.getenv("TELNYX_DIDS", "").strip()
+    nums = os.getenv("TELNYX_PHONE_NUMBERS", "").strip()
+    outbound_caller = os.getenv("TELNYX_OUTBOUND_CALLER_ID", "").strip()
+    dana_caller = os.getenv("DANA_OUTBOUND_CALLER_ID", "").strip()
+    
+    db_dids = []
+    try:
+        from storage.repository import Repository
+        repo = Repository()
+        if os.getenv("DATABASE_URL"):
+            db_dids = await repo.list_dids(provider="telnyx")
+    except Exception:
+        pass
+        
+    has_pool = bool(dids or nums or outbound_caller or dana_caller or db_dids)
+    
+    if not has_pool and not is_test_mode:
+        return False, "Outbound caller ID pool is not configured (and DANA_CONTROLLED_LIVE_TEST is not enabled)"
+        
+    return True, "Telephony configuration verified"
 
 async def check_stt() -> tuple[bool, str]:
     """Verify STT faster-whisper package and configuration are available."""
@@ -1318,11 +1358,19 @@ async def check_stt() -> tuple[bool, str]:
         return False, f"STT module not available: {e}"
 
 async def check_llm() -> tuple[bool, str]:
-    """Verify vLLM endpoint availability."""
+    """Verify vLLM endpoint availability and warmup status."""
     vllm_url = os.getenv("VLLM_BASE_URL", "http://vllm-server:8000/v1")
-    health_url = vllm_url.replace("/v1", "/health")
-    
-    if os.getenv("DANA_RUNTIME_ENV") == "test":
+    if not vllm_url or vllm_url == "replace_me":
+        return False, "VLLM_BASE_URL is not configured"
+        
+    if "/v1" in vllm_url:
+        health_url = vllm_url.replace("/v1", "/health")
+        models_url = vllm_url + "/models"
+    else:
+        health_url = vllm_url.rstrip("/") + "/health"
+        models_url = vllm_url.rstrip("/") + "/v1/models"
+        
+    if os.getenv("DANA_RUNTIME_ENV") == "test" and "unreachable" not in vllm_url:
         return True, "vLLM (mocked for tests) available"
         
     try:
@@ -1330,22 +1378,100 @@ async def check_llm() -> tuple[bool, str]:
         async with httpx.AsyncClient(timeout=2.0) as client:
             response = await client.get(health_url)
             if response.status_code == 200:
-                return True, "vLLM server is healthy"
+                # Check model warmup status
+                try:
+                    models_resp = await client.get(models_url)
+                    if models_resp.status_code == 200:
+                        models_data = models_resp.json()
+                        models = models_data.get("data", [])
+                        if not models:
+                            return True, "vLLM server is healthy, but no models are loaded. A cold-start is expected on the first request."
+                        return True, "vLLM server is healthy and pre-warmed"
+                except Exception:
+                    pass
+                return True, "vLLM server is healthy (warmup status could not be verified, cold-start expected)"
             return False, f"vLLM server returned unhealthy: {response.status_code}"
     except Exception as e:
         return False, f"vLLM server is unreachable at {health_url}: {e}"
 
 async def check_tts() -> tuple[bool, str]:
-    """Verify TTS kokoro-onnx package and mock status."""
+    """Verify TTS kokoro-onnx package, non-silence output, and fallback configurations."""
+    is_prod = is_production()
+    allow_mock = allow_mock_tts()
+    
+    if is_prod and allow_mock:
+        return False, "CRITICAL: Mock TTS is enabled in production mode (DANA_ALLOW_MOCK_TTS=true)"
+
+    # Identify if a valid cloud fallback is configured
+    tts_routing = os.getenv("DANA_TTS_ROUTING_MODE", "local").strip().lower()
+    openai_key = os.getenv("OPENAI_API_KEY", "").strip()
+    eleven_key = os.getenv("ELEVENLABS_API_KEY", "").strip()
+    
+    has_openai = bool(openai_key and openai_key != "replace_me")
+    has_eleven = bool(eleven_key and eleven_key != "replace_me")
+    
+    allow_cloud_fallback = os.getenv("DANA_ALLOW_CLOUD_TTS_FALLBACK", "false").lower() in ("true", "1", "yes")
+    
+    valid_cloud_fallback = (
+        (tts_routing in ("openai", "elevenlabs", "cloud") and (has_openai or has_eleven)) or
+        (allow_cloud_fallback and (has_openai or has_eleven))
+    )
+
     try:
         import kokoro_onnx
+        import numpy as np
     except ImportError as e:
+        if valid_cloud_fallback:
+            return True, f"TTS module kokoro_onnx not available ({e}), using cloud fallback"
         return False, f"TTS module not available: {e}"
 
-    if is_production() and allow_mock_tts():
-        return False, "CRITICAL: Mock TTS is enabled in production mode (DANA_ALLOW_MOCK_TTS=true)"
+    # Verify if model/voices files are present
+    model_path = os.environ.get("KOKORO_MODEL_PATH", "/root/.cache/kokoro/kokoro-v1.0.onnx")
+    voices_path = os.environ.get("KOKORO_VOICES_PATH", "/root/.cache/kokoro/voices-v1.0.bin")
+    
+    # Check default paths if custom not found
+    if not os.path.exists(model_path):
+        if os.path.exists("models/kokoro-v1.0.onnx"):
+            model_path = "models/kokoro-v1.0.onnx"
+            voices_path = "models/voices-v1.0.bin"
+        else:
+            model_path = "kokoro-v1.0.onnx"
+            voices_path = "voices.bin"
+            
+    kokoro_files_exist = os.path.exists(model_path) and os.path.exists(voices_path)
+    
+    if not kokoro_files_exist:
+        if valid_cloud_fallback:
+            return True, "Local Kokoro model files missing, using cloud fallback"
+        return False, f"Local Kokoro model/voices files missing at {model_path} / {voices_path}"
+
+    if os.getenv("DANA_RUNTIME_ENV") == "test":
+        return True, "TTS module (kokoro-onnx) available"
+
+    # If Kokoro files exist and not in test, we verify non-silent audio
+    try:
+        from tts_service import LocallyHostedKokoro
+        tts_service = LocallyHostedKokoro()
+        await tts_service.initialize()
         
-    return True, "TTS module (kokoro-onnx) available"
+        if hasattr(tts_service, "_model") and tts_service._model.__class__.__name__ == "MockKokoro":
+            # Real Kokoro failed to load.
+            if valid_cloud_fallback:
+                return True, "Local Kokoro failed to initialize, using cloud fallback"
+            return False, "Local Kokoro failed to initialize and fell back to mock"
+
+        audio = await tts_service._synthesize_audio("test")
+        if audio is None or audio.size == 0 or np.all(audio == 0.0):
+            if valid_cloud_fallback:
+                return True, "Local TTS generated silent audio, using cloud fallback"
+            return False, "Local TTS generated silent audio"
+            
+    except Exception as e:
+        if valid_cloud_fallback:
+            return True, f"Local TTS synthesis failed ({e}), using cloud fallback"
+        return False, f"Local TTS synthesis failed: {e}"
+
+    return True, "TTS module (kokoro-onnx) available and verified non-silent"
 
 async def check_vad() -> tuple[bool, str]:
     """Verify VAD silero-vad is available."""
@@ -1360,13 +1486,18 @@ async def check_vad() -> tuple[bool, str]:
             return False, f"VAD module not available: {e}"
 
 async def check_storage() -> tuple[bool, str]:
-    """Verify Postgres and Redis connectivity."""
+    """Verify Postgres and Redis connectivity, migrations, and table structure."""
+    is_prod_mode = is_production()
+    db_url = os.getenv("DATABASE_URL")
+    
+    if not db_url or db_url == "replace_me":
+        if is_prod_mode:
+            return False, "DATABASE_URL is not configured (JSONL fallback is not allowed in production)"
+        else:
+            return True, "Storage using local JSONL fallback (not production-ready)"
+
     if os.getenv("DANA_RUNTIME_ENV") == "test":
         return True, "Storage (mocked for tests) available"
-
-    db_url = os.getenv("DATABASE_URL")
-    if not db_url:
-        return False, "DATABASE_URL is not set"
 
     try:
         store = PostgresStore(db_url)
@@ -1375,6 +1506,35 @@ async def check_storage() -> tuple[bool, str]:
             val = await conn.fetchval("SELECT 1;")
             if val != 1:
                 return False, "Postgres failed to return test query"
+                
+            # Verify migrations are applied
+            expected_migrations = [
+                "001_initial", "002_cost_accounting", "002_dialer", "003_integrations",
+                "004_metrics", "005_continuous_training", "006_pgvector_rag_documents",
+                "006_telephony_campaigns", "007_prompt_versioning_indexes", "008_dids",
+                "009_training_notes_review"
+            ]
+            
+            try:
+                rows = await conn.fetch("SELECT version FROM schema_migrations;")
+                applied_versions = {row["version"] for row in rows}
+            except Exception as e:
+                return False, f"Migrations tracking table schema_migrations is missing: {e}"
+                
+            missing_migrations = [m for m in expected_migrations if m not in applied_versions]
+            if missing_migrations:
+                return False, f"Pending migrations: {', '.join(missing_migrations)}"
+                
+            # Verify required tables exist
+            table_rows = await conn.fetch("SELECT table_name FROM information_schema.tables WHERE table_schema = 'public';")
+            existing_tables = {r["table_name"] for r in table_rows}
+            
+            from storage.postgres_store import TABLE_COLUMNS
+            required_tables = set(TABLE_COLUMNS.keys())
+            missing_tables = required_tables - existing_tables
+            if missing_tables:
+                return False, f"Missing required database tables: {', '.join(sorted(missing_tables))}"
+                
     except Exception as e:
         return False, f"Postgres database is unreachable: {e}"
 
@@ -1389,7 +1549,7 @@ async def check_storage() -> tuple[bool, str]:
         except Exception as e:
             return False, f"Redis is unreachable: {e}"
 
-    return True, "Storage connections operational"
+    return True, "Storage connections operational and verified"
 
 
 def get_readiness_status(
@@ -1419,6 +1579,7 @@ async def run_readiness_checks() -> tuple[bool, dict[str, tuple[bool, str]]]:
     """Execute all readiness checks and return global status."""
     checks = {
         "livekit": check_livekit(),
+        "telephony": check_telephony(),
         "stt": check_stt(),
         "llm": check_llm(),
         "tts": check_tts(),

@@ -459,6 +459,47 @@ class TrainingWebConsoleServer(ThreadingHTTPServer):
                     if not ok:
                         missing_env.append(f"{name.upper()}: {msg}")
                 
+                from config.runtime_env import is_production, allow_mock_tts
+                missing_livekit = not readiness_results.get("livekit", (False, ""))[0]
+                missing_telephony = not readiness_results.get("telephony", (False, ""))[0]
+                missing_database = not readiness_results.get("storage", (False, ""))[0]
+                missing_vllm = not readiness_results.get("llm", (False, ""))[0]
+                tts_risk = is_production() and allow_mock_tts()
+
+                remediations = []
+                if missing_livekit:
+                    remediations.append("LiveKit: Configure LIVEKIT_URL, LIVEKIT_API_KEY, and LIVEKIT_API_SECRET in your environment with valid non-placeholder credentials.")
+                if missing_telephony:
+                    t_msg = readiness_results.get("telephony", (False, ""))[1]
+                    if "API_KEY" in t_msg:
+                        remediations.append("Telnyx: Set TELNYX_API_KEY to your valid Telnyx API key.")
+                    elif "CONNECTION_ID" in t_msg:
+                        remediations.append("Telnyx: Set TELNYX_CONNECTION_ID to your Telnyx SIP Connection ID.")
+                    elif "documentation" in t_msg:
+                        remediations.append("Telephony: Ensure docs/telnyx_livekit_setup.md exists in the repository.")
+                    else:
+                        remediations.append("Telephony: Ensure dids are populated or configure TELNYX_DIDS / TELNYX_PHONE_NUMBERS. Alternatively, set DANA_CONTROLLED_LIVE_TEST=true for controlled testing.")
+                if missing_database:
+                    d_msg = readiness_results.get("storage", (False, ""))[1]
+                    if "DATABASE_URL" in d_msg:
+                        remediations.append("Postgres: DATABASE_URL is not set. A PostgreSQL database is required in production.")
+                    elif "Pending migrations" in d_msg:
+                        remediations.append("Postgres: Apply database migrations using `python -m storage.migrations`.")
+                    elif "Missing required database tables" in d_msg:
+                        remediations.append("Postgres: Ensure all tables exist by applying migrations.")
+                    else:
+                        remediations.append("Postgres: Ensure the PostgreSQL database is running and reachable via DATABASE_URL.")
+                if missing_vllm:
+                    remediations.append("vLLM: Configure VLLM_BASE_URL and verify the vLLM server is running and reachable.")
+                if not readiness_results.get("tts", (False, ""))[0]:
+                    tts_msg = readiness_results.get("tts", (False, ""))[1]
+                    if "DANA_ALLOW_MOCK_TTS" in tts_msg or tts_risk:
+                        remediations.append("TTS: Disable mock TTS in production by setting DANA_ALLOW_MOCK_TTS=false.")
+                    else:
+                        remediations.append("TTS: Ensure Kokoro model files are present (kokoro-v1.0.onnx and voices-v1.0.bin), or configure a valid cloud fallback (e.g., set DANA_ALLOW_CLOUD_TTS_FALLBACK=true and OPENAI_API_KEY).")
+
+                remediation_text = "\n".join(remediations) if remediations else "All checked systems are operational."
+
                 res = {
                     "success": True,
                     "BENCHMARK_READY": status_flags["BENCHMARK_READY"],
@@ -475,7 +516,13 @@ class TrainingWebConsoleServer(ThreadingHTTPServer):
                         "ok": readiness_ok,
                         "results": {name: {"ok": ok, "message": msg} for name, (ok, msg) in readiness_results.items()}
                     },
-                    "missing_environment_variables": missing_env
+                    "missing_environment_variables": missing_env,
+                    "missing_livekit_config": missing_livekit,
+                    "missing_telnyx_config": missing_telephony,
+                    "missing_database_config": missing_database,
+                    "missing_vllm_config": missing_vllm,
+                    "production_mock_tts_risk": tts_risk,
+                    "remediation_text": remediation_text
                 }
                 return (200, res)
 

@@ -65,6 +65,7 @@ async def test_check_storage_test_mode():
 @pytest.mark.asyncio
 async def test_run_readiness_checks_aggregate():
     with patch("ops.readiness.check_livekit", return_value=(True, "ok")), \
+         patch("ops.readiness.check_telephony", return_value=(True, "ok")), \
          patch("ops.readiness.check_stt", return_value=(True, "ok")), \
          patch("ops.readiness.check_llm", return_value=(True, "ok")), \
          patch("ops.readiness.check_tts", return_value=(True, "ok")), \
@@ -73,5 +74,5 @@ async def test_run_readiness_checks_aggregate():
         
         success, results = await run_readiness_checks()
         assert success is True
-        assert len(results) == 6
+        assert len(results) == 7
         assert all(val[0] for val in results.values())
