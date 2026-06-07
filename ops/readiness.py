@@ -1301,11 +1301,11 @@ async def check_livekit() -> tuple[bool, str]:
     secret = os.getenv("LIVEKIT_API_SECRET")
     
     if not url or url.startswith("wss://replace-me") or url == "replace_me":
-        return False, "LIVEKIT_URL is missing or placeholder value is used"
+        return False, "LIVEKIT_URL is not configured"
     if not key or key == "replace_me":
-        return False, "LIVEKIT_API_KEY is missing or placeholder value is used"
+        return False, "LIVEKIT_API_KEY is not configured"
     if not secret or secret == "replace_me":
-        return False, "LIVEKIT_API_SECRET is missing or placeholder value is used"
+        return False, "LIVEKIT_API_SECRET is not configured"
         
     return True, "LiveKit credentials configured"
 
@@ -1487,6 +1487,9 @@ async def check_vad() -> tuple[bool, str]:
 
 async def check_storage() -> tuple[bool, str]:
     """Verify Postgres and Redis connectivity, migrations, and table structure."""
+    if os.getenv("DANA_RUNTIME_ENV") == "test":
+        return True, "Storage (mocked for tests) available"
+
     is_prod_mode = is_production()
     db_url = os.getenv("DATABASE_URL")
     
@@ -1495,9 +1498,6 @@ async def check_storage() -> tuple[bool, str]:
             return False, "DATABASE_URL is not configured (JSONL fallback is not allowed in production)"
         else:
             return True, "Storage using local JSONL fallback (not production-ready)"
-
-    if os.getenv("DANA_RUNTIME_ENV") == "test":
-        return True, "Storage (mocked for tests) available"
 
     try:
         store = PostgresStore(db_url)

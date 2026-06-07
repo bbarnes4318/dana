@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional, Protocol
 
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, field_validator
 
 from safety.compliance_filter import ComplianceFilter
 from evals.case_runner import normalize_text
@@ -35,7 +35,7 @@ class ReplayTurn(BaseModel):
     max_words: Optional[int] = None
     metadata: dict[str, Any] = Field(default_factory=dict)
 
-    @validator("speaker", pre=True)
+    @field_validator("speaker", mode="before")
     def normalize_speaker(cls, v: str) -> str:
         if not isinstance(v, str):
             return v
@@ -62,7 +62,7 @@ class TranscriptReplayFixture(BaseModel):
     must_never_include: list[str] = Field(default_factory=list)
     global_rules: dict[str, Any] = Field(default_factory=dict)
 
-    @validator("turns", pre=True)
+    @field_validator("turns", mode="before")
     def populate_turn_indices(cls, v: Any) -> Any:
         if isinstance(v, list):
             for idx, turn in enumerate(v):

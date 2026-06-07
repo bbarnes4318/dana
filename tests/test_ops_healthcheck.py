@@ -22,6 +22,8 @@ async def test_healthcheck_all_passed():
              "llm": (True, "ok"),
              "tts": (True, "ok"),
              "vad": (True, "ok"),
+             "telephony": (True, "ok"),
+             "storage": (True, "ok"),
          })):
         
         is_healthy, msg = await run_healthcheck()
@@ -46,6 +48,8 @@ async def test_healthcheck_readiness_failed():
              "llm": (True, "ok"),
              "tts": (True, "ok"),
              "vad": (True, "ok"),
+             "telephony": (True, "ok"),
+             "storage": (True, "ok"),
          })):
         
         is_healthy, msg = await run_healthcheck()
@@ -67,6 +71,8 @@ async def test_healthcheck_latency_degraded():
              "llm": (True, "ok"),
              "tts": (True, "ok"),
              "vad": (True, "ok"),
+             "telephony": (True, "ok"),
+             "storage": (True, "ok"),
          })):
         
         is_healthy, msg = await run_healthcheck()
