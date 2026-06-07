@@ -254,6 +254,67 @@
             </div>
           </section>
 
+          <!-- Widget: Interruption & Telemetry Metrics -->
+          <section class="card widget-card" style="margin: 0;">
+            <div class="card-title">Interruption Telemetry</div>
+            <div class="table-wrapper">
+              <table style="font-size: 0.8rem; width: 100%;">
+                <thead>
+                  <tr>
+                    <th style="text-align: left;">Metric</th>
+                    <th style="text-align: right;">P50</th>
+                    <th style="text-align: right;">P95</th>
+                    <th style="text-align: right;">Count / Rate</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr id="row-latency-total-bargein">
+                    <td>Total Barge-in Stop</td>
+                    <td id="val-latency-total-bargein-p50" style="text-align: right; font-weight: bold;">—</td>
+                    <td id="val-latency-total-bargein-p95" style="text-align: right; font-weight: bold;">—</td>
+                    <td style="text-align: right; color: var(--text-muted);">ms</td>
+                  </tr>
+                  <tr id="row-latency-tts-cancel">
+                    <td>TTS Cancel Duration</td>
+                    <td id="val-latency-tts-cancel-p50" style="text-align: right; font-weight: bold;">—</td>
+                    <td id="val-latency-tts-cancel-p95" style="text-align: right; font-weight: bold;">—</td>
+                    <td style="text-align: right; color: var(--text-muted);">ms</td>
+                  </tr>
+                  <tr id="row-latency-audio-flush">
+                    <td>Audio Flush Duration</td>
+                    <td id="val-latency-audio-flush-p50" style="text-align: right; font-weight: bold;">—</td>
+                    <td id="val-latency-audio-flush-p95" style="text-align: right; font-weight: bold;">—</td>
+                    <td style="text-align: right; color: var(--text-muted);">ms</td>
+                  </tr>
+                  <tr>
+                    <td>False Interruptions</td>
+                    <td colspan="2" id="val-false-interruption-count" style="text-align: right; font-weight: bold;">—</td>
+                    <td id="val-false-interruption-rate" style="text-align: right; font-weight: bold;">—</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            
+            <div class="card-title" style="margin-top: 1rem; font-size: 0.85rem;">Barge-in Stop Latency by Stage</div>
+            <div class="table-wrapper">
+              <table style="font-size: 0.75rem; width: 100%;">
+                <thead>
+                  <tr>
+                    <th style="text-align: left;">Stage</th>
+                    <th style="text-align: right;">P50</th>
+                    <th style="text-align: right;">P95</th>
+                    <th style="text-align: right;">Count</th>
+                  </tr>
+                </thead>
+                <tbody id="tbl-interruption-stages">
+                  <tr>
+                    <td colspan="4" style="text-align: center; color: var(--text-muted);">No stage data recorded</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+
           <!-- Widget: Costs breakdown -->
           <section class="card widget-card" style="margin: 0;">
             <div class="card-title">Cost Accounting Breakdown</div>

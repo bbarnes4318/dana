@@ -3606,6 +3606,48 @@ document.addEventListener("DOMContentLoaded", () => {
         document.getElementById("val-latency-tts-p95").innerText = `${ttsP95.toFixed(0)}ms`;
         document.getElementById("val-latency-bargein-p50").innerText = `${bargeP50.toFixed(0)}ms`;
         document.getElementById("val-latency-bargein-p95").innerText = `${bargeP95.toFixed(0)}ms`;
+
+        // Interruption Telemetry DOM updates
+        const totalBargeP50 = l.p50_total_barge_in_stop_ms || 0;
+        const totalBargeP95 = l.p95_total_barge_in_stop_ms || 0;
+        const ttsCancelP50 = l.p50_tts_cancel_duration_ms || 0;
+        const ttsCancelP95 = l.p95_tts_cancel_duration_ms || 0;
+        const audioFlushP50 = l.p50_audio_flush_duration_ms || 0;
+        const audioFlushP95 = l.p95_audio_flush_duration_ms || 0;
+        const falseCount = l.false_interruption_count || 0;
+        const falseRate = l.false_interruption_rate || 0;
+
+        document.getElementById("val-latency-total-bargein-p50").innerText = `${totalBargeP50.toFixed(0)}ms`;
+        document.getElementById("val-latency-total-bargein-p95").innerText = `${totalBargeP95.toFixed(0)}ms`;
+        document.getElementById("val-latency-tts-cancel-p50").innerText = `${ttsCancelP50.toFixed(0)}ms`;
+        document.getElementById("val-latency-tts-cancel-p95").innerText = `${ttsCancelP95.toFixed(0)}ms`;
+        document.getElementById("val-latency-audio-flush-p50").innerText = `${audioFlushP50.toFixed(0)}ms`;
+        document.getElementById("val-latency-audio-flush-p95").innerText = `${audioFlushP95.toFixed(0)}ms`;
+        document.getElementById("val-false-interruption-count").innerText = `${falseCount}`;
+        document.getElementById("val-false-interruption-rate").innerText = `${(falseRate * 100).toFixed(1)}%`;
+
+        // Render stage breaks
+        const stageTbody = document.getElementById("tbl-interruption-stages");
+        if (stageTbody) {
+          stageTbody.innerHTML = "";
+          const stagesData = l.interruption_latency_by_stage || {};
+          const stageKeys = Object.keys(stagesData);
+          if (stageKeys.length === 0) {
+            stageTbody.innerHTML = `<tr><td colspan="4" style="text-align: center; color: var(--text-muted);">No stage data recorded</td></tr>`;
+          } else {
+            stageKeys.forEach(stage => {
+              const info = stagesData[stage];
+              const tr = document.createElement("tr");
+              tr.innerHTML = `
+                <td style="text-align: left; font-weight: bold;">${stage}</td>
+                <td style="text-align: right;">${info.p50.toFixed(0)}ms</td>
+                <td style="text-align: right;">${info.p95.toFixed(0)}ms</td>
+                <td style="text-align: right; color: var(--text-muted);">${info.count}</td>
+              `;
+              stageTbody.appendChild(tr);
+            });
+          }
+        }
         
         const turnOk = turnP50 < 450 && turnP95 < 850;
         const llmOk = llmP50 < 250 && llmP95 < 400;

@@ -134,5 +134,10 @@ class VoiceConfig:
     gpu_overload_threshold: float = field(default_factory=lambda: env_float("DANA_GPU_OVERLOAD_THRESHOLD", 0.85))
     premium_campaigns: str = field(default_factory=lambda: env_str("DANA_PREMIUM_CAMPAIGNS", ""))
 
+    # ---- Interruption Settings ----
+    enable_fast_interruption: bool = field(default_factory=lambda: env_bool("DANA_ENABLE_FAST_INTERRUPTION", False))
+    interruption_profile: str = field(default_factory=lambda: env_str("DANA_INTERRUPTION_PROFILE", "CONSERVATIVE_DEFAULT"))
+    record_interruption_telemetry: bool = field(default_factory=lambda: env_bool("DANA_RECORD_INTERRUPTION_TELEMETRY", True))
+
     # ---- Logging ----
     log_level: str = field(default_factory=lambda: env_str("LOG_LEVEL", "INFO"))

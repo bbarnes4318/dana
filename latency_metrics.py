@@ -10,10 +10,21 @@ class LatencyRecorder:
         self.call_id = call_id
         self.events: Dict[str, float] = {}
         self.streaming_mode_enabled = False
+        self.total_barge_ins = 0
+        self.false_interruption_count = 0
+        self.event_history = []
 
     def mark(self, event_name: str):
         """Record the current high-resolution timestamp for an event."""
-        self.events[event_name] = time.perf_counter()
+        t = time.perf_counter()
+        self.events[event_name] = t
+        self.event_history.append((event_name, t))
+
+        if event_name == "barge_in_detected":
+            self.total_barge_ins += 1
+        elif event_name == "false_interruption_detected":
+            self.false_interruption_count += 1
+
         logger.debug(f"Call {self.call_id} marked {event_name}")
         if event_name == "first_audio_published":
             turn_lat = self.duration("transcript_final", "first_audio_published")
@@ -23,6 +34,12 @@ class LatencyRecorder:
                     WorkerCapacity.record_turn_latency(turn_lat)
                 except ImportError:
                     pass
+
+    @property
+    def false_interruption_rate(self) -> float:
+        if self.total_barge_ins > 0:
+            return round(self.false_interruption_count / self.total_barge_ins, 4)
+        return 0.0
 
     def duration(self, start_event: str, end_event: str) -> Optional[float]:
         """Calculate the duration in milliseconds between two marked events."""
@@ -52,6 +69,13 @@ class LatencyRecorder:
         add_dur("turn_response_latency", "transcript_final", "first_audio_published")
         add_dur("barge_in_stop_audio_latency", "barge_in_detected", "barge_in_stopped_audio")
         
+        # Interruption Telemetry metrics
+        add_dur("total_barge_in_stop_ms", "barge_in_detected", "agent_audio_stopped")
+        add_dur("barge_in_detected_to_interrupt_call_ms", "barge_in_detected", "session_interrupt_called")
+        add_dur("interrupt_call_to_audio_stopped_ms", "session_interrupt_called", "agent_audio_stopped")
+        add_dur("tts_cancel_duration_ms", "tts_cancel_requested", "tts_cancel_completed")
+        add_dur("audio_flush_duration_ms", "audio_output_flush_requested", "audio_output_flush_completed")
+        
         # Add new streaming specific metrics
         add_dur("first_safe_clause_ms", "llm_request_start", "first_safe_clause_detected")
         add_dur("first_streamed_tts_text_ms", "llm_request_start", "first_streamed_tts_text")
@@ -59,9 +83,36 @@ class LatencyRecorder:
         return {
             "call_id": self.call_id,
             "streaming_mode_enabled": self.streaming_mode_enabled,
+            "total_barge_ins": self.total_barge_ins,
+            "false_interruption_count": self.false_interruption_count,
+            "false_interruption_rate": self.false_interruption_rate,
             "durations": durations,
             "events": {k: round(v, 4) for k, v in self.events.items()}
         }
+
+    async def save_metrics(self, repository, stage: str = "opening") -> None:
+        """Persist all recorded durations and rates to database."""
+        summary = self.to_dict()
+        durations = summary.get("durations", {})
+        
+        metrics_to_save = dict(durations)
+        metrics_to_save["false_interruption_count"] = float(self.false_interruption_count)
+        metrics_to_save["false_interruption_rate"] = self.false_interruption_rate
+
+        for name, val in metrics_to_save.items():
+            try:
+                await repository.save_latency_metric(
+                    call_id=self.call_id,
+                    metric_name=name,
+                    metric_value_ms=val
+                )
+                await repository.save_latency_metric(
+                    call_id=self.call_id,
+                    metric_name=f"{name}_stage_{stage}",
+                    metric_value_ms=val
+                )
+            except Exception as e:
+                logger.error(f"Failed to save latency metric {name}: {e}")
 
     def log_summary(self):
         """Log call summary as one compact JSON line and output any warnings."""

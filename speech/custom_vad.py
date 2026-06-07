@@ -25,7 +25,14 @@ async def execute_emergency_flush(session, agent) -> None:
     """
     logger.info("Executing emergency track flush and aborting active generation tasks...")
     
+    recorder = getattr(agent, "_latency_recorder", None)
+    config = getattr(agent, "_config", None)
+    record_telemetry = getattr(config, "record_interruption_telemetry", True) if config else True
+
     # 1. Clear outbound WebRTC playback buffer
+    if recorder and record_telemetry:
+        recorder.mark("audio_output_flush_requested")
+
     audio_output = getattr(session, "output", None) and getattr(session.output, "audio", None)
     if audio_output:
         try:
@@ -51,7 +58,13 @@ async def execute_emergency_flush(session, agent) -> None:
         except Exception as e:
             logger.error(f"Error clearing audio_output._audio_source queue: {e}")
 
+    if recorder and record_telemetry:
+        recorder.mark("audio_output_flush_completed")
+
     # 2. Abort TTS synthesis
+    if recorder and record_telemetry:
+        recorder.mark("tts_cancel_requested")
+
     if getattr(tts_service, "active_tts_stream", None):
         try:
             await tts_service.active_tts_stream.interrupt()
@@ -59,7 +72,13 @@ async def execute_emergency_flush(session, agent) -> None:
         except Exception as e:
             logger.error(f"Error interrupting active_tts_stream: {e}")
 
+    if recorder and record_telemetry:
+        recorder.mark("tts_cancel_completed")
+
     # 3. Call session.interrupt() to abort LLM and LiveKit speech handles
+    if recorder and record_telemetry:
+        recorder.mark("session_interrupt_called")
+
     try:
         if asyncio.iscoroutinefunction(session.interrupt):
             await session.interrupt()
@@ -68,6 +87,9 @@ async def execute_emergency_flush(session, agent) -> None:
         logger.info("Called session.interrupt()")
     except Exception as e:
         logger.error(f"Error calling session.interrupt(): {e}")
+
+    if recorder and record_telemetry:
+        recorder.mark("session_interrupt_completed")
 
     # 4. Truncate conversation memory log to the exact word index spoken
     start_time = getattr(agent, "agent_speech_started_time", None)
@@ -185,6 +207,23 @@ class ElderlySileroVAD(silero.VAD):
         )
         return cls(session=session, opts=opts)
 
+    def update_profile(self, profile: Any) -> None:
+        """Update VAD options on all active streams using an InterruptionProfile."""
+        logger.info(f"Updating VAD streams to profile: {profile.name}")
+        if not hasattr(self, "_streams"):
+            self._streams = set()
+        for stream in list(self._streams):
+            try:
+                stream.update_options(
+                    min_speech_duration=profile.min_speech_duration,
+                    min_silence_duration=profile.min_silence_duration,
+                    activation_threshold=profile.activation_threshold,
+                    deactivation_threshold=profile.deactivation_threshold
+                )
+                stream._interruption_speech_threshold = profile.interruption_speech_threshold
+            except Exception as e:
+                logger.error(f"Failed to update VAD stream options: {e}")
+
     def bind(self, session, agent) -> ElderlySileroVAD:
         """
         Return a copy or wrapper of this VAD bound to a specific session and agent context.
@@ -231,6 +270,7 @@ class ElderlySileroVADStream(silero.VADStream):
         super().__init__(vad, opts, model)
         self._session = session
         self._agent = agent
+        self._interruption_speech_threshold = 0.12
         
         # Pre-allocate frames pool (no allocations on hot path)
         self._pool_size = 32
@@ -556,7 +596,8 @@ class ElderlySileroVADStream(silero.VADStream):
                         agent_speaking = agent_state == "speaking" or getattr(agent_state, "value", None) == "speaking"
                         if agent_speaking:
                             speech_duration = pub_speech_duration if pub_speaking else speech_threshold_duration
-                            if speech_duration >= 0.12:  # 120ms threshold
+                            threshold = getattr(self, "_interruption_speech_threshold", 0.12)
+                            if speech_duration >= threshold:
                                 agent = self._agent
                                 if agent and not getattr(agent, "interrupted_current_turn", False):
                                     agent.interrupted_current_turn = True

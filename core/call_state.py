@@ -52,6 +52,7 @@ class CallState:
     objection_count: int = 0
     started_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     last_transition_at: Optional[datetime] = None
+    _transition_callbacks: list = field(default_factory=list, repr=False, compare=False)
 
     # ------------------------------------------------------------------
     # helpers
@@ -63,6 +64,11 @@ class CallState:
         self.current_stage = stage
         self.stage_history.append(stage)
         self.last_transition_at = datetime.now(timezone.utc)
+        for cb in getattr(self, "_transition_callbacks", []):
+            try:
+                cb(stage)
+            except Exception:
+                pass
 
     def increment_turn(self) -> None:
         self.turn_count += 1

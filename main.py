@@ -923,6 +923,10 @@ async def entrypoint(ctx: JobContext):
         old_state_str = str(ev.old_state).lower()
         if "speaking" in state_str:
             logger.info("User speaking started")
+            # Mark user_speech_resumed if user speaks again after interruption before agent starts speaking
+            if getattr(agent, "interrupted_current_turn", False) and latency_recorder.events.get("user_speech_end"):
+                latency_recorder.mark("user_speech_resumed")
+
             latency_recorder.mark("user_speech_start")
             
             # Check for barge-in interruption
@@ -953,6 +957,12 @@ async def entrypoint(ctx: JobContext):
                 dur = latency_recorder.duration("user_speech_start", "user_speech_end")
                 if dur is not None:
                     agent.stt_seconds += (dur / 1000.0)
+                    # Detect false interruption
+                    if getattr(agent, "interrupted_current_turn", False):
+                        interrupted_dur = time.perf_counter() - getattr(agent, "interrupted_at", 0)
+                        if interrupted_dur < 0.8:
+                            latency_recorder.mark("false_interruption_detected")
+                            logger.info("False interruption detected (duration since interrupt < 800ms)")
                 
     @session.on("agent_state_changed")
     def on_agent_state_changed(ev):
@@ -964,6 +974,7 @@ async def entrypoint(ctx: JobContext):
             agent.agent_speech_started_time = time.perf_counter()
         elif "speaking" in old_state_str:
             latency_recorder.mark("agent_speech_stopped")
+            latency_recorder.mark("agent_audio_stopped")
             if getattr(agent, "interrupted_current_turn", False):
                 # Calculate portion spoken before interruption
                 start_time = getattr(agent, "agent_speech_started_time", None)
@@ -973,6 +984,12 @@ async def entrypoint(ctx: JobContext):
                     # 15 characters per second is a good standard speech speed
                     chars_spoken = min(len(getattr(agent, "current_turn_response", "")), int(dur * 15.0))
                     agent.tts_characters += max(0, chars_spoken)
+                
+                # Save turn interruption metrics to DB
+                stage = "opening"
+                if agent.adapter and agent.adapter.state_machine:
+                    stage = agent.adapter.state_machine.call_state.current_stage.value
+                asyncio.create_task(latency_recorder.save_metrics(shared.repository, stage))
             else:
                 # Fully spoken without interruption
                 agent.tts_characters += len(getattr(agent, "current_turn_response", ""))
@@ -1092,6 +1109,32 @@ async def entrypoint(ctx: JobContext):
         pii_redactor=shared.pii_redactor,
         repository=shared.repository,
     )
+    
+    # Configure interruption profile callback on stage transition
+    if hasattr(agent.adapter, "state_machine") and agent.adapter.state_machine:
+        call_state = agent.adapter.state_machine.call_state
+        
+        def apply_interruption_profile(stage):
+            from speech.interruption_profiles import get_profile_for_stage
+            profile = get_profile_for_stage(stage, shared.config)
+            
+            # Update telemetry event if enabled
+            if shared.config.record_interruption_telemetry:
+                import time
+                latency_recorder.events[f"profile_applied_{stage.value}"] = time.perf_counter()
+                
+            # Update VAD streams
+            if hasattr(shared.vad, "update_profile"):
+                shared.vad.update_profile(profile)
+                
+            # Update context registry
+            update_call_stage(call_id, stage.value)
+            
+        call_state._transition_callbacks = getattr(call_state, "_transition_callbacks", [])
+        call_state._transition_callbacks.append(apply_interruption_profile)
+        
+        # Apply initial profile for current stage
+        apply_interruption_profile(call_state.current_stage)
     
     # Start AgentSession with RoomOptions
     await session.start(
@@ -1303,6 +1346,13 @@ async def entrypoint(ctx: JobContext):
             # Retrieve existing call record to preserve fields (like dry_run)
             existing_call = await shared.repository.get_call_record(call_id)
             is_dry_run = existing_call.get("dry_run", False) if existing_call else False
+
+            # Save final latency metrics, including counters and rates
+            try:
+                final_stage = agent.adapter.state_machine.call_state.current_stage.value if agent.adapter else "end"
+                await latency_recorder.save_metrics(shared.repository, final_stage)
+            except Exception as e:
+                logger.error(f"Failed to save final latency metrics: {e}")
 
             await shared.repository.save_call(
                 call_id=call_id,
