@@ -17,7 +17,7 @@ import uuid
 import logging
 import asyncio
 from livekit import rtc
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Any, Optional, Dict, List, Tuple
 from pydantic import BaseModel, Field
 
@@ -966,7 +966,6 @@ async def run_room_session(ctx: Any, config: LiveKitAgentWorkerConfig) -> None:
         # Update lead queue status in database based on actual outcome
         try:
             if lead_id and shared.repository:
-                from datetime import datetime, timezone, timedelta
                 from dialer.retry_policy import RetryPolicy
                 
                 if outcome == "voicemail":
