@@ -40,6 +40,16 @@ DATABASE_ADMIN_URL=postgresql://dana_user:dana_secure_pass@localhost:5432/dana \
   python -m storage.migrations
 ```
 
+---
+
+## Testing & CI/CD
+
+To prevent performance degradation or environment pollution on local operator and developer workstations, **running tests locally is strictly discouraged**. 
+
+A complete automated testing pipeline is configured in `.github/workflows/ci.yml`. All unit, integration, and platform tests are run in isolated containerized GitHub runners on every pull request and push to the `main` branch.
+
+---
+
 For detailed setup, monitoring, backups, and restores, read the following files in the `docs/` folder:
 *   [docs/PRODUCTION_INFRA.md](file:///c:/Users/jimbo/OneDrive/Desktop/ultimate-voice/docs/PRODUCTION_INFRA.md)
 *   [docs/DATABASE_ARCHITECTURE.md](file:///c:/Users/jimbo/OneDrive/Desktop/ultimate-voice/docs/DATABASE_ARCHITECTURE.md)
@@ -50,4 +60,3 @@ For detailed setup, monitoring, backups, and restores, read the following files 
 *   [docs/prompt_canary_operating_procedure.md](file:///C:/Users/jimbo/.gemini/antigravity/worktrees/ultimate-voice/implement-canary-rollout-system/docs/prompt_canary_operating_procedure.md)
 *   [docs/training_operations_console.md](file:///C:/Users/jimbo/.gemini/antigravity/worktrees/ultimate-voice/dana-training-ops-console/docs/training_operations_console.md)
 *   [docs/training_web_console_operating_procedure.md](file:///C:/Users/jimbo/.gemini/antigravity/worktrees/ultimate-voice/dana-training-ops-console/docs/training_web_console_operating_procedure.md)
-

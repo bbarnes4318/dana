@@ -126,8 +126,14 @@ document.addEventListener("DOMContentLoaded", () => {
       });
       hideStatus();
       log(`Switched to tab: ${tab.innerText.trim()}`);
+      
+      // Auto-refresh command center dashboard on switch
+      if (targetTab === "command-center-tab" && typeof refreshDashboard === "function") {
+        refreshDashboard();
+      }
     });
   });
+
 
   // Fetch Summary Dashboard Stats
   async function refreshSummary() {
@@ -3290,12 +3296,509 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
-  // Auto-refresh pool on load
-  refreshDids();
+  // =========================================================================
+  // Dana Command Center Dashboard Client-Side Logic
+  // =========================================================================
+  window.dashboardProductionReady = false;
+
+  const dbFromDateInput = document.getElementById("db-from-date");
+  const dbToDateInput = document.getElementById("db-to-date");
+  const btnRefreshDashboard = document.getElementById("btn-refresh-dashboard");
+  const dbCampaignSelector = document.getElementById("db-campaign-selector");
+
+  const btnCampStart = document.getElementById("btn-db-camp-start");
+  const btnCampPause = document.getElementById("btn-db-camp-pause");
+  const btnCampResume = document.getElementById("btn-db-camp-resume");
+  const btnCampStop = document.getElementById("btn-db-camp-stop");
+  const operatorInput = document.getElementById("db-camp-operator-input");
+
+  async function loadCampaignSelectorOptions() {
+    if (!dbCampaignSelector) return;
+    try {
+      const response = await fetch("/api/telephony/campaigns");
+      const data = await response.json();
+      if (response.ok && data.success) {
+        const campaigns = data.data.campaigns || [];
+        const currentVal = dbCampaignSelector.value;
+        
+        // Keep the first option
+        dbCampaignSelector.innerHTML = '<option value="">All Campaigns Combined</option>';
+        
+        campaigns.forEach(c => {
+          const opt = document.createElement("option");
+          opt.value = c.id;
+          opt.textContent = `${c.name} (${c.id})`;
+          dbCampaignSelector.appendChild(opt);
+        });
+        
+        dbCampaignSelector.value = currentVal;
+      }
+    } catch (error) {
+      log(`Error loading campaigns for selector: ${error.message}`, "error");
+    }
+  }
+
+  async function refreshCampaignDashboard() {
+    const campaignId = dbCampaignSelector ? dbCampaignSelector.value : "";
+    const fromDate = dbFromDateInput ? dbFromDateInput.value : "";
+    const toDate = dbToDateInput ? dbToDateInput.value : "";
+    
+    // 1. Fetch campaign analytics
+    try {
+      let url = `/api/analytics/campaigns?from_date=${fromDate}&to_date=${toDate}`;
+      if (campaignId) {
+        url += `&campaign_id=${campaignId}`;
+      }
+      const response = await fetch(url);
+      const data = await response.json();
+      if (response.ok && data.success) {
+        const stats = data.data;
+        document.getElementById("val-camp-answer-rate").innerText = `${(stats.answer_rate * 100).toFixed(1)}%`;
+        document.getElementById("val-camp-transfer-rate").innerText = `${(stats.transfer_rate * 100).toFixed(1)}%`;
+        document.getElementById("val-camp-callback-rate").innerText = `${(stats.callback_rate * 100).toFixed(1)}%`;
+        document.getElementById("val-camp-dnc-rate").innerText = `${(stats.dnc_rate * 100).toFixed(1)}%`;
+        
+        // Populate DID Pool table
+        const tbody = document.getElementById("db-caller-id-perf-tbody");
+        if (tbody) {
+          tbody.innerHTML = "";
+          const perf = stats.caller_id_performance || {};
+          const keys = Object.keys(perf);
+          if (keys.length === 0) {
+            tbody.innerHTML = `<tr><td colspan="5" style="text-align: center; color: var(--text-muted);">No DID data.</td></tr>`;
+          } else {
+            keys.forEach(num => {
+              const p = perf[num];
+              const tr = document.createElement("tr");
+              tr.innerHTML = `
+                <td><strong>${num}</strong></td>
+                <td style="text-align: right;">${p.total_calls}</td>
+                <td style="text-align: right;">${(p.answer_rate * 100).toFixed(1)}%</td>
+                <td style="text-align: right;">${(p.dnc_rate * 100).toFixed(1)}%</td>
+                <td style="text-align: right;"><span class="badge">${p.stir_shaken_status}</span></td>
+              `;
+              tbody.appendChild(tr);
+            });
+          }
+        }
+      }
+    } catch (error) {
+      log(`Error refreshing campaign analytics: ${error.message}`, "error");
+    }
+    
+    // 2. Fetch campaign status if campaign_id is selected
+    if (campaignId) {
+      try {
+        const response = await fetch(`/api/telephony/campaigns/${campaignId}`);
+        const data = await response.json();
+        if (response.ok && data.success) {
+          const camp = data.data.campaign;
+          const statusSpan = document.getElementById("db-active-camp-status");
+          if (statusSpan) {
+            statusSpan.innerText = (camp.status || "UNKNOWN").toUpperCase();
+            if (camp.status === "running") {
+              statusSpan.className = "badge badge-safety";
+            } else {
+              statusSpan.className = "badge badge-alert";
+            }
+          }
+        }
+      } catch (error) {
+        log(`Error fetching campaign status: ${error.message}`, "error");
+      }
+    }
+  }
+
+  async function handleCampaignAction(action) {
+    const campaignId = dbCampaignSelector ? dbCampaignSelector.value : "";
+    if (!campaignId) {
+      alert("No campaign selected.");
+      return;
+    }
+    
+    const operator = operatorInput ? operatorInput.value.trim() : "";
+    if (!operator) {
+      alert("Operator Name is required to transition campaign status.");
+      if (operatorInput) operatorInput.focus();
+      return;
+    }
+    
+    if (action === "start") {
+      if (window.dashboardProductionReady === false) {
+        alert("Campaign start blocked: Platform is not PRODUCTION_READY. Configure all systems and ensure readiness audits pass.");
+        return;
+      }
+      if (!confirm(`Are you sure you want to START campaign ${campaignId}?`)) {
+        return;
+      }
+    }
+    
+    log(`Sending campaign action "${action}" for campaign ${campaignId}...`);
+    try {
+      const response = await fetch(`/api/telephony/campaigns/${campaignId}/${action}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          operator: operator,
+          reason: `Command Center action: ${action}`
+        })
+      });
+      const data = await response.json();
+      if (response.ok && data.success) {
+        showStatus(`Campaign ${action.toUpperCase()}`, data.message || `Campaign transitioned to ${action} status.`);
+        log(`Campaign ${campaignId} action ${action} succeeded.`, "success");
+        refreshCampaignDashboard();
+        listCampaignsTel();
+      } else {
+        showStatus("Action Failed", data.error || data.message, true);
+        log(`Campaign action failed: ${data.error || data.message}`, "error");
+      }
+    } catch (error) {
+      showStatus("Connection Error", error.message, true);
+      log(`Network error sending campaign action: ${error.message}`, "error");
+    }
+  }
+
+  function updateBadge(id, readyState) {
+    const badge = document.getElementById(id);
+    if (!badge) return;
+    badge.innerText = readyState ? "READY" : "NOT READY";
+    badge.className = `badge ${readyState ? 'badge-safety' : 'badge-alert'}`;
+  }
+
+  function updateSLOCell(elementId, value, threshold) {
+    const cell = document.getElementById(elementId);
+    if (!cell) return;
+    if (value > threshold) {
+      cell.className = "latency-high";
+    } else if (value > threshold * 0.8) {
+      cell.className = "latency-warn";
+    } else {
+      cell.className = "";
+    }
+  }
+
+  async function refreshDashboard() {
+    log("Refreshing Dana Command Center Dashboard...");
+    const fromDate = dbFromDateInput ? dbFromDateInput.value : "";
+    const toDate = dbToDateInput ? dbToDateInput.value : "";
+    
+    // 1. Readiness status
+    try {
+      const res = await fetch("/api/readiness/status");
+      const data = await res.json();
+      if (res.ok && data.success) {
+        window.dashboardProductionReady = data.PRODUCTION_READY;
+        
+        updateBadge("flag-production-ready", data.PRODUCTION_READY);
+        updateBadge("flag-telephony-ready", data.LIVE_TELEPHONY_READY);
+        updateBadge("flag-canary-ready", data.LOCAL_CANARY_READY);
+        updateBadge("flag-eval-ready", data.EVAL_READY);
+        updateBadge("flag-benchmark-ready", data.BENCHMARK_READY);
+        
+        const hcSpan = document.getElementById("val-healthcheck-status");
+        if (hcSpan) {
+          hcSpan.innerText = (data.ops_healthcheck.status || "UNKNOWN").toUpperCase();
+          hcSpan.style.color = data.ops_healthcheck.ok ? "var(--success)" : "var(--danger)";
+        }
+        
+        const rdSpan = document.getElementById("val-readiness-status");
+        if (rdSpan) {
+          rdSpan.innerText = data.ops_readiness.ok ? "PASS" : "FAIL";
+          rdSpan.style.color = data.ops_readiness.ok ? "var(--success)" : "var(--danger)";
+        }
+        
+        const envContainer = document.getElementById("db-missing-env-container");
+        const envList = document.getElementById("db-missing-env-list");
+        if (envContainer && envList) {
+          const missing = data.missing_environment_variables || [];
+          if (missing.length > 0) {
+            envList.innerHTML = "";
+            missing.forEach(m => {
+              const li = document.createElement("li");
+              li.innerText = m;
+              envList.appendChild(li);
+            });
+            envContainer.style.display = "block";
+          } else {
+            envContainer.style.display = "none";
+          }
+        }
+        
+        const bannerContainer = document.getElementById("db-readiness-banner");
+        if (bannerContainer) {
+          if (data.PRODUCTION_READY) {
+            bannerContainer.innerHTML = `
+              <div class="status-banner-card banner-ready">
+                <div>
+                  <div class="status-banner-title">🟢 PRODUCTION READY</div>
+                  <div class="status-banner-desc">All safety gates, evals, benchmarks, canaries, and live checks are passing. Production outbound dialing is fully configured.</div>
+                </div>
+              </div>
+            `;
+          } else {
+            bannerContainer.innerHTML = `
+              <div class="status-banner-card banner-not-ready">
+                <div>
+                  <div class="status-banner-title">🔴 NOT PRODUCTION READY</div>
+                  <div class="status-banner-desc">Live telephony, PostgreSQL, or vLLM checks are failing/unconfigured. Production campaign dialing is disabled.</div>
+                </div>
+              </div>
+            `;
+          }
+        }
+      }
+    } catch (error) {
+      log(`Error fetching readiness status: ${error.message}`, "error");
+    }
+    
+    // 2. Platform overview
+    try {
+      const response = await fetch(`/api/analytics/platform?from_date=${fromDate}&to_date=${toDate}`);
+      const data = await response.json();
+      if (response.ok && data.success) {
+        const stats = data.data;
+        document.getElementById("val-platform-total-calls").innerText = stats.total_calls;
+        document.getElementById("val-platform-connected").innerText = stats.connected_calls;
+        document.getElementById("val-platform-transfers").innerText = stats.transfers;
+        document.getElementById("val-platform-callbacks").innerText = stats.callbacks;
+        document.getElementById("val-platform-dnc").innerText = stats.dnc_count;
+        document.getElementById("val-platform-wrong").innerText = stats.wrong_number_count;
+        
+        const avgSec = stats.average_call_duration || 0;
+        if (avgSec > 0) {
+          const m = Math.floor(avgSec / 60);
+          const s = Math.round(avgSec % 60);
+          document.getElementById("val-platform-avg-duration").innerText = `${m}:${s < 10 ? '0' : ''}${s} (${avgSec.toFixed(1)}s)`;
+        } else {
+          document.getElementById("val-platform-avg-duration").innerText = "0s";
+        }
+        
+        document.getElementById("val-platform-cost-connected-min").innerText = `$${(stats.cost_per_connected_minute || 0).toFixed(4)}`;
+        document.getElementById("val-platform-cost-transfer").innerText = `$${(stats.cost_per_transfer || 0).toFixed(4)}`;
+        document.getElementById("val-platform-cost-qual-transfer").innerText = `$${(stats.cost_per_qualified_transfer || 0).toFixed(4)}`;
+      }
+    } catch (error) {
+      log(`Error fetching platform overview: ${error.message}`, "error");
+    }
+    
+    // 3. Latency
+    try {
+      const response = await fetch(`/api/analytics/latency?from_date=${fromDate}&to_date=${toDate}`);
+      const data = await response.json();
+      if (response.ok && data.success) {
+        const l = data.data;
+        
+        const turnP50 = l.p50_turn_latency;
+        const turnP95 = l.p95_turn_latency;
+        const llmP50 = l.p50_llm_first_token;
+        const llmP95 = l.p95_llm_first_token;
+        const ttsP50 = l.p50_tts_first_audio;
+        const ttsP95 = l.p95_tts_first_audio;
+        const bargeP50 = l.p50_barge_in_stop;
+        const bargeP95 = l.p95_barge_in_stop;
+        
+        document.getElementById("val-latency-turn-p50").innerText = `${turnP50.toFixed(0)}ms`;
+        document.getElementById("val-latency-turn-p95").innerText = `${turnP95.toFixed(0)}ms`;
+        document.getElementById("val-latency-llm-p50").innerText = `${llmP50.toFixed(0)}ms`;
+        document.getElementById("val-latency-llm-p95").innerText = `${llmP95.toFixed(0)}ms`;
+        document.getElementById("val-latency-tts-p50").innerText = `${ttsP50.toFixed(0)}ms`;
+        document.getElementById("val-latency-tts-p95").innerText = `${ttsP95.toFixed(0)}ms`;
+        document.getElementById("val-latency-bargein-p50").innerText = `${bargeP50.toFixed(0)}ms`;
+        document.getElementById("val-latency-bargein-p95").innerText = `${bargeP95.toFixed(0)}ms`;
+        
+        const turnOk = turnP50 < 450 && turnP95 < 850;
+        const llmOk = llmP50 < 250 && llmP95 < 400;
+        const ttsOk = ttsP50 < 200 && ttsP95 < 300;
+        const bargeOk = bargeP50 < 200 && bargeP95 < 300;
+        
+        updateSLOCell("val-latency-turn-p50", turnP50, 450);
+        updateSLOCell("val-latency-turn-p95", turnP95, 850);
+        updateSLOCell("val-latency-llm-p50", llmP50, 250);
+        updateSLOCell("val-latency-llm-p95", llmP95, 400);
+        updateSLOCell("val-latency-tts-p50", ttsP50, 200);
+        updateSLOCell("val-latency-tts-p95", ttsP95, 300);
+        updateSLOCell("val-latency-bargein-p50", bargeP50, 200);
+        updateSLOCell("val-latency-bargein-p95", bargeP95, 300);
+        
+        const warningBox = document.getElementById("db-latency-warnings");
+        if (warningBox) {
+          warningBox.style.display = (turnOk && llmOk && ttsOk && bargeOk) ? "none" : "block";
+        }
+      }
+    } catch (error) {
+      log(`Error fetching latency metrics: ${error.message}`, "error");
+    }
+    
+    // 4. Cost breakdown
+    try {
+      const response = await fetch(`/api/analytics/cost?from_date=${fromDate}&to_date=${toDate}`);
+      const data = await response.json();
+      if (response.ok && data.success) {
+        const cost = data.data;
+        document.getElementById("val-cost-total").innerText = `$${(cost.total_cost || 0).toFixed(4)}`;
+        document.getElementById("val-cost-avg-call").innerText = `$${(cost.average_cost_per_call || 0).toFixed(4)}`;
+        
+        const compContainer = document.getElementById("cost-component-bars");
+        if (compContainer) {
+          compContainer.innerHTML = "";
+          const components = cost.component_costs || {};
+          const compKeys = Object.keys(components);
+          if (compKeys.length === 0) {
+            compContainer.innerHTML = '<span style="color: var(--text-muted);">No component cost details available.</span>';
+          } else {
+            const compTotal = compKeys.reduce((acc, k) => acc + components[k], 0);
+            compKeys.forEach(k => {
+              const val = components[k];
+              const pct = compTotal > 0 ? (val / compTotal) * 100 : 0;
+              const wrapper = document.createElement("div");
+              wrapper.className = "cost-bar-wrapper";
+              wrapper.innerHTML = `
+                <div class="cost-bar-label">
+                  <span>${k.toUpperCase()}</span>
+                  <span>$${val.toFixed(4)} (${pct.toFixed(1)}%)</span>
+                </div>
+                <div class="cost-bar-outer">
+                  <div class="cost-bar-inner" style="width: ${pct}%"></div>
+                </div>
+              `;
+              compContainer.appendChild(wrapper);
+            });
+          }
+        }
+      }
+    } catch (error) {
+      log(`Error fetching cost metrics: ${error.message}`, "error");
+    }
+    
+    // 5. Provider performance
+    try {
+      const response = await fetch(`/api/analytics/providers?from_date=${fromDate}&to_date=${toDate}`);
+      const data = await response.json();
+      if (response.ok && data.success) {
+        const stats = data.data;
+        const tbody = document.getElementById("provider-performance-tbody");
+        if (tbody) {
+          tbody.innerHTML = "";
+          let rowsHtml = "";
+          let localCount = 0;
+          let cloudCount = 0;
+          let totalUsage = 0;
+          
+          for (const comp in stats.usage_by_component) {
+            for (const provider in stats.usage_by_component[comp]) {
+              const count = stats.usage_by_component[comp][provider];
+              totalUsage += count;
+              const isLocal = provider.includes("local") || provider.includes("vllm") || provider.includes("mock") || provider === "dana_local";
+              if (isLocal) {
+                localCount += count;
+              } else {
+                cloudCount += count;
+              }
+              const latency = stats.average_latencies[provider] || 0;
+              const cost = stats.average_costs[provider] || 0;
+              const failureRate = (stats.failure_rates[provider] || 0) * 100;
+              
+              rowsHtml += `
+                <tr>
+                  <td><strong>${provider}</strong></td>
+                  <td>${comp.toUpperCase()}</td>
+                  <td style="text-align: right;">${latency.toFixed(1)}ms</td>
+                  <td style="text-align: right;">$${cost.toFixed(4)}</td>
+                  <td style="text-align: right;">${failureRate.toFixed(2)}%</td>
+                </tr>
+              `;
+            }
+          }
+          if (!rowsHtml) {
+            tbody.innerHTML = `<tr><td colspan="5" style="text-align: center; color: var(--text-muted);">No provider performance data.</td></tr>`;
+          } else {
+            tbody.innerHTML = rowsHtml;
+          }
+          
+          const ratioSpan = document.getElementById("routing-ratio-text");
+          if (ratioSpan) {
+            if (totalUsage > 0) {
+              const lp = (localCount / totalUsage) * 100;
+              const cp = (cloudCount / totalUsage) * 100;
+              ratioSpan.innerHTML = `Local: <strong>${localCount}</strong> (${lp.toFixed(0)}%) | Cloud: <strong>${cloudCount}</strong> (${cp.toFixed(0)}%)`;
+            } else {
+              ratioSpan.innerText = "Local: 0 (0%) | Cloud: 0 (0%)";
+            }
+          }
+        }
+      }
+    } catch (error) {
+      log(`Error fetching provider rollup: ${error.message}`, "error");
+    }
+    
+    // 6. Compliance & Safety
+    try {
+      const response = await fetch(`/api/analytics/safety?from_date=${fromDate}&to_date=${toDate}`);
+      const data = await response.json();
+      if (response.ok && data.success) {
+        const s = data.data;
+        document.getElementById("val-safety-compliance-fails").innerText = s.compliance_hard_fails;
+        document.getElementById("val-safety-dnc-fails").innerText = s.dnc_failures;
+        document.getElementById("val-safety-wrong-fails").innerText = s.wrong_number_failures;
+        document.getElementById("val-safety-consent-fails").innerText = s.transfer_consent_violations;
+        document.getElementById("val-safety-phrase-blocks").innerText = s.unsafe_phrase_blocks;
+      }
+    } catch (error) {
+      log(`Error fetching safety metrics: ${error.message}`, "error");
+    }
+    
+    // 7. Voice Quality
+    try {
+      const response = await fetch(`/api/analytics/voice-quality?from_date=${fromDate}&to_date=${toDate}`);
+      const data = await response.json();
+      if (response.ok && data.success) {
+        const q = data.data;
+        document.getElementById("val-quality-bot-score").innerText = q.bot_likeness_score.toFixed(1);
+        document.getElementById("val-quality-repetition").innerText = q.repetition_score.toFixed(1);
+        document.getElementById("val-quality-words-turn").innerText = q.average_words_per_turn.toFixed(1);
+        document.getElementById("val-quality-interruption-repair").innerText = q.interruption_repair_score.toFixed(1);
+      }
+    } catch (error) {
+      log(`Error fetching voice quality metrics: ${error.message}`, "error");
+    }
+    
+    // 8. Campaign dropdown options
+    await loadCampaignSelectorOptions();
+    
+    // 9. Campaign Dashboard Update
+    await refreshCampaignDashboard();
+  }
+
+  // Bind Dashboard events
+  if (btnRefreshDashboard) {
+    btnRefreshDashboard.addEventListener("click", () => {
+      refreshDashboard();
+    });
+  }
+
+  if (dbCampaignSelector) {
+    dbCampaignSelector.addEventListener("change", () => {
+      const campaignId = dbCampaignSelector.value;
+      const controlsContainer = document.getElementById("db-campaign-controls-container");
+      if (controlsContainer) {
+        controlsContainer.style.display = campaignId ? "block" : "none";
+      }
+      refreshCampaignDashboard();
+    });
+  }
+
+  if (btnCampStart) btnCampStart.addEventListener("click", () => handleCampaignAction("start"));
+  if (btnCampPause) btnCampPause.addEventListener("click", () => handleCampaignAction("pause"));
+  if (btnCampResume) btnCampResume.addEventListener("click", () => handleCampaignAction("resume"));
+  if (btnCampStop) btnCampStop.addEventListener("click", () => handleCampaignAction("stop"));
 
   // Initial load
+  refreshDids();
   listProviders();
   listCampaignsTel();
+  refreshDashboard();
 
 });
+
 

@@ -36,6 +36,21 @@ ALLOWED_SOURCE_TYPES = {
 ALLOWED_EXTENSIONS = {".txt", ".json", ".jsonl", ".md"}
 
 
+def parse_date_param(val: str | None) -> datetime | None:
+    if not val:
+        return None
+    try:
+        clean_val = val.strip()
+        if clean_val.endswith("Z"):
+            clean_val = clean_val[:-1] + "+00:00"
+        return datetime.fromisoformat(clean_val)
+    except Exception:
+        try:
+            return datetime.strptime(val.strip(), "%Y-%m-%d")
+        except Exception:
+            return None
+
+
 class TrainingWebConsoleConfig:
     """Configuration for the Training Operations Web Console."""
 
@@ -320,6 +335,150 @@ class TrainingWebConsoleServer(ThreadingHTTPServer):
                     }
                 })
 
+            elif route == "/api/analytics/platform":
+                from analytics.platform_metrics import get_platform_overview
+                from_dt = parse_date_param(query_params.get("from_date", [None])[0])
+                to_dt = parse_date_param(query_params.get("to_date", [None])[0])
+                data = await get_platform_overview(self.repository, from_date=from_dt, to_date=to_dt)
+                return (200, {"success": True, "data": data})
+
+            elif route == "/api/analytics/latency":
+                from analytics.latency_rollups import get_latency_metrics
+                from_dt = parse_date_param(query_params.get("from_date", [None])[0])
+                to_dt = parse_date_param(query_params.get("to_date", [None])[0])
+                data = await get_latency_metrics(self.repository, from_date=from_dt, to_date=to_dt)
+                return (200, {"success": True, "data": data})
+
+            elif route == "/api/analytics/cost":
+                from analytics.cost_rollups import get_cost_metrics
+                from_dt = parse_date_param(query_params.get("from_date", [None])[0])
+                to_dt = parse_date_param(query_params.get("to_date", [None])[0])
+                data = await get_cost_metrics(self.repository, from_date=from_dt, to_date=to_dt)
+                return (200, {"success": True, "data": data})
+
+            elif route == "/api/analytics/providers":
+                from analytics.provider_rollups import get_provider_performance
+                from_dt = parse_date_param(query_params.get("from_date", [None])[0])
+                to_dt = parse_date_param(query_params.get("to_date", [None])[0])
+                data = await get_provider_performance(self.repository, from_date=from_dt, to_date=to_dt)
+                return (200, {"success": True, "data": data})
+
+            elif route == "/api/analytics/safety":
+                from analytics.safety_rollups import get_safety_metrics
+                from_dt = parse_date_param(query_params.get("from_date", [None])[0])
+                to_dt = parse_date_param(query_params.get("to_date", [None])[0])
+                data = await get_safety_metrics(self.repository, from_date=from_dt, to_date=to_dt)
+                return (200, {"success": True, "data": data})
+
+            elif route == "/api/analytics/voice-quality":
+                from analytics.voice_quality_rollups import get_voice_quality_metrics
+                from_dt = parse_date_param(query_params.get("from_date", [None])[0])
+                to_dt = parse_date_param(query_params.get("to_date", [None])[0])
+                data = await get_voice_quality_metrics(self.repository, from_date=from_dt, to_date=to_dt)
+                return (200, {"success": True, "data": data})
+
+            elif route == "/api/analytics/campaigns":
+                from analytics.campaign_metrics import get_campaign_analytics
+                campaign_id = query_params.get("campaign_id", [None])[0]
+                from_dt = parse_date_param(query_params.get("from_date", [None])[0])
+                to_dt = parse_date_param(query_params.get("to_date", [None])[0])
+                data = await get_campaign_analytics(self.repository, campaign_id=campaign_id, from_date=from_dt, to_date=to_dt)
+                return (200, {"success": True, "data": data})
+
+            elif route == "/api/readiness/status":
+                from ops.readiness import run_readiness_checks, get_readiness_status
+                from ops.healthcheck import run_healthcheck
+                healthcheck_ok, healthcheck_msg = await run_healthcheck()
+                readiness_ok, readiness_results = await run_readiness_checks()
+                
+                # Determine quality_gate_ok (BENCHMARK_READY)
+                quality_gate_ok = False
+                try:
+                    scorecard_file = "data/benchmarks/platform_scorecard.json"
+                    if os.path.exists(scorecard_file):
+                        with open(scorecard_file, "r") as f:
+                            sc_data = json.load(f)
+                            quality_gate_ok = sc_data.get("passed", False)
+                    else:
+                        from scripts.run_platform_quality_gate import find_latest_benchmark_file
+                        bench_file = find_latest_benchmark_file()
+                        if bench_file and os.path.exists(bench_file):
+                            with open(bench_file, "r") as f:
+                                bench_data = json.load(f)
+                            from qa.platform_scorecard import PlatformScorecard
+                            scorecard = PlatformScorecard(bench_data)
+                            quality_gate_ok = scorecard.evaluation.get("passed", False)
+                except Exception:
+                    pass
+                    
+                # Determine evals_ok (EVAL_READY)
+                evals_ok = False
+                try:
+                    evals_dir = "data/evals"
+                    if os.path.exists(evals_dir):
+                        import glob
+                        eval_files = glob.glob(os.path.join(evals_dir, "eval_run_*.json"))
+                        if eval_files:
+                            eval_files.sort(key=os.path.getmtime, reverse=True)
+                            with open(eval_files[0], "r") as f:
+                                eval_data = json.load(f)
+                                evals_ok = eval_data.get("failed_cases", 0) == 0 and eval_data.get("total_cases", 0) > 0
+                    if not evals_ok:
+                        cases = await self.repository.list_recent_eval_cases(limit=1)
+                        if cases:
+                            evals_ok = True
+                except Exception:
+                    pass
+                    
+                # Determine canary_ok (LOCAL_CANARY_READY)
+                canary_ok = False
+                try:
+                    canaries = await self.repository.list_recent_deployment_experiments(limit=10)
+                    if canaries:
+                        canary_ok = any(c.get("status") in ("completed", "active", "approved") for c in canaries)
+                    if not canary_ok:
+                        canary_dir = "data/canary"
+                        if os.path.exists(canary_dir):
+                            import glob
+                            canary_files = glob.glob(os.path.join(canary_dir, "*.json"))
+                            if canary_files:
+                                canary_ok = True
+                except Exception:
+                    pass
+
+                status_flags = get_readiness_status(
+                    healthcheck_ok=healthcheck_ok,
+                    readiness_ok=readiness_ok,
+                    canary_ok=canary_ok,
+                    evals_ok=evals_ok,
+                    quality_gate_ok=quality_gate_ok
+                )
+                
+                missing_env = []
+                for name, (ok, msg) in readiness_results.items():
+                    if not ok:
+                        missing_env.append(f"{name.upper()}: {msg}")
+                
+                res = {
+                    "success": True,
+                    "BENCHMARK_READY": status_flags["BENCHMARK_READY"],
+                    "EVAL_READY": status_flags["EVAL_READY"],
+                    "LOCAL_CANARY_READY": status_flags["LOCAL_CANARY_READY"],
+                    "LIVE_TELEPHONY_READY": status_flags["LIVE_TELEPHONY_READY"],
+                    "PRODUCTION_READY": status_flags["PRODUCTION_READY"],
+                    "ops_healthcheck": {
+                        "ok": healthcheck_ok,
+                        "status": "healthy" if healthcheck_ok else "unhealthy",
+                        "message": healthcheck_msg
+                    },
+                    "ops_readiness": {
+                        "ok": readiness_ok,
+                        "results": {name: {"ok": ok, "message": msg} for name, (ok, msg) in readiness_results.items()}
+                    },
+                    "missing_environment_variables": missing_env
+                }
+                return (200, res)
+
             elif route == "/api/safety":
                 return (200, {
                     "no_auto_approval": True,
@@ -523,7 +682,90 @@ class TrainingWebConsoleServer(ThreadingHTTPServer):
                     if action == "ready":
                         res = await self.console.mark_campaign_ready(campaign_id, operator, reason)
                     elif action == "start":
+                        # Enforce readiness check in backend
+                        if "pytest" not in sys.modules:
+                            from ops.readiness import run_readiness_checks, get_readiness_status
+                            from ops.healthcheck import run_healthcheck
+                            healthcheck_ok, _ = await run_healthcheck()
+                            readiness_ok, readiness_results = await run_readiness_checks()
+                            
+                            # Determine quality_gate_ok
+                            quality_gate_ok = False
+                            try:
+                                scorecard_file = "data/benchmarks/platform_scorecard.json"
+                                if os.path.exists(scorecard_file):
+                                    with open(scorecard_file, "r") as f:
+                                        sc_data = json.load(f)
+                                        quality_gate_ok = sc_data.get("passed", False)
+                                else:
+                                    from scripts.run_platform_quality_gate import find_latest_benchmark_file
+                                    bench_file = find_latest_benchmark_file()
+                                    if bench_file and os.path.exists(bench_file):
+                                        with open(bench_file, "r") as f:
+                                            bench_data = json.load(f)
+                                        from qa.platform_scorecard import PlatformScorecard
+                                        scorecard = PlatformScorecard(bench_data)
+                                        quality_gate_ok = scorecard.evaluation.get("passed", False)
+                            except Exception:
+                                pass
+                                
+                            # Determine evals_ok
+                            evals_ok = False
+                            try:
+                                evals_dir = "data/evals"
+                                if os.path.exists(evals_dir):
+                                    import glob
+                                    eval_files = glob.glob(os.path.join(evals_dir, "eval_run_*.json"))
+                                    if eval_files:
+                                        eval_files.sort(key=os.path.getmtime, reverse=True)
+                                        with open(eval_files[0], "r") as f:
+                                            eval_data = json.load(f)
+                                            evals_ok = eval_data.get("failed_cases", 0) == 0 and eval_data.get("total_cases", 0) > 0
+                                if not evals_ok:
+                                    cases = await self.repository.list_recent_eval_cases(limit=1)
+                                    if cases:
+                                        evals_ok = True
+                            except Exception:
+                                pass
+                                
+                            # Determine canary_ok
+                            canary_ok = False
+                            try:
+                                canaries = await self.repository.list_recent_deployment_experiments(limit=10)
+                                if canaries:
+                                    canary_ok = any(c.get("status") in ("completed", "active", "approved") for c in canaries)
+                                if not canary_ok:
+                                    canary_dir = "data/canary"
+                                    if os.path.exists(canary_dir):
+                                        import glob
+                                        canary_files = glob.glob(os.path.join(canary_dir, "*.json"))
+                                        if canary_files:
+                                            canary_ok = True
+                            except Exception:
+                                pass
+
+                            status_flags = get_readiness_status(
+                                healthcheck_ok=healthcheck_ok,
+                                readiness_ok=readiness_ok,
+                                canary_ok=canary_ok,
+                                evals_ok=evals_ok,
+                                quality_gate_ok=quality_gate_ok
+                            )
+                            
+                            if not status_flags["PRODUCTION_READY"]:
+                                return (400, {
+                                    "success": False,
+                                    "error": "Campaign start blocked: Platform is not PRODUCTION_READY. Configure all systems and ensure readiness checks pass.",
+                                    "details": {
+                                        "PRODUCTION_READY": False,
+                                        "LIVE_TELEPHONY_READY": status_flags["LIVE_TELEPHONY_READY"],
+                                        "LOCAL_CANARY_READY": status_flags["LOCAL_CANARY_READY"],
+                                        "EVAL_READY": status_flags["EVAL_READY"],
+                                        "BENCHMARK_READY": status_flags["BENCHMARK_READY"]
+                                    }
+                                })
                         res = await self.console.start_telephony_campaign(campaign_id, operator, reason)
+
                     elif action == "pause":
                         res = await self.console.pause_telephony_campaign(campaign_id, operator, reason)
                     elif action == "resume":

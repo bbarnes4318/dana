@@ -31,6 +31,7 @@ async def get_safety_metrics(
     compliance_hard_fails = 0
     dnc_failures = 0
     transfer_consent_violations = 0
+    wrong_number_failures = 0
     unsafe_phrase_blocks = 0
     
     for c in filtered_calls:
@@ -50,7 +51,21 @@ async def get_safety_metrics(
         if any("consent" in str(issue).lower() or "transfer_before_consent" in str(issue).lower() for issue in issues):
             transfer_consent_violations += 1
             
-    # 4. Unsafe phrase blocks (scan turns belonging to filtered calls)
+        # 4. Wrong-number failures
+        outcome = str(c.get("outcome") or "").lower()
+        if "wrong" in outcome or outcome == "wrong_number" or any("wrong" in str(issue).lower() or "wrong_number" in str(issue).lower() for issue in issues):
+            wrong_number_failures += 1
+        else:
+            # Fallback to transcript phrases scan
+            transcript = c.get("transcript") or []
+            for turn in transcript:
+                if turn.get("speaker") == "prospect":
+                    p_text = str(turn.get("text", "")).lower()
+                    if any(phrase in p_text for phrase in ["wrong number", "not me", "not the person", "no such person", "don't know who that is", "wrong person"]):
+                        wrong_number_failures += 1
+                        break
+            
+    # 5. Unsafe phrase blocks (scan turns belonging to filtered calls)
     for t in turns:
         call_id = t.get("call_id")
         # Ensure the turn belongs to a call in our filtered list
@@ -62,5 +77,7 @@ async def get_safety_metrics(
         "compliance_hard_fails": compliance_hard_fails,
         "dnc_failures": dnc_failures,
         "transfer_consent_violations": transfer_consent_violations,
+        "wrong_number_failures": wrong_number_failures,
         "unsafe_phrase_blocks": unsafe_phrase_blocks
     }
+

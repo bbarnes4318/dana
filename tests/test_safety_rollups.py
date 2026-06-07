@@ -32,10 +32,11 @@ async def test_get_safety_metrics(repo: Repository):
         created_at=datetime(2026, 6, 1, 13, 0, tzinfo=timezone.utc)
     )
     
-    # Call 3: No issues
+    # Call 3: No issues, but wrong number outcome
     await repo.save_call(
         call_id="call-3",
         compliance_flags={"issues": []},
+        outcome="wrong_number",
         created_at=datetime(2026, 6, 1, 14, 0, tzinfo=timezone.utc)
     )
     
@@ -89,6 +90,7 @@ async def test_get_safety_metrics(repo: Repository):
     assert metrics["compliance_hard_fails"] == 3  # call-1, call-2, call-old
     assert metrics["dnc_failures"] == 1           # call-2
     assert metrics["transfer_consent_violations"] == 1 # call-1
+    assert metrics["wrong_number_failures"] == 1  # call-3
     assert metrics["unsafe_phrase_blocks"] == 4   # 2 (call-1) + 1 (call-2) + 1 (call-old)
 
     # Test date filtered safety metrics (June 1 only)
@@ -101,4 +103,6 @@ async def test_get_safety_metrics(repo: Repository):
     assert metrics_filtered["compliance_hard_fails"] == 2  # call-1, call-2
     assert metrics_filtered["dnc_failures"] == 1
     assert metrics_filtered["transfer_consent_violations"] == 1
+    assert metrics_filtered["wrong_number_failures"] == 1  # call-3
     assert metrics_filtered["unsafe_phrase_blocks"] == 3   # 2 (call-1) + 1 (call-2)
+

@@ -67,7 +67,8 @@
       <!-- Sidebar Tabs Navigation -->
       <section class="card" style="padding: 0.75rem;">
         <nav class="tabs-header" style="flex-direction: column; border-bottom: none; gap: 0.2rem; margin-bottom: 0;">
-          <button class="tab-btn active" data-tab="review-tab" style="text-align: left; border-bottom: none; border-left: 2px solid transparent;">📋 Human Review Queue</button>
+          <button class="tab-btn active" data-tab="command-center-tab" style="text-align: left; border-bottom: none; border-left: 2px solid transparent;">📊 Dana Command Center</button>
+          <button class="tab-btn" data-tab="review-tab" style="text-align: left; border-bottom: none; border-left: 2px solid transparent;">📋 Human Review Queue</button>
           <button class="tab-btn" data-tab="intake-tab" style="text-align: left; border-bottom: none; border-left: 2px solid transparent;">📥 Training Intake & Import</button>
           <button class="tab-btn" data-tab="scheduler-tab" style="text-align: left; border-bottom: none; border-left: 2px solid transparent;">⏳ Scheduler iteration</button>
           <button class="tab-btn" data-tab="readiness-tab" style="text-align: left; border-bottom: none; border-left: 2px solid transparent;">🛡️ Readiness Auditor</button>
@@ -94,8 +95,332 @@
     <!-- Main Workspace -->
     <main>
       
+      <!-- TAB: Dana Command Center -->
+      <div id="command-center-tab" class="tab-content active">
+        <!-- Top bar with Title and Filters/Refresh -->
+        <div class="dashboard-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; flex-wrap: wrap; gap: 1rem;">
+          <div class="dashboard-title">
+            <h2 style="margin: 0; color: var(--text-primary); font-size: 1.5rem;">📊 Dana Command Center Dashboard</h2>
+            <p class="subtitle" style="margin: 0.25rem 0 0 0; color: var(--text-secondary); font-size: 0.85rem;">Real-time platform status, latencies, costs, provider performance, and compliance safety gates</p>
+          </div>
+          <div class="dashboard-actions" style="display: flex; gap: 1rem; align-items: center; flex-wrap: wrap;">
+            <div class="date-picker-group" style="display: flex; gap: 0.5rem; align-items: center; font-size: 0.85rem;">
+              <label for="db-from-date" style="color: var(--text-secondary);">From:</label>
+              <input type="date" id="db-from-date" class="form-control date-input" style="width: 130px; font-size: 0.8rem; padding: 0.2rem 0.4rem;">
+              <label for="db-to-date" style="color: var(--text-secondary);">To:</label>
+              <input type="date" id="db-to-date" class="form-control date-input" style="width: 130px; font-size: 0.8rem; padding: 0.2rem 0.4rem;">
+            </div>
+            <button id="btn-refresh-dashboard" class="btn btn-primary" style="width: auto;">🔄 Update Dashboard</button>
+          </div>
+        </div>
+
+        <!-- Section: Urgent Production / Readiness Status Banner -->
+        <div id="db-readiness-banner" style="margin-bottom: 1.5rem;">
+          <!-- Dynamically filled status alert/banner -->
+        </div>
+
+        <!-- Grid layout for Dashboard Widgets -->
+        <div class="dashboard-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap: 1.5rem; margin-bottom: 1.5rem;">
+          
+          <!-- Widget: Platform Overview -->
+          <section class="card widget-card" style="margin: 0;">
+            <div class="card-title">Platform Overview</div>
+            <div class="metrics-grid" style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 0.75rem;">
+              <div class="stat-box" style="padding: 0.5rem 0.75rem;">
+                <div class="stat-label">Total Calls</div>
+                <div class="stat-val" id="val-platform-total-calls">—</div>
+              </div>
+              <div class="stat-box" style="padding: 0.5rem 0.75rem;">
+                <div class="stat-label">Connected Calls</div>
+                <div class="stat-val" id="val-platform-connected">—</div>
+              </div>
+              <div class="stat-box" style="padding: 0.5rem 0.75rem;">
+                <div class="stat-label">Transfers</div>
+                <div class="stat-val" id="val-platform-transfers">—</div>
+              </div>
+              <div class="stat-box" style="padding: 0.5rem 0.75rem;">
+                <div class="stat-label">Callbacks</div>
+                <div class="stat-val" id="val-platform-callbacks">—</div>
+              </div>
+              <div class="stat-box" style="padding: 0.5rem 0.75rem;">
+                <div class="stat-label">DNC Count</div>
+                <div class="stat-val" id="val-platform-dnc">—</div>
+              </div>
+              <div class="stat-box" style="padding: 0.5rem 0.75rem;">
+                <div class="stat-label">Wrong Numbers</div>
+                <div class="stat-val" id="val-platform-wrong">—</div>
+              </div>
+              <div class="stat-box" style="grid-column: span 2; padding: 0.5rem 0.75rem;">
+                <div class="stat-label">Average Call Duration</div>
+                <div class="stat-val" id="val-platform-avg-duration">—</div>
+              </div>
+              <div class="stat-box" style="padding: 0.5rem 0.75rem;">
+                <div class="stat-label">Cost/Connected Min</div>
+                <div class="stat-val highlight" id="val-platform-cost-connected-min" style="font-size: 1.1rem; color: var(--primary);">—</div>
+              </div>
+              <div class="stat-box" style="padding: 0.5rem 0.75rem;">
+                <div class="stat-label">Cost/Transfer</div>
+                <div class="stat-val highlight" id="val-platform-cost-transfer" style="font-size: 1.1rem; color: var(--primary);">—</div>
+              </div>
+              <div class="stat-box" style="grid-column: span 2; padding: 0.5rem 0.75rem;">
+                <div class="stat-label">Cost/Qualified Transfer</div>
+                <div class="stat-val highlight" id="val-platform-cost-qual-transfer" style="font-size: 1.1rem; color: var(--success);">—</div>
+              </div>
+            </div>
+          </section>
+
+          <!-- Widget: Readiness Status -->
+          <section class="card widget-card" style="margin: 0;">
+            <div class="card-title">Readiness Assessment</div>
+            <div style="display: flex; flex-direction: column; gap: 0.5rem;">
+              <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border-color); padding-bottom: 0.4rem; font-size: 0.85rem;">
+                <strong>PRODUCTION_READY</strong>
+                <span id="flag-production-ready" class="badge">UNKNOWN</span>
+              </div>
+              <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border-color); padding-bottom: 0.4rem; font-size: 0.85rem;">
+                <span>LIVE_TELEPHONY_READY</span>
+                <span id="flag-telephony-ready" class="badge">UNKNOWN</span>
+              </div>
+              <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border-color); padding-bottom: 0.4rem; font-size: 0.85rem;">
+                <span>LOCAL_CANARY_READY</span>
+                <span id="flag-canary-ready" class="badge">UNKNOWN</span>
+              </div>
+              <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border-color); padding-bottom: 0.4rem; font-size: 0.85rem;">
+                <span>EVAL_READY</span>
+                <span id="flag-eval-ready" class="badge">UNKNOWN</span>
+              </div>
+              <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border-color); padding-bottom: 0.4rem; font-size: 0.85rem;">
+                <span>BENCHMARK_READY</span>
+                <span id="flag-benchmark-ready" class="badge">UNKNOWN</span>
+              </div>
+              <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border-color); padding-bottom: 0.4rem; font-size: 0.85rem;">
+                <span>ops.healthcheck Status</span>
+                <span id="val-healthcheck-status" style="font-weight: bold;">UNKNOWN</span>
+              </div>
+              <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border-color); padding-bottom: 0.4rem; font-size: 0.85rem;">
+                <span>ops.readiness Status</span>
+                <span id="val-readiness-status" style="font-weight: bold;">UNKNOWN</span>
+              </div>
+            </div>
+            <div id="db-missing-env-container" style="display: none; background-color: rgba(239, 68, 68, 0.05); padding: 0.5rem; border-radius: 4px; margin-top: 0.75rem; border-left: 3px solid var(--danger);">
+              <strong style="color: var(--danger); font-size: 0.8rem;">⚠️ Missing Configurations:</strong>
+              <ul id="db-missing-env-list" style="margin: 0.25rem 0 0 0; padding-left: 1.25rem; font-size: 0.75rem; color: var(--text-secondary);"></ul>
+            </div>
+          </section>
+
+          <!-- Widget: Latency Percentiles (P50/P95) -->
+          <section class="card widget-card" style="margin: 0;">
+            <div class="card-title">Turn & Service Latency Metrics</div>
+            <div class="table-wrapper">
+              <table style="font-size: 0.8rem; width: 100%;">
+                <thead>
+                  <tr>
+                    <th style="text-align: left;">Metric</th>
+                    <th style="text-align: right;">P50</th>
+                    <th style="text-align: right;">P95</th>
+                    <th style="text-align: right;">SLO Limit</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr id="row-latency-turn">
+                    <td>Turn Response</td>
+                    <td id="val-latency-turn-p50" style="text-align: right; font-weight: bold;">—</td>
+                    <td id="val-latency-turn-p95" style="text-align: right; font-weight: bold;">—</td>
+                    <td style="text-align: right; color: var(--text-muted);">&lt; 450/850ms</td>
+                  </tr>
+                  <tr id="row-latency-llm">
+                    <td>LLM First Token</td>
+                    <td id="val-latency-llm-p50" style="text-align: right; font-weight: bold;">—</td>
+                    <td id="val-latency-llm-p95" style="text-align: right; font-weight: bold;">—</td>
+                    <td style="text-align: right; color: var(--text-muted);">&lt; 250/400ms</td>
+                  </tr>
+                  <tr id="row-latency-tts">
+                    <td>TTS First Audio</td>
+                    <td id="val-latency-tts-p50" style="text-align: right; font-weight: bold;">—</td>
+                    <td id="val-latency-tts-p95" style="text-align: right; font-weight: bold;">—</td>
+                    <td style="text-align: right; color: var(--text-muted);">&lt; 200/300ms</td>
+                  </tr>
+                  <tr id="row-latency-bargein">
+                    <td>Barge-in Stop</td>
+                    <td id="val-latency-bargein-p50" style="text-align: right; font-weight: bold;">—</td>
+                    <td id="val-latency-bargein-p95" style="text-align: right; font-weight: bold;">—</td>
+                    <td style="text-align: right; color: var(--text-muted);">&lt; 200/300ms</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div id="db-latency-warnings" style="margin-top: 0.5rem; font-size: 0.75rem; color: var(--danger); display: none;">
+              ⚠️ Turn latency values exceed the target SLO threshold.
+            </div>
+          </section>
+
+          <!-- Widget: Costs breakdown -->
+          <section class="card widget-card" style="margin: 0;">
+            <div class="card-title">Cost Accounting Breakdown</div>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; margin-bottom: 0.75rem;">
+              <div class="stat-box" style="padding: 0.5rem 0.75rem;">
+                <div class="stat-label">Total Cost</div>
+                <div class="stat-val" id="val-cost-total" style="color: var(--primary);">—</div>
+              </div>
+              <div class="stat-box" style="padding: 0.5rem 0.75rem;">
+                <div class="stat-label">Avg Cost/Call</div>
+                <div class="stat-val" id="val-cost-avg-call" style="color: var(--primary);">—</div>
+              </div>
+            </div>
+            <div class="cost-breakdown-container" style="font-size: 0.8rem;">
+              <strong style="display: block; margin-bottom: 0.25rem;">Component Cost Breakdown</strong>
+              <div id="cost-component-bars" style="display: flex; flex-direction: column; gap: 0.4rem;">
+                <!-- Filled dynamically -->
+              </div>
+            </div>
+          </section>
+
+          <!-- Widget: Provider Performance & Failures -->
+          <section class="card widget-card" style="margin: 0; grid-column: span 1;">
+            <div class="card-title">Provider Performance Rollup</div>
+            <div class="table-wrapper" style="max-height: 180px;">
+              <table style="font-size: 0.75rem; width: 100%;">
+                <thead>
+                  <tr>
+                    <th style="text-align: left;">Provider</th>
+                    <th style="text-align: left;">Component</th>
+                    <th style="text-align: right;">Avg Latency</th>
+                    <th style="text-align: right;">Avg Cost</th>
+                    <th style="text-align: right;">Failure %</th>
+                  </tr>
+                </thead>
+                <tbody id="provider-performance-tbody">
+                  <tr><td colspan="5" style="text-align: center; color: var(--text-muted);">No provider data.</td></tr>
+                </tbody>
+              </table>
+            </div>
+            <div style="font-size: 0.75rem; margin-top: 0.5rem; display: flex; justify-content: space-between; border-top: 1px solid var(--border-color); padding-top: 0.4rem;">
+              <strong>Local vs Cloud Routing:</strong>
+              <span id="routing-ratio-text">—</span>
+            </div>
+          </section>
+
+          <!-- Widget: Compliance & Safety -->
+          <section class="card widget-card" style="margin: 0;">
+            <div class="card-title">Compliance & Safety Violations</div>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem;">
+              <div class="stat-box" style="padding: 0.5rem 0.75rem; border-left: 4px solid var(--danger);">
+                <div class="stat-label">Compliance Fails</div>
+                <div class="stat-val" id="val-safety-compliance-fails" style="color: var(--danger);">0</div>
+              </div>
+              <div class="stat-box" style="padding: 0.5rem 0.75rem;">
+                <div class="stat-label">DNC Failures</div>
+                <div class="stat-val" id="val-safety-dnc-fails">0</div>
+              </div>
+              <div class="stat-box" style="padding: 0.5rem 0.75rem;">
+                <div class="stat-label">Wrong-Number Fails</div>
+                <div class="stat-val" id="val-safety-wrong-fails">0</div>
+              </div>
+              <div class="stat-box" style="padding: 0.5rem 0.75rem;">
+                <div class="stat-label">Consent Violations</div>
+                <div class="stat-val" id="val-safety-consent-fails">0</div>
+              </div>
+              <div class="stat-box" style="grid-column: span 2; padding: 0.5rem 0.75rem;">
+                <div class="stat-label">Unsafe Phrase Blocks</div>
+                <div class="stat-val" id="val-safety-phrase-blocks">0</div>
+              </div>
+            </div>
+          </section>
+
+          <!-- Widget: Voice Quality & Human Realism -->
+          <section class="card widget-card" style="margin: 0;">
+            <div class="card-title">Human Realism Scorecard</div>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem;">
+              <div class="stat-box" style="padding: 0.5rem 0.75rem;">
+                <div class="stat-label">Bot-likeness Score</div>
+                <div class="stat-val" id="val-quality-bot-score" style="color: var(--warning);">—</div>
+              </div>
+              <div class="stat-box" style="padding: 0.5rem 0.75rem;">
+                <div class="stat-label">Repetition Score</div>
+                <div class="stat-val" id="val-quality-repetition">—</div>
+              </div>
+              <div class="stat-box" style="padding: 0.5rem 0.75rem;">
+                <div class="stat-label">Words Per Turn</div>
+                <div class="stat-val" id="val-quality-words-turn">—</div>
+              </div>
+              <div class="stat-box" style="padding: 0.5rem 0.75rem;">
+                <div class="stat-label">Interruption Repair</div>
+                <div class="stat-val" id="val-quality-interruption-repair" style="color: var(--success);">—</div>
+              </div>
+            </div>
+          </section>
+
+          <!-- Widget: Campaign Management Dashboard -->
+          <section class="card widget-card" style="margin: 0;">
+            <div class="card-title">Campaign Dashboard</div>
+            <div style="margin-bottom: 0.5rem;">
+              <label for="db-campaign-selector" style="font-size: 0.75rem; color: var(--text-secondary); display: block; margin-bottom: 0.2rem;">Select Campaign</label>
+              <select id="db-campaign-selector" class="form-control" style="font-size: 0.8rem; padding: 0.25rem;">
+                <option value="">All Campaigns Combined</option>
+              </select>
+            </div>
+            <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 0.5rem; margin-bottom: 0.5rem;">
+              <div class="stat-box" style="padding: 0.4rem 0.5rem;">
+                <div class="stat-label" style="font-size: 0.65rem;">Answer Rate</div>
+                <div class="stat-val" id="val-camp-answer-rate" style="font-size: 1rem;">—</div>
+              </div>
+              <div class="stat-box" style="padding: 0.4rem 0.5rem;">
+                <div class="stat-label" style="font-size: 0.65rem;">Transfer Rate</div>
+                <div class="stat-val" id="val-camp-transfer-rate" style="font-size: 1rem;">—</div>
+              </div>
+              <div class="stat-box" style="padding: 0.4rem 0.5rem;">
+                <div class="stat-label" style="font-size: 0.65rem;">Callback Rate</div>
+                <div class="stat-val" id="val-camp-callback-rate" style="font-size: 1rem;">—</div>
+              </div>
+              <div class="stat-box" style="padding: 0.4rem 0.5rem;">
+                <div class="stat-label" style="font-size: 0.65rem;">DNC Rate</div>
+                <div class="stat-val" id="val-camp-dnc-rate" style="font-size: 1rem;">—</div>
+              </div>
+            </div>
+
+            <!-- Campaign Lifecycle Controls -->
+            <div id="db-campaign-controls-container" style="display: none; border-top: 1px solid var(--border-color); padding-top: 0.5rem; margin-top: 0.5rem;">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.35rem; font-size: 0.75rem;">
+                <strong>Status: <span id="db-active-camp-status" class="badge">INACTIVE</span></strong>
+              </div>
+              <div style="display: flex; gap: 0.25rem; margin-bottom: 0.35rem;">
+                <input type="text" id="db-camp-operator-input" class="form-control" style="font-size: 0.75rem; padding: 0.2rem;" placeholder="Operator Name Required">
+              </div>
+              <div style="display: flex; gap: 0.25rem;">
+                <button type="button" id="btn-db-camp-start" class="btn btn-primary" style="padding: 0.2rem; font-size: 0.7rem; width: auto; flex: 1;">Start</button>
+                <button type="button" id="btn-db-camp-pause" class="btn btn-warning" style="padding: 0.2rem; font-size: 0.7rem; width: auto; flex: 1;">Pause</button>
+                <button type="button" id="btn-db-camp-resume" class="btn btn-primary" style="padding: 0.2rem; font-size: 0.7rem; width: auto; flex: 1;">Resume</button>
+                <button type="button" id="btn-db-camp-stop" class="btn btn-danger" style="padding: 0.2rem; font-size: 0.7rem; width: auto; flex: 1;">Stop</button>
+              </div>
+            </div>
+
+            <!-- Caller ID / DID Rotation Performance -->
+            <div style="margin-top: 0.5rem; border-top: 1px solid var(--border-color); padding-top: 0.5rem;">
+              <strong style="display: block; margin-bottom: 0.25rem; font-size: 0.75rem;">DID Pool Performance</strong>
+              <div class="table-wrapper" style="max-height: 80px;">
+                <table style="font-size: 0.7rem; width: 100%;">
+                  <thead>
+                    <tr>
+                      <th style="text-align: left;">Number</th>
+                      <th style="text-align: right;">Calls</th>
+                      <th style="text-align: right;">Answer %</th>
+                      <th style="text-align: right;">DNC %</th>
+                      <th style="text-align: right;">Attestation</th>
+                    </tr>
+                  </thead>
+                  <tbody id="db-caller-id-perf-tbody">
+                    <tr><td colspan="5" style="text-align: center; color: var(--text-muted);">No campaign selected.</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </section>
+
+        </div>
+      </div>
+
       <!-- TAB: Review Queue -->
-      <div id="review-tab" class="tab-content active">
+      <div id="review-tab" class="tab-content">
         <section class="card">
           <div class="card-title">Human Review items Queue</div>
           
