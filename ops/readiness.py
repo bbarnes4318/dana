@@ -4,6 +4,9 @@ import re
 import json
 import uuid
 from datetime import datetime, timezone
+from dotenv import load_dotenv
+
+load_dotenv()
 from pathlib import Path
 from typing import Any, Optional, Literal, List
 from pydantic import BaseModel, Field

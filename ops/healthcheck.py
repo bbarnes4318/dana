@@ -5,6 +5,9 @@ from __future__ import annotations
 import asyncio
 import sys
 from typing import Dict, Tuple
+from dotenv import load_dotenv
+
+load_dotenv()
 
 from ops.dependency_audit import audit_dependencies
 from ops.readiness import run_readiness_checks
