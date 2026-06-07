@@ -162,17 +162,17 @@ async def test_dashboard_analytics_include_interruption_metrics(repo: Repository
     # Save mock metrics into the repository (e.g. total_barge_in_stop_ms, tts_cancel_duration_ms, etc.)
     # We will save multiple entries to verify percentile calculations
     for val in [100.0, 200.0, 300.0, 400.0, 500.0]:
-        await repo.save_latency_metric("call-1", "total_barge_in_stop_ms", val)
-        await repo.save_latency_metric("call-1", "tts_cancel_duration_ms", val / 2.0)
-        await repo.save_latency_metric("call-1", "audio_flush_duration_ms", val / 4.0)
+        await repo.save_latency_metric(call_id="call-1", metric_name="total_barge_in_stop_ms", metric_value_ms=val)
+        await repo.save_latency_metric(call_id="call-1", metric_name="tts_cancel_duration_ms", metric_value_ms=val / 2.0)
+        await repo.save_latency_metric(call_id="call-1", metric_name="audio_flush_duration_ms", metric_value_ms=val / 4.0)
         
         # Save stage-specific metrics
-        await repo.save_latency_metric("call-1", "total_barge_in_stop_ms_stage_OPENING", val)
-        await repo.save_latency_metric("call-1", "total_barge_in_stop_ms_stage_TRANSFER_CONSENT", val * 1.5)
+        await repo.save_latency_metric(call_id="call-1", metric_name="total_barge_in_stop_ms_stage_OPENING", metric_value_ms=val)
+        await repo.save_latency_metric(call_id="call-1", metric_name="total_barge_in_stop_ms_stage_TRANSFER_CONSENT", metric_value_ms=val * 1.5)
 
     # Save false interruption stats
-    await repo.save_latency_metric("call-1", "false_interruption_count", 2.0)
-    await repo.save_latency_metric("call-1", "false_interruption_rate", 0.4)
+    await repo.save_latency_metric(call_id="call-1", metric_name="false_interruption_count", metric_value_ms=2.0)
+    await repo.save_latency_metric(call_id="call-1", metric_name="false_interruption_rate", metric_value_ms=0.4)
     
     # Retrieve metrics via the rollup service
     metrics = await get_latency_metrics(repo)
