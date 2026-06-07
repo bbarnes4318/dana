@@ -494,22 +494,30 @@ async def test_async_emit_persists_before_return(repo, monkeypatch):
     monkeypatch.setenv("DANA_CRM_WEBHOOK_ENABLED", "true")
     monkeypatch.setenv("DANA_CRM_WEBHOOK_URL", "http://fake-crm.com/webhook")
     monkeypatch.setenv("DANA_CRM_WEBHOOK_SECRET", "my_secret")
+    monkeypatch.setenv("DANA_CRM_WEBHOOK_MAX_RETRIES", "1")
     
     from integrations.crm_webhooks import emit_crm_event_async
     
-    task = await emit_crm_event_async(
-        event_type="call.started",
-        repository=repo,
-        call_id="call-async-persist",
-        phone_e164="+15551234567"
-    )
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.text = "Success"
     
-    # Assert event exists in database immediately after return
-    event = await repo.get_webhook_event("call.started:call-async-persist")
-    assert event is not None
-    assert event["status"] == "pending"
-    if task:
-        await task
+    with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+        mock_post.return_value = mock_response
+        
+        task = await emit_crm_event_async(
+            event_type="call.started",
+            repository=repo,
+            call_id="call-async-persist",
+            phone_e164="+15551234567"
+        )
+        
+        # Assert event exists in database immediately after return
+        event = await repo.get_webhook_event("call.started:call-async-persist")
+        assert event is not None
+        assert event["status"] == "pending"
+        if task:
+            await task
 
 
 @pytest.mark.asyncio
@@ -829,6 +837,8 @@ async def test_webhook_failure_never_breaks_call_path(repo, monkeypatch):
     monkeypatch.setenv("DANA_CRM_WEBHOOK_ENABLED", "true")
     monkeypatch.setenv("DANA_CRM_WEBHOOK_URL", "http://fake-crm.com/webhook")
     monkeypatch.setenv("DANA_CRM_WEBHOOK_SECRET", "my_secret")
+    monkeypatch.setenv("DANA_CRM_WEBHOOK_MAX_RETRIES", "1")
+    monkeypatch.setenv("DANA_CRM_WEBHOOK_FIXED_JITTER", "yes")
     
     from integrations.crm_webhooks import emit_crm_event_async
     

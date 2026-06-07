@@ -28,6 +28,14 @@ for k in _telephony_keys:
     os.environ.pop(k, None)
 os.environ["DANA_WRITE_BEHIND_ENABLED"] = "false"
 
+import subprocess
+_orig_subprocess_run = subprocess.run
+def _mock_subprocess_run(*args, **kwargs):
+    if "timeout" not in kwargs:
+        kwargs["timeout"] = 60
+    return _orig_subprocess_run(*args, **kwargs)
+subprocess.run = _mock_subprocess_run
+
 # Resolve real repo root
 _real_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
