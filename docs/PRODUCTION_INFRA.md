@@ -72,3 +72,59 @@ Running PostgreSQL in a Docker container (as configured in the default `docker-c
 1.  **Named Volumes**: Ensure the `pg-data` volume is backed by host NVMe paths.
 2.  **Daily Backups**: Implement the daily encrypted backups script (`infra/backup/backup.sh`) and send them offsite.
 3.  **Active Monitoring**: Monitor container memory usage and CPU limits to ensure Postgres is not starved of resources.
+
+---
+
+## Production Environment Checklist
+
+Before deploying, ensure all variables in `.env` are configured correctly. The list below outlines categories, sources, and safety default rules.
+
+### 1. Required Variables by Source
+
+#### A. LiveKit Cloud (Provider: LiveKit)
+*   `LIVEKIT_URL`: WebRTC gateway url (e.g. `wss://<project>.livekit.cloud`).
+*   `LIVEKIT_API_KEY`: API authentication key.
+*   `LIVEKIT_API_SECRET`: API authentication secret (sensitive).
+*   `LIVEKIT_SIP_OUTBOUND_TRUNK_ID`: The unique ID of the SIP trunk registered in LiveKit dashboard for outbound calls.
+
+#### B. Telephony Trunk (Provider: Telnyx)
+*   `TELNYX_API_KEY`: Telephony management credential (sensitive).
+*   `TELNYX_CONNECTION_ID`: Connection ID of the Telnyx outbound SIP profile.
+*   `TELNYX_OUTBOUND_NUMBER`: Active phone number to place calls from.
+
+#### C. Model Engine (Provider: HuggingFace & Local vLLM)
+*   `HF_TOKEN`: HuggingFace token for gated repository access (sensitive).
+*   `VLLM_BASE_URL`: Model API URL (defaults to `http://vllm-server:8000/v1`).
+*   `VLLM_MODEL`: ID of model to execute.
+
+#### D. Database & Cache (Generated Locally)
+*   `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB`: Persistent database credentials.
+*   `DATABASE_URL`: Connection string pointing to PgBouncer connection pooler on port `6432`.
+*   `DATABASE_ADMIN_URL`: Direct PostgreSQL connection string on port `5432` for running migrations.
+*   `REDIS_URL`: Cache instance connection string (defaults to `redis://redis:6379/0`).
+
+### 2. Critical Safety Flags (Must remain False by default)
+*   `DANA_ALLOW_MOCK_TTS=false`: Setting this to `true` will crash production readiness checks. Real Kokoro ONNX synthesis or a valid cloud fallback must be active.
+*   `DANA_CONTROLLED_LIVE_TEST=false`: Set to `true` ONLY when running single controlled outbound smoke calls. Bulk campaigns are disabled while this is enabled.
+
+---
+
+## Staging & Deployment Checks
+
+To verify your configuration before starting services:
+
+1.  **Run the Deployment Doctor**:
+    Execute the doctor script to check local drivers, Docker, directories, and variables:
+    ```bash
+    python -m ops.deployment_doctor --env-file .env
+    ```
+2.  **Understand Production Readiness Gates**:
+    To achieve `PRODUCTION_READY` status in the console, the platform requires:
+    *   Health checks pass (system metrics and capacity limits OK).
+    *   Readiness checks pass (LiveKit, Telnyx, database, Redis, vLLM pre-warmed).
+    *   Offline canary runs succeed.
+    *   Voice stack benchmark run completes.
+    *   Compliance and quality gates (SLOs) are satisfied.
+
+For a comprehensive step-by-step installation guide on dedicated Hyperstack GPU VMs, refer to the [docs/HYPERSTACK_L40_DEPLOYMENT_RUNBOOK.md](file:///c:/Users/jimbo/OneDrive/Desktop/ultimate-voice/docs/HYPERSTACK_L40_DEPLOYMENT_RUNBOOK.md).
+

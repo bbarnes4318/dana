@@ -1296,28 +1296,20 @@ from runtime.hot_state import get_hot_state_store
 
 async def check_livekit() -> tuple[bool, str]:
     """Check if LiveKit environment variables are present and valid."""
-    url = os.getenv("LIVEKIT_URL")
-    key = os.getenv("LIVEKIT_API_KEY")
-    secret = os.getenv("LIVEKIT_API_SECRET")
-    
-    if not url or url.startswith("wss://replace-me") or url == "replace_me":
-        return False, "LIVEKIT_URL is not configured"
-    if not key or key == "replace_me":
-        return False, "LIVEKIT_API_KEY is not configured"
-    if not secret or secret == "replace_me":
-        return False, "LIVEKIT_API_SECRET is not configured"
-        
+    from config.env_schema import validate_env
+    res = validate_env(dict(os.environ))
+    lk_failures = [f for f in res["failures"] if "LIVEKIT_" in f]
+    if lk_failures:
+        return False, "; ".join(lk_failures)
     return True, "LiveKit credentials configured"
 
 async def check_telephony() -> tuple[bool, str]:
     """Verify Telnyx/SIP configuration readiness."""
-    telnyx_key = os.getenv("TELNYX_API_KEY")
-    connection_id = os.getenv("TELNYX_CONNECTION_ID")
-    
-    if not telnyx_key or telnyx_key == "replace_me":
-        return False, "TELNYX_API_KEY is not configured"
-    if not connection_id or connection_id == "replace_me" or connection_id == "":
-        return False, "TELNYX_CONNECTION_ID is not configured"
+    from config.env_schema import validate_env
+    res = validate_env(dict(os.environ))
+    telnyx_failures = [f for f in res["failures"] if "TELNYX_" in f or "outbound caller ID" in f or "LIVEKIT_SIP_" in f]
+    if telnyx_failures:
+        return False, "; ".join(telnyx_failures)
         
     # Check SIP trunk config documented
     doc_paths = ["docs/telnyx_livekit_setup.md", "docs/TELNYX_LIVEKIT_SIP_SETUP.md"]
@@ -1332,6 +1324,8 @@ async def check_telephony() -> tuple[bool, str]:
     nums = os.getenv("TELNYX_PHONE_NUMBERS", "").strip()
     outbound_caller = os.getenv("TELNYX_OUTBOUND_CALLER_ID", "").strip()
     dana_caller = os.getenv("DANA_OUTBOUND_CALLER_ID", "").strip()
+    outbound_num = os.getenv("TELNYX_OUTBOUND_NUMBER", "").strip()
+    default_caller = os.getenv("DANA_DEFAULT_CALLER_ID", "").strip()
     
     db_dids = []
     try:
@@ -1342,7 +1336,7 @@ async def check_telephony() -> tuple[bool, str]:
     except Exception:
         pass
         
-    has_pool = bool(dids or nums or outbound_caller or dana_caller or db_dids)
+    has_pool = bool(dids or nums or outbound_caller or dana_caller or db_dids or outbound_num or default_caller)
     
     if not has_pool and not is_test_mode:
         return False, "Outbound caller ID pool is not configured (and DANA_CONTROLLED_LIVE_TEST is not enabled)"
@@ -1490,14 +1484,14 @@ async def check_storage() -> tuple[bool, str]:
     if os.getenv("DANA_RUNTIME_ENV") == "test":
         return True, "Storage (mocked for tests) available"
 
+    from config.env_schema import validate_env
+    res = validate_env(dict(os.environ))
+    db_failures = [f for f in res["failures"] if "DATABASE" in f or "POSTGRES" in f or "REDIS" in f]
+    if db_failures:
+        return False, "; ".join(db_failures)
+
     is_prod_mode = is_production()
     db_url = os.getenv("DATABASE_URL")
-    
-    if not db_url or db_url == "replace_me":
-        if is_prod_mode:
-            return False, "DATABASE_URL is not configured (JSONL fallback is not allowed in production)"
-        else:
-            return True, "Storage using local JSONL fallback (not production-ready)"
 
     try:
         store = PostgresStore(db_url)

@@ -51,7 +51,8 @@ A complete automated testing pipeline is configured in `.github/workflows/ci.yml
 ---
 
 For detailed setup, monitoring, backups, and restores, read the following files in the `docs/` folder:
-*   [docs/PRODUCTION_INFRA.md](file:///c:/Users/jimbo/OneDrive/Desktop/ultimate-voice/docs/PRODUCTION_INFRA.md)
+*   [docs/HYPERSTACK_L40_DEPLOYMENT_RUNBOOK.md](file:///c:/Users/jimbo/OneDrive/Desktop/ultimate-voice/docs/HYPERSTACK_L40_DEPLOYMENT_RUNBOOK.md) - **Hyperstack L40/L40S Deployment Runbook** (Required Reading)
+*   [docs/PRODUCTION_INFRA.md](file:///c:/Users/jimbo/OneDrive/Desktop/ultimate-voice/docs/PRODUCTION_INFRA.md) - **Production Infrastructure & Environment Checklist**
 *   [docs/DATABASE_ARCHITECTURE.md](file:///c:/Users/jimbo/OneDrive/Desktop/ultimate-voice/docs/DATABASE_ARCHITECTURE.md)
 *   [docs/OPERATIONS_RUNBOOK.md](file:///c:/Users/jimbo/OneDrive/Desktop/ultimate-voice/docs/OPERATIONS_RUNBOOK.md)
 *   [docs/continuous_training_runbook.md](file:///C:/Users/jimbo/.gemini/antigravity/worktrees/ultimate-voice/implement-canary-rollout-system/docs/continuous_training_runbook.md)
@@ -60,3 +61,20 @@ For detailed setup, monitoring, backups, and restores, read the following files 
 *   [docs/prompt_canary_operating_procedure.md](file:///C:/Users/jimbo/.gemini/antigravity/worktrees/ultimate-voice/implement-canary-rollout-system/docs/prompt_canary_operating_procedure.md)
 *   [docs/training_operations_console.md](file:///C:/Users/jimbo/.gemini/antigravity/worktrees/ultimate-voice/dana-training-ops-console/docs/training_operations_console.md)
 *   [docs/training_web_console_operating_procedure.md](file:///C:/Users/jimbo/.gemini/antigravity/worktrees/ultimate-voice/dana-training-ops-console/docs/training_web_console_operating_procedure.md)
+
+---
+
+## Local Deployment Doctor
+
+Before starting services or placing test calls on a production host, run the **Deployment Doctor** to audit your local system drivers, Docker versions, directory permissions, and environment variables configuration:
+
+```bash
+python -m ops.deployment_doctor --env-file .env
+```
+
+Or get output formatted strictly as JSON:
+```bash
+python -m ops.deployment_doctor --env-file .env --json
+```
+
+The doctor validates all required production parameters without making any external API or provider calls. A single failure will block the `READY_FOR_LIVE_CALL_TEST` status, preventing unverified production execution.
