@@ -1388,6 +1388,30 @@ async def check_storage() -> tuple[bool, str]:
 
     return True, "Storage connections operational"
 
+
+def get_readiness_status(
+    healthcheck_ok: bool,
+    readiness_ok: bool,
+    canary_ok: bool,
+    evals_ok: bool,
+    quality_gate_ok: bool
+) -> dict[str, bool]:
+    """Calculate the readiness status keys."""
+    benchmark_ready = quality_gate_ok
+    eval_ready = evals_ok
+    local_canary_ready = canary_ok
+    live_telephony_ready = healthcheck_ok and readiness_ok
+    production_ready = all([healthcheck_ok, readiness_ok, canary_ok, evals_ok, quality_gate_ok])
+    
+    return {
+        "BENCHMARK_READY": benchmark_ready,
+        "EVAL_READY": eval_ready,
+        "LOCAL_CANARY_READY": local_canary_ready,
+        "LIVE_TELEPHONY_READY": live_telephony_ready,
+        "PRODUCTION_READY": production_ready
+    }
+
+
 async def run_readiness_checks() -> tuple[bool, dict[str, tuple[bool, str]]]:
     """Execute all readiness checks and return global status."""
     checks = {
