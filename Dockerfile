@@ -59,10 +59,9 @@ RUN python -c "import torch; \
     print('Silero VAD downloaded successfully')"
 
 # Pre-download Kokoro ONNX model
-RUN python -c "from kokoro_onnx import Kokoro; \
-    print('Downloading Kokoro ONNX...'); \
-    kokoro = Kokoro('kokoro-v1.0'); \
-    print('Kokoro model downloaded successfully')"
+RUN mkdir -p /root/.cache/kokoro \
+    && wget -q -O /root/.cache/kokoro/kokoro-v1.0.onnx https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/kokoro-v1.0.onnx \
+    && wget -q -O /root/.cache/kokoro/voices-v1.0.bin https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/voices-v1.0.bin
 
 # ============================================
 # Production Stage
