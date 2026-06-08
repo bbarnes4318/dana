@@ -70,7 +70,7 @@ async def test_deployment_doctor_passes_when_everything_valid(tmp_path, mock_sys
     env_file.write_text(valid_env_content)
 
     # Setup repo structure mocks
-    with patch("os.makedirs"), patch("pathlib.Path.exists", return_value=True), patch("builtins.open", patch.object(Path, "open", return_value=MagicMock())):
+    with patch("os.makedirs"), patch("pathlib.Path.exists", return_value=True), patch("pathlib.Path.open", return_value=MagicMock()), patch("pathlib.Path.unlink"):
         # To bypass open() on the real system files but read env_file correctly
         original_open = open
         def mock_open_file(file, *args, **kwargs):
@@ -111,7 +111,7 @@ async def test_deployment_doctor_fails_on_placeholder_env(tmp_path, mock_system_
     env_file = tmp_path / ".env"
     env_file.write_text(invalid_content)
 
-    with patch("os.makedirs"), patch("pathlib.Path.exists", return_value=True):
+    with patch("os.makedirs"), patch("pathlib.Path.exists", return_value=True), patch("pathlib.Path.open", return_value=MagicMock()), patch("pathlib.Path.unlink"):
         original_open = open
         def mock_open_file(file, *args, **kwargs):
             if str(file) == str(env_file):
@@ -135,7 +135,7 @@ async def test_deployment_doctor_secrets_masking(tmp_path, mock_system_helpers, 
     env_file = tmp_path / ".env"
     env_file.write_text(valid_env_content)
 
-    with patch("os.makedirs"), patch("pathlib.Path.exists", return_value=True):
+    with patch("os.makedirs"), patch("pathlib.Path.exists", return_value=True), patch("pathlib.Path.open", return_value=MagicMock()), patch("pathlib.Path.unlink"):
         original_open = open
         def mock_open_file(file, *args, **kwargs):
             if str(file) == str(env_file):
@@ -173,7 +173,7 @@ async def test_deployment_doctor_fail_closed_controlled_test(tmp_path, mock_syst
     env_file = tmp_path / ".env"
     env_file.write_text(test_env_content)
 
-    with patch("os.makedirs"), patch("pathlib.Path.exists", return_value=True):
+    with patch("os.makedirs"), patch("pathlib.Path.exists", return_value=True), patch("pathlib.Path.open", return_value=MagicMock()), patch("pathlib.Path.unlink"):
         original_open = open
         def mock_open_file(file, *args, **kwargs):
             if str(file) == str(env_file):

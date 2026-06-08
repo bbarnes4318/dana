@@ -27,6 +27,8 @@ _telephony_keys = [
 for k in _telephony_keys:
     os.environ.pop(k, None)
 os.environ["DANA_WRITE_BEHIND_ENABLED"] = "false"
+os.environ["DANA_ALLOW_MOCK_TTS"] = "true"
+
 
 import subprocess
 _orig_subprocess_run = subprocess.run

@@ -266,7 +266,11 @@ class ModelRouter:
         elif component == "llm":
             return "openai"
         elif component == "tts":
-            # Determine cloud provider based on config voice name
+            prov = self.config.tts_provider.strip().lower()
+            if prov == "openai":
+                return "openai_tts"
+            elif prov == "elevenlabs":
+                return "elevenlabs"
             voice_lower = self.config.tts_voice.lower()
             if "openai" in voice_lower:
                 return "openai_tts"

@@ -1396,6 +1396,44 @@ async def check_tts() -> tuple[bool, str]:
     if is_prod and allow_mock:
         return False, "CRITICAL: Mock TTS is enabled in production mode (DANA_ALLOW_MOCK_TTS=true)"
 
+    # Check for premium_live configuration requirements
+    voice_mode = os.getenv("DANA_VOICE_MODE", "local_cost").strip().lower()
+    if voice_mode == "premium_live":
+        tts_provider = os.getenv("DANA_TTS_PROVIDER", "elevenlabs").strip().lower()
+        if tts_provider == "elevenlabs":
+            el_key = os.getenv("ELEVENLABS_API_KEY", "").strip()
+            if not el_key or el_key.lower() in ("replace_me", "replace-me", ""):
+                return False, "CRITICAL: premium_live requires ELEVENLABS_API_KEY to be set"
+            el_voice = os.getenv("ELEVENLABS_VOICE_ID", "").strip()
+            if not el_voice or el_voice.lower() in ("replace_me", "replace-me", ""):
+                return False, "CRITICAL: premium_live requires ELEVENLABS_VOICE_ID to be set"
+        elif tts_provider == "openai":
+            oa_key = os.getenv("OPENAI_API_KEY", "").strip()
+            if not oa_key or oa_key.lower() in ("replace_me", "replace-me", ""):
+                return False, "CRITICAL: premium_live requires OPENAI_API_KEY to be set for OpenAI TTS"
+            oa_voice = os.getenv("OPENAI_TTS_VOICE", "").strip()
+            if not oa_voice or oa_voice.lower() in ("replace_me", "replace-me", ""):
+                return False, "CRITICAL: premium_live requires OPENAI_TTS_VOICE to be set"
+        else:
+            return False, f"CRITICAL: premium_live requires a cloud provider (elevenlabs or openai), got '{tts_provider}'"
+
+        enable_streaming = os.getenv("DANA_ENABLE_STREAMING_RESPONSE", "true").strip().lower() in ("true", "1", "yes")
+        if not enable_streaming:
+            return False, "CRITICAL: premium_live requires DANA_ENABLE_STREAMING_RESPONSE=true"
+
+        enable_filters = os.getenv("DANA_ENABLE_AUDIO_FILTERS", "false").strip().lower() in ("true", "1", "yes")
+        if enable_filters:
+            return False, "CRITICAL: premium_live requires DANA_ENABLE_AUDIO_FILTERS=false"
+
+        if allow_mock:
+            return False, "CRITICAL: premium_live requires DANA_ALLOW_MOCK_TTS=false"
+
+        llm_routing = os.getenv("DANA_LLM_ROUTING_MODE", "local").strip().lower()
+        if llm_routing == "cloud":
+            oa_key = os.getenv("OPENAI_API_KEY", "").strip()
+            if not oa_key or oa_key.lower() in ("replace_me", "replace-me", ""):
+                return False, "CRITICAL: DANA_LLM_ROUTING_MODE=cloud requires OPENAI_API_KEY to be set"
+
     # Identify if a valid cloud fallback is configured
     tts_routing = os.getenv("DANA_TTS_ROUTING_MODE", "local").strip().lower()
     openai_key = os.getenv("OPENAI_API_KEY", "").strip()
@@ -1410,6 +1448,7 @@ async def check_tts() -> tuple[bool, str]:
         (tts_routing in ("openai", "elevenlabs", "cloud") and (has_openai or has_eleven)) or
         (allow_cloud_fallback and (has_openai or has_eleven))
     )
+
 
     try:
         import kokoro_onnx

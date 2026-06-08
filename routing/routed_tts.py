@@ -69,25 +69,29 @@ class RoutedTTS(tts.TTS):
         conn_options: Optional[Any] = None,
     ) -> RoutedTTSStream:
         """Return a dynamic routed TTS stream."""
+        from livekit.agents.types import DEFAULT_API_CONNECT_OPTIONS
+        actual_conn_options = conn_options or DEFAULT_API_CONNECT_OPTIONS
         return RoutedTTSStream(
             routed_tts=self,
-            conn_options=conn_options
+            conn_options=actual_conn_options
         )
 
 
 class RoutedTTSStream(tts.SynthesizeStream):
     """A synthesize stream that routes audio production dynamically and handles failover."""
 
-    def __init__(self, *, routed_tts: RoutedTTS, conn_options: Any) -> None:
-        super().__init__(tts=routed_tts, conn_options=conn_options)
+    def __init__(self, *, routed_tts: RoutedTTS, conn_options: Optional[Any] = None) -> None:
+        from livekit.agents.types import DEFAULT_API_CONNECT_OPTIONS
+        actual_conn_options = conn_options or DEFAULT_API_CONNECT_OPTIONS
         self.routed_tts = routed_tts
-        self.conn_options = conn_options
+        self.conn_options = actual_conn_options
         self.active_stream = None
         self.provider = "local"
         self.call_id = "unknown"
         self.campaign_id = None
         self._concurrency_context = None
         self._forward_task = None
+        super().__init__(tts=routed_tts, conn_options=actual_conn_options)
 
     async def _run(self, output_emitter: tts.AudioEmitter) -> None:
         from speech.context_registry import get_current_call_id, get_current_campaign_id
@@ -234,6 +238,5 @@ class RoutedTTSStream(tts.SynthesizeStream):
 
     async def interrupt(self) -> None:
         """Forward interrupt to active stream delegate."""
-        if self.active_stream:
+        if self.active_stream and hasattr(self.active_stream, "interrupt"):
             await self.active_stream.interrupt()
-        await super().interrupt()

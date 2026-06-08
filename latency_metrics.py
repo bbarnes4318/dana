@@ -13,6 +13,18 @@ class LatencyRecorder:
         self.total_barge_ins = 0
         self.false_interruption_count = 0
         self.event_history = []
+        self.init_time = time.time()
+        self.init_perf = time.perf_counter()
+
+    def get_timestamp(self, event_name: str):
+        """Get the absolute datetime for a recorded event, converted from perf_counter."""
+        t = self.events.get(event_name)
+        if t is None:
+            return None
+        from datetime import datetime, timezone
+        offset = t - self.init_perf
+        abs_epoch = self.init_time + offset
+        return datetime.fromtimestamp(abs_epoch, tz=timezone.utc)
 
     def mark(self, event_name: str):
         """Record the current high-resolution timestamp for an event."""
@@ -67,6 +79,7 @@ class LatencyRecorder:
         add_dur("llm_duration", "llm_request_start", "llm_done")
         add_dur("tts_synthesis_start_latency", "tts_first_text", "tts_first_audio")
         add_dur("turn_response_latency", "transcript_final", "first_audio_published")
+        add_dur("user_final_transcript_to_first_audio_ms", "transcript_final", "first_audio_published")
         add_dur("barge_in_stop_audio_latency", "barge_in_detected", "barge_in_stopped_audio")
         
         # Interruption Telemetry metrics

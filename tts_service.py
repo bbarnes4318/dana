@@ -61,26 +61,27 @@ def resample_to_16k(audio: np.ndarray, orig_fs: int = 24000) -> np.ndarray:
 
 def apply_senior_audio_filters(audio: np.ndarray) -> np.ndarray:
     """
-    Applies post-synthesis digital audio filtering to enforce tone compliance
-    for an older hearing profile over PSTN lines:
-    1. Low-pass filter rolling off above 3400Hz.
-    2. Boost of the mid-to-low register (150Hz - 500Hz) by precisely +3dB.
+    Applies Butterworth low-pass filter and Peaking EQ filter designed for senior hearing
+    only if DANA_ENABLE_AUDIO_FILTERS is true and DANA_AUDIO_FILTER_PROFILE is 'pstn_senior'.
     """
+    enable_filters = os.environ.get("DANA_ENABLE_AUDIO_FILTERS", "false").strip().lower() in ("true", "1", "yes")
+    filter_profile = os.environ.get("DANA_AUDIO_FILTER_PROFILE", "none").strip().lower()
+    
+    if not (enable_filters and filter_profile == "pstn_senior"):
+        return audio
+        
     if audio.size == 0:
         return audio
         
-    # Apply low-pass filter
-    audio_lp = scipy.signal.sosfilt(LP_SOS, audio)
-    
-    # Apply peaking EQ filter
-    equalized = scipy.signal.lfilter(PEAK_B, PEAK_A, audio_lp)
-    
-    # Soft clip/limiter to prevent any digital clipping after boosting
-    peak = np.max(np.abs(equalized))
-    if peak > 0.95:
-        equalized = np.clip(equalized, -1.0, 1.0)
-        
-    return equalized
+    try:
+        # 1. Low pass filter
+        audio_lp = scipy.signal.sosfilt(LP_SOS, audio)
+        # 2. Peaking EQ filter
+        audio_eq = scipy.signal.lfilter(PEAK_B, PEAK_A, audio_lp)
+        return audio_eq.astype(np.float32)
+    except Exception as e:
+        logger.error(f"Failed to apply audio filters: {e}")
+        return audio
 
 
 @dataclass
@@ -201,13 +202,16 @@ def crossfade_audio(prev_audio: np.ndarray, next_audio: np.ndarray, fade_samples
     return combined
 
 
-class MockKokoro:
+class MockKokoroModel:
     def __init__(self, model_path: str, voices_path: str):
+        from config.runtime_env import is_mock_tts_allowed
+        if not is_mock_tts_allowed():
+            raise RuntimeError("MockKokoroModel is prohibited in this environment.")
         self.model_path = model_path
         self.voices_path = voices_path
 
     def create(self, text: str, voice: str, speed: float):
-        # 0.5s of silence at 24000Hz
+        # 0.5s of silence at 24000Hz (only allowed in dev/test)
         audio = np.zeros(12000, dtype=np.float32)
         return audio, None
 
@@ -241,7 +245,7 @@ class LocallyHostedKokoro(tts.TTS):
             model_path = os.environ.get("KOKORO_MODEL_PATH", "/root/.cache/kokoro/kokoro-v1.0.onnx")
             voices_path = os.environ.get("KOKORO_VOICES_PATH", "/root/.cache/kokoro/voices-v1.0.bin")
             
-            from config.runtime_env import is_production
+            from config.runtime_env import is_production, is_mock_tts_allowed
             if is_production():
                 if not os.path.exists(model_path) and not os.path.exists("models/kokoro-v1.0.onnx"):
                     raise FileNotFoundError(f"Production Kokoro model file not found at {model_path} or models/kokoro-v1.0.onnx")
@@ -254,6 +258,8 @@ class LocallyHostedKokoro(tts.TTS):
                     model_path = "models/kokoro-v1.0.onnx"
                     voices_path = "models/voices-v1.0.bin"
                 else:
+                    if not is_mock_tts_allowed():
+                        raise RuntimeError(f"Kokoro model file not found at {model_path} and Mock TTS is not allowed.")
                     model_path = self.config.model_name
                     voices_path = "voices.bin"
                     
@@ -268,9 +274,12 @@ class LocallyHostedKokoro(tts.TTS):
                 )
                 load_time = time.time() - start_time
                 logger.info(f"Kokoro TTS initialized in {load_time:.2f}s")
-            except (FileNotFoundError, Exception) as e:
+            except Exception as e:
+                if not is_mock_tts_allowed():
+                    logger.error(f"Failed to load Kokoro ONNX model: {e}")
+                    raise RuntimeError(f"Failed to load Kokoro ONNX model: {e}") from e
                 logger.warning(f"Failed to load Kokoro ONNX model ({e}). Falling back to MockKokoro.")
-                self._model = MockKokoro(model_path, voices_path)
+                self._model = MockKokoroModel(model_path, voices_path)
                 
             self._initialized = True
             
@@ -317,8 +326,12 @@ class LocallyHostedKokoro(tts.TTS):
             try:
                 self._model = Kokoro(model_path, voices_path)
             except Exception as e:
+                from config.runtime_env import is_mock_tts_allowed
+                if not is_mock_tts_allowed():
+                    logger.error(f"Failed sync-load of Kokoro ONNX model: {e}")
+                    raise RuntimeError(f"Failed sync-load of Kokoro: {e}") from e
                 logger.warning(f"Failed sync-load of Kokoro ({e}). Using MockKokoro.")
-                self._model = MockKokoro(model_path, voices_path)
+                self._model = MockKokoroModel(model_path, voices_path)
             self._initialized = True
             
         audio, _ = self._model.create(
@@ -580,7 +593,7 @@ class LocalChunkedStream(tts.ChunkedStream):
     Chunked TTS implementation for synthesizing a full block of text.
     """
     def __init__(self, *, tts: LocallyHostedKokoro, text: str, conn_options: APIConnectOptions):
-        super().__init__(tts=tts, text=text, conn_options=conn_options)
+        super().__init__(tts=tts, input_text=text, conn_options=conn_options)
         self._tts = tts
         self._text = text
 
@@ -623,11 +636,9 @@ class MockKokoro(LocallyHostedKokoro):
     Generates dummy non-silent audio so it passes healthchecks and unit tests.
     """
     def __init__(self, config: Optional[TTSConfig] = None):
-        from config.runtime_env import is_production, allow_mock_tts
-        if is_production() and not allow_mock_tts():
-            raise RuntimeError("MockKokoro is prohibited in production mode unless DANA_ALLOW_MOCK_TTS=true.")
-        if is_production() and allow_mock_tts():
-            logger.warning("WARNING: MockKokoro is running in PRODUCTION mode because DANA_ALLOW_MOCK_TTS=true is set.")
+        from config.runtime_env import is_mock_tts_allowed
+        if not is_mock_tts_allowed():
+            raise RuntimeError("MockKokoro is prohibited in this environment.")
             
         super().__init__(config)
         self._initialized = True

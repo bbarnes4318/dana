@@ -22,29 +22,32 @@ def test_resample_to_16k():
     assert np.array_equal(audio_16k_same, audio_16k)
 
 def test_apply_senior_audio_filters():
-    # 1. Test low-pass filter: high frequency (> 3400Hz) should be heavily attenuated
-    fs = 16000
-    t = np.linspace(0, 0.5, int(fs * 0.5), endpoint=False)
-    
-    # 4000Hz tone (should be lowpassed since 4000 > 3400)
-    high_freq_tone = np.sin(2 * np.pi * 4000 * t).astype(np.float32)
-    filtered_high = apply_senior_audio_filters(high_freq_tone)
-    
-    # 300Hz tone (should be boosted)
-    mid_freq_tone = np.sin(2 * np.pi * 300 * t).astype(np.float32)
-    filtered_mid = apply_senior_audio_filters(mid_freq_tone)
-    
-    # Check attenuation of high frequency compared to original (energy ratio should be small)
-    high_energy_orig = np.sum(high_freq_tone ** 2)
-    high_energy_filt = np.sum(filtered_high ** 2)
-    assert high_energy_filt < 0.1 * high_energy_orig  # At least 10dB attenuation
-    
-    # Check boost of mid frequency (should be boosted by ~3dB, i.e., root-mean-square amplitude ratio around 1.41)
-    mid_rms_orig = np.sqrt(np.mean(mid_freq_tone ** 2))
-    mid_rms_filt = np.sqrt(np.mean(filtered_mid ** 2))
-    boost_ratio = mid_rms_filt / mid_rms_orig
-    # Expected boost ratio is around 1.16 due to phase shifts and transients
-    assert 1.1 <= boost_ratio <= 1.5
+    import os
+    from unittest.mock import patch
+    with patch.dict(os.environ, {"DANA_ENABLE_AUDIO_FILTERS": "true", "DANA_AUDIO_FILTER_PROFILE": "pstn_senior"}):
+        # 1. Test low-pass filter: high frequency (> 3400Hz) should be heavily attenuated
+        fs = 16000
+        t = np.linspace(0, 0.5, int(fs * 0.5), endpoint=False)
+        
+        # 4000Hz tone (should be lowpassed since 4000 > 3400)
+        high_freq_tone = np.sin(2 * np.pi * 4000 * t).astype(np.float32)
+        filtered_high = apply_senior_audio_filters(high_freq_tone)
+        
+        # 300Hz tone (should be boosted)
+        mid_freq_tone = np.sin(2 * np.pi * 300 * t).astype(np.float32)
+        filtered_mid = apply_senior_audio_filters(mid_freq_tone)
+        
+        # Check attenuation of high frequency compared to original (energy ratio should be small)
+        high_energy_orig = np.sum(high_freq_tone ** 2)
+        high_energy_filt = np.sum(filtered_high ** 2)
+        assert high_energy_filt < 0.1 * high_energy_orig  # At least 10dB attenuation
+        
+        # Check boost of mid frequency (should be boosted by ~3dB, i.e., root-mean-square amplitude ratio around 1.41)
+        mid_rms_orig = np.sqrt(np.mean(mid_freq_tone ** 2))
+        mid_rms_filt = np.sqrt(np.mean(filtered_mid ** 2))
+        boost_ratio = mid_rms_filt / mid_rms_orig
+        # Expected boost ratio is around 1.16 due to phase shifts and transients
+        assert 1.1 <= boost_ratio <= 1.5
 
 @pytest.mark.asyncio
 async def test_divergent_input_logic():

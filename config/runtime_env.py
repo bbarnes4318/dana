@@ -200,11 +200,37 @@ def get_runtime_env() -> dict:
     # Local-first Routing Modes & Fallbacks
     stt_routing_mode = os.environ.get("DANA_STT_ROUTING_MODE", "local")
     llm_routing_mode = os.environ.get("DANA_LLM_ROUTING_MODE", "local")
-    tts_routing_mode = os.environ.get("DANA_TTS_ROUTING_MODE", "local")
-
+    
+    # Premium voice mode configuration defaults & overrides
+    voice_mode = os.environ.get("DANA_VOICE_MODE", "local_cost").strip().lower()
+    
+    default_tts_provider = "elevenlabs" if voice_mode == "premium_live" else "local"
+    default_tts_routing_mode = "cloud" if voice_mode == "premium_live" else "local"
+    default_allow_cloud_tts_fallback = "true" if voice_mode == "premium_live" else "false"
+    default_enable_streaming_response = "true" if voice_mode == "premium_live" else "true"
+    
+    tts_provider = os.environ.get("DANA_TTS_PROVIDER", default_tts_provider).strip().lower()
+    tts_routing_mode = os.environ.get("DANA_TTS_ROUTING_MODE", default_tts_routing_mode)
+    
+    allow_cloud_tts_fallback = parse_bool(os.environ.get("DANA_ALLOW_CLOUD_TTS_FALLBACK", default_allow_cloud_tts_fallback))
+    enable_streaming_response = parse_bool(os.environ.get("DANA_ENABLE_STREAMING_RESPONSE", default_enable_streaming_response))
+    
     allow_cloud_llm_fallback = parse_bool(os.environ.get("DANA_ALLOW_CLOUD_LLM_FALLBACK", "false"))
-    allow_cloud_tts_fallback = parse_bool(os.environ.get("DANA_ALLOW_CLOUD_TTS_FALLBACK", "false"))
     cloud_stt_on_failure = parse_bool(os.environ.get("DANA_CLOUD_STT_ON_FAILURE", "false"))
+
+    # If premium_live mode is active, we enforce these cloud settings
+    if voice_mode == "premium_live":
+        if not os.environ.get("DANA_TTS_ROUTING_MODE"):
+            tts_routing_mode = "cloud"
+        if not os.environ.get("DANA_ALLOW_CLOUD_TTS_FALLBACK"):
+            allow_cloud_tts_fallback = True
+        if not os.environ.get("DANA_TTS_PROVIDER"):
+            tts_provider = "elevenlabs"
+        if not os.environ.get("DANA_ENABLE_STREAMING_RESPONSE"):
+            enable_streaming_response = True
+
+    enable_audio_filters = parse_bool(os.environ.get("DANA_ENABLE_AUDIO_FILTERS", "false"))
+    audio_filter_profile = os.environ.get("DANA_AUDIO_FILTER_PROFILE", "none").strip().lower()
 
     # Local Engine config paths
     vllm_base_url = os.environ.get("VLLM_BASE_URL")
@@ -233,6 +259,11 @@ def get_runtime_env() -> dict:
         "vllm_base_url": vllm_base_url,
         "kokoro_model_path": kokoro_model_path,
         "kokoro_voices_path": kokoro_voices_path,
+        "voice_mode": voice_mode,
+        "tts_provider": tts_provider,
+        "enable_audio_filters": enable_audio_filters,
+        "audio_filter_profile": audio_filter_profile,
+        "enable_streaming_response": enable_streaming_response,
     }
 
 
@@ -242,7 +273,7 @@ def get_runtime_mode() -> str:
     Defaults to 'development'.
     """
     env = os.getenv("DANA_RUNTIME_ENV", "development").strip().lower()
-    if env in ("production", "prod"):
+    if env in ("production", "prod", "live", "staging"):
         return "production"
     if env in ("test", "testing"):
         return "test"
@@ -266,3 +297,16 @@ def allow_mock_tts() -> bool:
     """
     val = os.getenv("DANA_ALLOW_MOCK_TTS", "false").strip().lower()
     return val in ("true", "1", "yes")
+
+
+def is_mock_tts_allowed() -> bool:
+    """
+    Mock TTS is allowed ONLY in development or test environments AND when explicitly enabled.
+    """
+    mode = get_runtime_mode()
+    raw_env = os.getenv("DANA_RUNTIME_ENV", "development").strip().lower()
+    if raw_env in ("production", "prod", "live", "staging"):
+        return False
+    if mode == "production":
+        return False
+    return allow_mock_tts()

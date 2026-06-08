@@ -5,8 +5,10 @@ Ultra-low-latency Voice AI using LiveKit Agents Framework.
 
 import asyncio
 import logging
+import time
 import os
 import uuid
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import AsyncIterable, Optional
 
@@ -162,6 +164,40 @@ class SharedComponents:
         self.repository = None
 
     async def initialize(self):
+        # Premium live mode startup safety validations
+        if self.config.voice_mode == "premium_live":
+            if not self.config.enable_streaming_response:
+                raise RuntimeError("premium_live voice mode requires DANA_ENABLE_STREAMING_RESPONSE=true")
+            if self.config.enable_audio_filters:
+                raise RuntimeError("premium_live voice mode requires DANA_ENABLE_AUDIO_FILTERS=false")
+            if self.config.allow_mock_tts:
+                raise RuntimeError("premium_live voice mode requires DANA_ALLOW_MOCK_TTS=false")
+            
+            # Check credentials & provider config
+            tts_provider = self.config.tts_provider.strip().lower()
+            if tts_provider == "elevenlabs":
+                el_key = os.getenv("ELEVENLABS_API_KEY", "").strip()
+                if not el_key or el_key.lower() in ("replace_me", "replace-me", ""):
+                    raise RuntimeError("premium_live with elevenlabs requires ELEVENLABS_API_KEY to be set")
+                el_voice = os.getenv("ELEVENLABS_VOICE_ID", "").strip()
+                if not el_voice or el_voice.lower() in ("replace_me", "replace-me", ""):
+                    raise RuntimeError("premium_live with elevenlabs requires ELEVENLABS_VOICE_ID to be set")
+            elif tts_provider == "openai":
+                oa_key = os.getenv("OPENAI_API_KEY", "").strip()
+                if not oa_key or oa_key.lower() in ("replace_me", "replace-me", ""):
+                    raise RuntimeError("premium_live with openai requires OPENAI_API_KEY to be set")
+                oa_voice = os.getenv("OPENAI_TTS_VOICE", "").strip()
+                if not oa_voice or oa_voice.lower() in ("replace_me", "replace-me", ""):
+                    raise RuntimeError("premium_live with openai requires OPENAI_TTS_VOICE to be set")
+            else:
+                raise RuntimeError(f"premium_live requires a cloud provider (elevenlabs or openai), got '{self.config.tts_provider}'")
+
+            llm_routing = self.config.llm_routing_mode.strip().lower()
+            if llm_routing == "cloud":
+                oa_key = os.getenv("OPENAI_API_KEY", "").strip()
+                if not oa_key or oa_key.lower() in ("replace_me", "replace-me", ""):
+                    raise RuntimeError("DANA_LLM_ROUTING_MODE=cloud requires OPENAI_API_KEY to be set")
+
         from routing.model_router import ModelRouter
         self.router = ModelRouter(self.config)
 
@@ -199,28 +235,46 @@ class SharedComponents:
         cloud_tts_required = self.config.tts_routing_mode == "cloud"
         cloud_tts_allowed = self.config.tts_routing_mode != "local" or self.config.allow_cloud_tts_fallback
         
+        # Determine cloud provider based on config
+        cloud_provider = self.config.tts_provider.strip().lower()
+        if cloud_provider == "local":
+            voice_lower = self.config.tts_voice.lower()
+            if "openai" in voice_lower:
+                cloud_provider = "openai"
+            else:
+                cloud_provider = "elevenlabs"
+
         has_cloud_tts_creds = False
-        voice_lower = self.config.tts_voice.lower()
-        if "openai" in voice_lower:
+        if cloud_provider == "openai":
             has_cloud_tts_creds = bool(os.getenv("OPENAI_API_KEY"))
-        else:
+        elif cloud_provider == "elevenlabs":
             has_cloud_tts_creds = bool(os.getenv("ELEVENLABS_API_KEY"))
             
         if cloud_tts_required and not has_cloud_tts_creds:
-            raise RuntimeError("Cloud TTS mode requested but credentials (OPENAI_API_KEY/ELEVENLABS_API_KEY) are missing.")
+            raise RuntimeError(f"Cloud TTS mode requested but credentials for provider '{cloud_provider}' are missing.")
             
         if cloud_tts_allowed and has_cloud_tts_creds:
             try:
-                if "openai" in voice_lower:
+                if cloud_provider == "openai":
                     from livekit.plugins.openai import TTS as OpenAI_TTS
-                    cloud_tts = OpenAI_TTS(voice="alloy")
+                    openai_voice = os.getenv("OPENAI_TTS_VOICE", "alloy").strip()
+                    openai_model = os.getenv("OPENAI_TTS_MODEL", "gpt-4o-mini-tts").strip()
+                    logger.info(f"Initializing OpenAI TTS with voice={openai_voice}, model={openai_model}")
+                    cloud_tts = OpenAI_TTS(voice=openai_voice, model=openai_model)
                 else:
                     from livekit.plugins import elevenlabs
-                    cloud_tts = elevenlabs.TTS()
+                    el_voice_id = os.getenv("ELEVENLABS_VOICE_ID", "hpp4J3VqNfWAUOO0d1Us").strip()
+                    el_model_id = os.getenv("ELEVENLABS_MODEL_ID", "eleven_turbo_v2_5").strip()
+                    logger.info(f"Initializing ElevenLabs TTS with voice_id={el_voice_id}, model_id={el_model_id}")
+                    cloud_tts = elevenlabs.TTS(
+                        voice_id=el_voice_id,
+                        model=el_model_id,
+                        api_key=os.getenv("ELEVENLABS_API_KEY")
+                    )
             except Exception as e:
-                logger.error(f"Failed to initialize cloud TTS provider: {e}")
+                logger.error(f"Failed to initialize cloud TTS provider {cloud_provider}: {e}")
                 if cloud_tts_required:
-                    raise RuntimeError(f"Cloud TTS requested but failed to load: {e}")
+                    raise RuntimeError(f"Cloud {cloud_provider} TTS requested but failed to load: {e}")
 
         # Post-healthcheck routing safety logic
         if not local_tts_healthy:
@@ -233,7 +287,6 @@ class SharedComponents:
                     raise RuntimeError(f"Local TTS healthcheck failed and cloud TTS is not available: {health_error}")
             else:
                 logger.warning(f"Local TTS healthcheck failed in non-production mode: {health_error}. Proceeding with fallback mode.")
-                # Also mark local tts unavailable for the router so it can route to cloud if possible
                 if cloud_tts is not None:
                     self.router.local_tts_available = False
 
@@ -256,6 +309,25 @@ class SharedComponents:
                 safety_status = "production-safe (strict)"
         else:
             safety_status = f"development/test bypass ({env})"
+
+        # ACTIVE_TTS_PROVIDER resolution
+        active_tts_provider = "local"
+        if not local_tts_healthy:
+            if cloud_tts:
+                active_tts_provider = cloud_provider
+            else:
+                active_tts_provider = "failed"
+        else:
+            if self.config.tts_routing_mode == "cloud" and cloud_tts:
+                active_tts_provider = cloud_provider
+
+        from tts_service import MockKokoroModel, MockKokoro
+        mock_tts_active = isinstance(local_tts._model, (MockKokoroModel, MockKokoro))
+
+        logger.info(f"LOCAL_TTS_AVAILABLE={'true' if local_tts_healthy else 'false'}")
+        logger.info(f"CLOUD_TTS_AVAILABLE={'true' if cloud_tts is not None else 'false'}")
+        logger.info(f"ACTIVE_TTS_PROVIDER={active_tts_provider}")
+        logger.info(f"MOCK_TTS_ACTIVE={'true' if mock_tts_active else 'false'}")
 
         logger.info(
             f"\n"
@@ -336,10 +408,13 @@ class DanaAgent(Agent):
     """
     def __init__(self, shared: SharedComponents, latency_recorder: LatencyRecorder):
         instructions = load_instructions(shared.config.agent_prompt_path)
-        super().__init__(instructions=instructions)
-        self.llm = shared.llm
-        self.tts = shared.tts
-        self.stt = shared.stt
+        super().__init__(
+            instructions=instructions,
+            stt=shared.stt,
+            llm=shared.llm,
+            tts=shared.tts,
+            vad=shared.vad,
+        )
         self.prompt_loader = getattr(shared, "prompt_loader", None)
         self._config = shared.config
         self._latency_recorder = latency_recorder
@@ -378,8 +453,8 @@ class DanaAgent(Agent):
         self.interrupted_current_turn = False
         
         # Get the latest user message
-        user_msg = chat_ctx.messages[-1] if chat_ctx.messages else None
-        user_text = user_msg.content if user_msg else ""
+        user_msg = chat_ctx.messages()[-1] if chat_ctx.messages() else None
+        user_text = user_msg.text_content if user_msg else ""
         
         if not user_text:
             logger.warning("llm_node called but no user message found in chat_ctx")
@@ -391,34 +466,8 @@ class DanaAgent(Agent):
             self._latency_recorder.mark("llm_done")
             return
 
-        def is_user_input_divergent(text: str) -> bool:
-            text_lower = text.lower().strip()
-            relevant_keywords = [
-                "insurance", "expense", "funeral", "burial", "benefit", "coverage", "policy", "premium", "cost", "pay",
-                "hello", "hi", "hey", "yes", "no", "ok", "sure", "correct", "wrong", "right", "state", "live", "age",
-                "year", "old", "born", "date", "birth", "month", "day", "cov", "die", "death", "health", "illness",
-                "medical", "history", "qualify", "program", "plan", "rate", "quote", "price", "dollars", "american",
-                "beneficiary", "senior", "elderly", "pension", "retire", "medicare", "medicaid", "social security", "ssi",
-                "alex", "dana", "who", "what", "why", "how", "where", "when", "tell", "show", "get", "give", "help"
-            ]
-            divergent_keywords = [
-                "weat" + "her", "rain", "sunny", "temperature", "sport", "game", "yankees", "baseball", "football",
-                "color", "food", "movie", "song", "jo" + "ke", "marry", "love", "date", "sing", "dance", "bot", "robot",
-                "ai", "computer", "hack", "trump", "biden", "election", "poli" + "tics", "president", "news", "stock",
-                "market", "crypto", "bitcoin", "dog", "cat", "pet", "hobby", "hobbies", "holiday", "vacation"
-            ]
-            for word in divergent_keywords:
-                if word in text_lower:
-                    return True
-            words = text_lower.split()
-            if len(words) > 2:
-                has_relevant = any(w in text_lower for w in relevant_keywords)
-                if not has_relevant:
-                    return True
-            return False
-
         # Check if streaming mode is enabled
-        is_streaming_enabled = os.getenv("DANA_ENABLE_STREAMING_RESPONSE", "false").lower() == "true"
+        is_streaming_enabled = self._config.enable_streaming_response
         if is_streaming_enabled:
             self._latency_recorder.streaming_mode_enabled = True
             
@@ -429,40 +478,24 @@ class DanaAgent(Agent):
                 # Prepend static system prompt prefix (personality and compliance parameters)
                 loader = self.prompt_loader or (self.adapter and self.adapter.prompt_loader)
                 static_prompt = loader.build_system_prompt() if loader else ""
-                
-                # Check for irrelevant or divergent topics
-                is_divergent = is_user_input_divergent(user_text)
-                if is_divergent:
-                    combined_prompt = (
-                        f"{static_prompt}\n\n"
-                        f"### SYSTEM CONTEXT ENFORCEMENT WARNING ###\n"
-                        f"The user has introduced an irrelevant or divergent topic. You must NOT discuss this topic.\n"
-                        f"Use this explicit internal logic pathway: Acknowledge politely, do not engage in the divergent topic, "
-                        f"and gently but firmly redirect the user back to the primary qualifying data points (age, state of residence, "
-                        f"and current coverage status).\n"
-                        f"Example: 'I hear you, but let's get back to the final expense benefits. To see if we can help, how old are you?'\n"
-                        f"##########################################\n\n"
-                        f"{instructions}"
-                    )
-                else:
-                    combined_prompt = f"{static_prompt}\n\n{instructions}"
+                combined_prompt = f"{static_prompt}\n\n{instructions}"
                 
                 # Add compiled instructions as the system prompt
-                new_ctx.messages.append(llm.ChatMessage(
+                new_ctx.add_message(
                     role="system",
                     content=combined_prompt
-                ))
+                )
                 
                 # Copy conversation history (user and assistant messages only)
-                for msg in chat_ctx.messages:
+                for msg in chat_ctx.messages():
                     if msg.role in ("user", "assistant"):
-                        new_ctx.messages.append(llm.ChatMessage(
+                        new_ctx.add_message(
                             role=msg.role,
-                            content=msg.content
-                        ))
+                            content=msg.text_content
+                        )
                 
                 # Estimate prompt tokens
-                prompt_str = instructions + "".join(m.content for m in new_ctx.messages if m.content)
+                prompt_str = instructions + "".join(m.text_content for m in new_ctx.messages() if m.text_content)
                 from metrics.model_cost_metrics import estimate_llm_tokens
                 self.prompt_tokens += estimate_llm_tokens(prompt_str)
 
@@ -477,7 +510,7 @@ class DanaAgent(Agent):
                 
                 first_token = True
                 async for chunk in stream:
-                    content = chunk.choices[0].delta.content if chunk.choices else ""
+                    content = chunk.delta.content if chunk.delta else ""
                     if content:
                         if first_token:
                             first_token = False
@@ -559,7 +592,7 @@ class DanaAgent(Agent):
                         async def disconnect_after_delay(delay: float = 8.0):
                             try:
                                 await asyncio.sleep(delay)
-                                if self.room and self.room.is_connected():
+                                if self.room and self.room.isconnected():
                                     logger.info("Fallback: Disconnecting room after delay...")
                                     await self.room.disconnect()
                             except asyncio.CancelledError:
@@ -577,39 +610,24 @@ class DanaAgent(Agent):
             loader = self.prompt_loader or (self.adapter and self.adapter.prompt_loader)
             static_prompt = loader.build_system_prompt() if loader else ""
             
-            # Check for irrelevant or divergent topics
-            is_divergent = is_user_input_divergent(user_text)
-            if is_divergent:
-                combined_prompt = (
-                    f"{static_prompt}\n\n"
-                    f"### SYSTEM CONTEXT ENFORCEMENT WARNING ###\n"
-                    f"The user has introduced an irrelevant or divergent topic. You must NOT discuss this topic.\n"
-                    f"Use this explicit internal logic pathway: Acknowledge politely, do not engage in the divergent topic, "
-                    f"and gently but firmly redirect the user back to the primary qualifying data points (age, state of residence, "
-                    f"and current coverage status).\n"
-                    f"Example: 'I hear you, but let's get back to the final expense benefits. To see if we can help, how old are you?'\n"
-                    f"##########################################\n\n"
-                    f"{instructions}"
-                )
-            else:
-                combined_prompt = f"{static_prompt}\n\n{instructions}"
+            combined_prompt = f"{static_prompt}\n\n{instructions}"
             
             # Add compiled instructions as the system prompt
-            new_ctx.messages.append(llm.ChatMessage(
+            new_ctx.add_message(
                 role="system",
                 content=combined_prompt
-            ))
+            )
             
             # Copy conversation history (user and assistant messages only)
-            for msg in chat_ctx.messages:
+            for msg in chat_ctx.messages():
                 if msg.role in ("user", "assistant"):
-                    new_ctx.messages.append(llm.ChatMessage(
+                    new_ctx.add_message(
                         role=msg.role,
-                        content=msg.content
-                    ))
+                        content=msg.text_content
+                    )
             
             # Estimate prompt tokens
-            prompt_str = instructions + "".join(m.content for m in new_ctx.messages if m.content)
+            prompt_str = instructions + "".join(m.text_content for m in new_ctx.messages() if m.text_content)
             from metrics.model_cost_metrics import estimate_llm_tokens
             self.prompt_tokens += estimate_llm_tokens(prompt_str)
 
@@ -624,7 +642,7 @@ class DanaAgent(Agent):
             
             response_text = ""
             async for chunk in stream:
-                content = chunk.choices[0].delta.content if chunk.choices else ""
+                content = chunk.delta.content if chunk.delta else ""
                 if content:
                     response_text += content
 
@@ -698,7 +716,7 @@ class DanaAgent(Agent):
                 async def disconnect_after_delay(delay: float = 8.0):
                     try:
                         await asyncio.sleep(delay)
-                        if self.room and self.room.is_connected():
+                        if self.room and self.room.isconnected():
                             logger.info("Fallback: Disconnecting room after delay...")
                             await self.room.disconnect()
                     except asyncio.CancelledError:
@@ -727,8 +745,8 @@ class DanaAgent(Agent):
                     if chunk and first_text:
                         first_text = False
                         self._latency_recorder.mark("tts_first_text")
-                    await tts_stream.push_text(chunk)
-                await tts_stream.flush()
+                    tts_stream.push_text(chunk)
+                tts_stream.flush()
             except asyncio.CancelledError:
                 pass
             except Exception as e:
@@ -738,12 +756,12 @@ class DanaAgent(Agent):
         
         first_audio = True
         try:
-            async for frame in tts_stream:
+            async for ev in tts_stream:
                 if first_audio:
                     first_audio = False
                     self._latency_recorder.mark("tts_first_audio")
                     self._latency_recorder.mark("first_audio_published")
-                yield frame
+                yield ev.frame
         finally:
             await tts_stream.interrupt()
             await tts_stream.aclose()
@@ -769,7 +787,7 @@ async def run_amd_worker(track: rtc.Track, session: AgentSession, agent: any, ro
     
     try:
         async for event in audio_stream:
-            if not room.is_connected() or getattr(agent, "is_voicemail", False):
+            if not room.isconnected() or getattr(agent, "is_voicemail", False):
                 break
                 
             frame = event.frame
@@ -900,7 +918,7 @@ async def entrypoint(ctx: JobContext):
             "resume_false_interruption": True,
             "false_interruption_timeout": 1.0,
         },
-        preemptive_generation=shared.config.preemptive_generation,
+        preemptive_generation={"enabled": shared.config.preemptive_generation},
     )
     
     # Initialize the AgentSession
@@ -931,18 +949,23 @@ async def entrypoint(ctx: JobContext):
             
             # Check for barge-in interruption
             if session.agent_state == "speaking" or getattr(session.agent_state, "value", None) == "speaking":
-                latency_recorder.mark("barge_in_detected")
-                logger.info("Barge-in detected - interrupting agent response")
-                agent.interrupted_current_turn = True
-                import time
-                agent.interrupted_at = time.perf_counter()
-                
-                # Interrupt the session
-                if asyncio.iscoroutinefunction(session.interrupt):
-                    asyncio.create_task(session.interrupt())
+                # Do not allow interruption during the OPENING stage
+                from speech.context_registry import get_current_call_stage
+                stage = get_current_call_stage() or "OPENING"
+                if stage != "OPENING":
+                    latency_recorder.mark("barge_in_detected")
+                    logger.info("Barge-in detected - interrupting agent response")
+                    agent.interrupted_current_turn = True
+                    agent.interrupted_at = time.perf_counter()
+                    
+                    # Interrupt the session
+                    if asyncio.iscoroutinefunction(session.interrupt):
+                        asyncio.create_task(session.interrupt())
+                    else:
+                        session.interrupt()
+                    latency_recorder.mark("barge_in_stopped_audio")
                 else:
-                    session.interrupt()
-                latency_recorder.mark("barge_in_stopped_audio")
+                    logger.info("Barge-in ignored during OPENING stage (greeting playback)")
                 
             # Cancellable fallback task cancellation on barge-in
             if getattr(agent, "fallback_disconnect_task", None):
@@ -1033,6 +1056,9 @@ async def entrypoint(ctx: JobContext):
     
     # Track listener for AMD
     def start_amd_for_track(track):
+        if os.getenv("DANA_CONTROLLED_LIVE_TEST", "false").lower() in ("true", "1", "yes"):
+            logger.info("Bypassing AMD parallel worker for track %s (controlled live test enabled)", track.sid)
+            return
         if track.kind == rtc.TrackKind.KIND_AUDIO:
             if not getattr(agent, "_amd_started", False):
                 agent._amd_started = True
@@ -1041,6 +1067,7 @@ async def entrypoint(ctx: JobContext):
 
     @ctx.room.on("track_subscribed")
     def on_track_subscribed(track: rtc.Track, publication: rtc.TrackPublication, participant: rtc.RemoteParticipant):
+        logger.info(f"[TRACK_SUBSCRIBED_LOG] participant={participant.identity} kind={track.kind} source={publication.source} sid={track.sid}")
         start_amd_for_track(track)
     
     # Wait for participant
@@ -1049,6 +1076,7 @@ async def entrypoint(ctx: JobContext):
     logger.info(f"Participant joined: {participant.identity}")
 
     for publication in participant.track_publications.values():
+        logger.info(f"[EXISTING_TRACK_LOG] participant={participant.identity} source={publication.source} track_present={publication.track is not None}")
         if publication.track:
             start_amd_for_track(publication.track)
     
@@ -1080,6 +1108,9 @@ async def entrypoint(ctx: JobContext):
             logger.error(f"Failed to fetch lead campaign_id: {e}")
 
     # Register call in context registry
+    if not campaign_id:
+        campaign_id = "unknown"
+
     from speech.context_registry import register_call, update_call_stage
     register_call(call_id, campaign_id)
     update_call_stage(call_id, "OPENING")
@@ -1090,8 +1121,8 @@ async def entrypoint(ctx: JobContext):
         min_d, max_d = get_endpoint_delays("OPENING")
         safe_update_endpointing(session, min_d, max_d)
 
-    # Attach session to agent
-    agent.session = session
+    # Attach session to agent (handled automatically by session.start in LiveKit Agents v1.5.x)
+    # agent.session = session
     
     # Instantiate per-call adapter freshly
     agent.adapter = LiveKitRuntimeAdapter(
@@ -1141,10 +1172,10 @@ async def entrypoint(ctx: JobContext):
         room=ctx.room,
         agent=agent,
         room_options=room_io.RoomOptions(
-            audio_input=room_io.AudioInputOptions(enabled=True),
-            audio_output=room_io.AudioOutputOptions(enabled=True),
-            video_input=room_io.VideoInputOptions(enabled=False),
-            text_input=room_io.TextInputOptions(enabled=False),
+            audio_input=True,
+            audio_output=True,
+            video_input=False,
+            text_input=False,
         ),
     )
     
@@ -1186,7 +1217,7 @@ async def entrypoint(ctx: JobContext):
     
     try:
         # Loop until room disconnected
-        while ctx.room.is_connected():
+        while ctx.room.isconnected():
             await asyncio.sleep(1.0)
     finally:
         from ops.worker_capacity import WorkerCapacity
@@ -1394,7 +1425,6 @@ async def entrypoint(ctx: JobContext):
 
             # Save turn latency spans & GPU runtime allocations based on latency recorder
             try:
-                from datetime import datetime, timezone, timedelta
                 from metrics.gpu_cost_allocator import allocate_gpu_cost
                 from routing.model_router import ModelRouter
 
@@ -1515,7 +1545,6 @@ async def entrypoint(ctx: JobContext):
         # Update lead queue status in database based on actual outcome
         try:
             if lead_id and shared.repository:
-                from datetime import datetime, timezone, timedelta
                 from dialer.retry_policy import RetryPolicy
                 
                 if outcome == "voicemail":
@@ -1624,10 +1653,14 @@ async def request_fnc(req: JobRequest) -> None:
 
 
 if __name__ == "__main__":
+    import os
+    num_idle = int(os.getenv("DANA_NUM_IDLE_PROCESSES", "1"))
+    logger.info(f"Starting agent worker with num_idle_processes={num_idle}")
     cli.run_app(
         WorkerOptions(
             entrypoint_fnc=entrypoint,
             prewarm_fnc=prewarm,
             request_fnc=request_fnc,
+            num_idle_processes=num_idle,
         ),
     )

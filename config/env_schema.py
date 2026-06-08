@@ -235,6 +235,46 @@ def validate_env(env_dict: dict[str, str]) -> dict[str, Any]:
     if allow_mock in ("true", "1", "yes"):
         failures.append("DANA_ALLOW_MOCK_TTS must be 'false' in production")
 
+    # Enforce premium_live validation
+    voice_mode = env_dict.get("DANA_VOICE_MODE", "local_cost").strip().lower()
+    if voice_mode == "premium_live":
+        tts_provider = env_dict.get("DANA_TTS_PROVIDER", "elevenlabs").strip().lower()
+        if tts_provider == "elevenlabs":
+            el_key = env_dict.get("ELEVENLABS_API_KEY", "").strip()
+            if not el_key or el_key.lower() in PLACEHOLDER_VALUES or el_key == "":
+                failures.append("premium_live requires ELEVENLABS_API_KEY to be set")
+            el_voice = env_dict.get("ELEVENLABS_VOICE_ID", "").strip()
+            if not el_voice or el_voice.lower() in PLACEHOLDER_VALUES or el_voice == "":
+                failures.append("premium_live requires ELEVENLABS_VOICE_ID to be set")
+        elif tts_provider == "openai":
+            oa_key = env_dict.get("OPENAI_API_KEY", "").strip()
+            if not oa_key or oa_key.lower() in PLACEHOLDER_VALUES or oa_key == "":
+                failures.append("premium_live requires OPENAI_API_KEY to be set for OpenAI TTS")
+            oa_voice = env_dict.get("OPENAI_TTS_VOICE", "").strip()
+            if not oa_voice or oa_voice.lower() in PLACEHOLDER_VALUES or oa_voice == "":
+                failures.append("premium_live requires OPENAI_TTS_VOICE to be set")
+        else:
+            failures.append(f"premium_live requires a cloud provider (elevenlabs or openai), got '{tts_provider}'")
+
+        enable_streaming = env_dict.get("DANA_ENABLE_STREAMING_RESPONSE", "true").strip().lower() in ("true", "1", "yes")
+        if not enable_streaming:
+            failures.append("premium_live requires DANA_ENABLE_STREAMING_RESPONSE=true")
+
+        enable_filters = env_dict.get("DANA_ENABLE_AUDIO_FILTERS", "false").strip().lower() in ("true", "1", "yes")
+        if enable_filters:
+            failures.append("premium_live requires DANA_ENABLE_AUDIO_FILTERS=false")
+
+        allow_mock_tts = env_dict.get("DANA_ALLOW_MOCK_TTS", "false").strip().lower() in ("true", "1", "yes")
+        if allow_mock_tts:
+            failures.append("premium_live requires DANA_ALLOW_MOCK_TTS=false")
+
+        llm_routing = env_dict.get("DANA_LLM_ROUTING_MODE", "local").strip().lower()
+        if llm_routing == "cloud":
+            oa_key = env_dict.get("OPENAI_API_KEY", "").strip()
+            if not oa_key or oa_key.lower() in PLACEHOLDER_VALUES or oa_key == "":
+                failures.append("DANA_LLM_ROUTING_MODE=cloud requires OPENAI_API_KEY to be set")
+
+
     # 5. Check DANA_CONTROLLED_LIVE_TEST warning / prevention of default production-ready status
     controlled_test = env_dict.get("DANA_CONTROLLED_LIVE_TEST", "false").strip().lower()
     if controlled_test in ("true", "1", "yes"):

@@ -113,6 +113,11 @@ class VoiceConfig:
     runtime_env: str = field(default_factory=lambda: env_str("DANA_RUNTIME_ENV", "development"))
     allow_mock_tts: bool = field(default_factory=lambda: env_bool("DANA_ALLOW_MOCK_TTS", False))
     voice_profile: str = field(default_factory=lambda: env_str("DANA_VOICE_PROFILE", "fallback_safe"))
+    voice_mode: str = field(default_factory=lambda: env_str("DANA_VOICE_MODE", "local_cost"))
+    tts_provider: str = field(default_factory=lambda: env_str("DANA_TTS_PROVIDER", "local"))
+    enable_audio_filters: bool = field(default_factory=lambda: env_bool("DANA_ENABLE_AUDIO_FILTERS", False))
+    audio_filter_profile: str = field(default_factory=lambda: env_str("DANA_AUDIO_FILTER_PROFILE", "none"))
+    enable_streaming_response: bool = field(default_factory=lambda: env_bool("DANA_ENABLE_STREAMING_RESPONSE", True))
 
     # ---- Turn-Taking ----
     turn_min_delay: float = field(default_factory=lambda: env_float("DANA_TURN_MIN_DELAY", 0.15))
@@ -141,3 +146,12 @@ class VoiceConfig:
 
     # ---- Logging ----
     log_level: str = field(default_factory=lambda: env_str("LOG_LEVEL", "INFO"))
+
+    def __post_init__(self) -> None:
+        self.voice_mode = self.voice_mode.strip().lower()
+        if self.voice_mode == "premium_live":
+            # Force / override values for premium_live
+            self.tts_routing_mode = env_str("DANA_TTS_ROUTING_MODE", "cloud")
+            self.allow_cloud_tts_fallback = env_bool("DANA_ALLOW_CLOUD_TTS_FALLBACK", True)
+            self.tts_provider = env_str("DANA_TTS_PROVIDER", "elevenlabs")
+            self.enable_streaming_response = env_bool("DANA_ENABLE_STREAMING_RESPONSE", True)

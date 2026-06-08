@@ -138,6 +138,7 @@ class DeploymentDoctor:
 
     def run_env_variable_checks(self):
         if not self.env_dict:
+            self.add_result("Env Variable Check", "FAIL", "No environment variables loaded because the env file is missing or empty.")
             return
             
         validation = validate_env(self.env_dict)

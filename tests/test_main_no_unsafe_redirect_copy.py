@@ -26,3 +26,8 @@ def test_main_py_has_no_unsafe_redirect_copy() -> None:
     assert "politics" not in content_lower, "main.py has hardcoded politics redirect copy"
     assert "sports" not in content_lower, "main.py has hardcoded sports redirect copy"
     assert "joke" not in content_lower, "main.py has hardcoded joke redirect copy"
+    
+    # Verify no old divergent-topic prompt copy remains in main.py
+    assert "divergent topic" not in content_lower, "main.py has old 'divergent topic' copy"
+    assert "final expense benefits" not in content_lower, "main.py has old 'final expense benefits' copy"
+    assert "how old are you" not in content_lower, "main.py has old 'how old are you' redirect copy"
