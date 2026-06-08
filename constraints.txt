@@ -1,11 +1,12 @@
 # Sovereign Voice Stack - Dependency Constraints
 livekit==1.1.8
-livekit-agents==1.5.15
-livekit-plugins-openai==1.5.15
-livekit-plugins-deepgram==1.5.15
-livekit-plugins-silero==1.5.15
+livekit-agents==1.5.17
+livekit-plugins-openai==1.5.17
+livekit-plugins-elevenlabs==1.5.17
+livekit-plugins-deepgram==1.5.17
+livekit-plugins-silero==1.5.17
 faster-whisper==1.2.1
-ctranslate2==4.7.2
-onnxruntime==1.25.0
+ctranslate2==4.8.0
+onnxruntime==1.26.0
 onnxruntime-gpu==1.26.0
 kokoro-onnx==0.5.0
