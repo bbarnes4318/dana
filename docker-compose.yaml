@@ -129,6 +129,7 @@ services:
       dockerfile: Dockerfile
       target: production
     container_name: dana-voice-agent
+    command: python main.py start
     runtime: nvidia
     restart: "no"
     ipc: host
