@@ -140,7 +140,7 @@ class LocallyHostedSTT(stt.STT):
         )
     
     def stream(self, *, conn_options=None, **kwargs) -> "LocalSTTStream":
-        return LocalSTTStream(self)
+        return LocalSTTStream(self, conn_options=conn_options, **kwargs)
 
 
 class LocalSTTStream(stt.SpeechStream):
@@ -149,8 +149,8 @@ class LocalSTTStream(stt.SpeechStream):
     Optimized for low latency, zero-allocation rolling buffer ingestion.
     """
     
-    def __init__(self, stt_instance: LocallyHostedSTT):
-        super().__init__()
+    def __init__(self, stt_instance: LocallyHostedSTT, *, conn_options=None, **kwargs):
+        super().__init__(stt=stt_instance, conn_options=conn_options)
         self._stt = stt_instance
         self._is_speaking = False
         self._speech_start_time: Optional[float] = None
