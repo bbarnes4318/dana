@@ -215,6 +215,12 @@ class SharedComponents:
                 if not oa_key or oa_key.lower() in ("replace_me", "replace-me", ""):
                     raise RuntimeError("DANA_LLM_ROUTING_MODE=cloud requires OPENAI_API_KEY to be set")
 
+            stt_routing = self.config.stt_routing_mode.strip().lower()
+            if stt_routing == "cloud":
+                dg_key = os.getenv("DEEPGRAM_API_KEY", "").strip()
+                if not dg_key or dg_key.lower() in ("replace_me", "replace-me", ""):
+                    raise RuntimeError("premium_live with stt_routing_mode=cloud requires DEEPGRAM_API_KEY to be set")
+
         from routing.model_router import ModelRouter
         self.router = ModelRouter(self.config)
 
@@ -459,6 +465,7 @@ class DanaAgent(Agent):
         tools: list[llm.Tool],
         model_settings: any,
     ) -> AsyncIterable[llm.ChatChunk]:
+        self._latency_recorder.mark("llm_node_entered")
         if self.warm_bridge_active:
             logger.info("warm_bridge_active_dana_suppressed: Suppressing Dana responses after warm bridge success.")
             return
@@ -500,6 +507,8 @@ class DanaAgent(Agent):
         ctx_msgs = get_messages(chat_ctx)
         user_msg = ctx_msgs[-1] if ctx_msgs else None
         user_text = get_msg_text(user_msg)
+        if user_text:
+            self._latency_recorder.mark("user_text_seen_by_llm_node")
         
         if not user_text:
             logger.warning("llm_node called but no user message found in chat_ctx")
@@ -566,6 +575,7 @@ class DanaAgent(Agent):
 
             try:
                 first_chunk = True
+                self._latency_recorder.mark("agent_runtime_process_user_turn_started")
                 # Process user turn via the adapter exactly once using stream
                 async for chunk in self.adapter.process_user_turn_stream(
                     user_text, chat_stream_fn, latency_recorder=self._latency_recorder, interrupted=interrupted
@@ -587,6 +597,7 @@ class DanaAgent(Agent):
             result = getattr(self.adapter, "last_streaming_result", None)
             if result:
                 self.current_turn_response = result.agent_response or ""
+                self._latency_recorder.mark("agent_response_text_created")
                 
                 # Update stage in registry
                 from speech.context_registry import update_call_stage
@@ -794,6 +805,8 @@ class DanaAgent(Agent):
                     if chunk and first_text:
                         first_text = False
                         self._latency_recorder.mark("tts_first_text")
+                        if "greeting_tts_started" in self._latency_recorder.events:
+                            self._latency_recorder.mark("second_turn_tts_first_text")
                     tts_stream.push_text(chunk)
                 tts_stream.flush()
             except asyncio.CancelledError:
@@ -810,6 +823,9 @@ class DanaAgent(Agent):
                     first_audio = False
                     self._latency_recorder.mark("tts_first_audio")
                     self._latency_recorder.mark("first_audio_published")
+                    if "greeting_tts_started" in self._latency_recorder.events:
+                        self._latency_recorder.mark("second_turn_tts_first_audio")
+                        self._latency_recorder.mark("second_turn_audio_published")
                 yield ev.frame
         finally:
             await tts_stream.interrupt()
@@ -978,9 +994,10 @@ async def entrypoint(ctx: JobContext):
         vad=shared.vad,
         turn_handling=turn_handling,
     )
-    
     agent = DanaAgent(shared, latency_recorder)
     agent.room = ctx.room
+    if hasattr(shared.stt, "bind"):
+        session._stt = shared.stt.bind(session, agent)
     session._vad = shared.vad.bind(session, agent)
     
     # Set up session event hooks
@@ -990,6 +1007,7 @@ async def entrypoint(ctx: JobContext):
         old_state_str = str(ev.old_state).lower()
         if "speaking" in state_str:
             logger.info("User speaking started")
+            latency_recorder.mark("stt_speech_start_hook_called")
             # Mark user_speech_resumed if user speaks again after interruption before agent starts speaking
             if getattr(agent, "interrupted_current_turn", False) and latency_recorder.events.get("user_speech_end"):
                 latency_recorder.mark("user_speech_resumed")
@@ -1025,6 +1043,7 @@ async def entrypoint(ctx: JobContext):
         elif "listening" in state_str or "idle" in state_str:
             if "speaking" in old_state_str:
                 logger.info("User speaking stopped")
+                latency_recorder.mark("stt_speech_end_hook_called")
                 latency_recorder.mark("user_speech_end")
                 dur = latency_recorder.duration("user_speech_start", "user_speech_end")
                 if dur is not None:
@@ -1122,6 +1141,7 @@ async def entrypoint(ctx: JobContext):
     # Wait for participant
     participant = await ctx.wait_for_participant()
     latency_recorder.mark("participant_joined")
+    latency_recorder.mark("room_joined")
     logger.info(f"Participant joined: {participant.identity}")
 
     for publication in participant.track_publications.values():
@@ -1255,8 +1275,10 @@ async def entrypoint(ctx: JobContext):
     # Speak greeting depending on opening_mode
     if shared.config.opening_mode == "immediate" and shared.config.opening_line:
         latency_recorder.mark("greeting_started")
+        latency_recorder.mark("greeting_tts_started")
         logger.info(f"Speaking opening line: {shared.config.opening_line}")
         await session.say(shared.config.opening_line)
+        latency_recorder.mark("greeting_audio_published")
         from core.call_state import CallStage
         agent.adapter.state_machine.call_state.transition_to(CallStage.INTEREST_CHECK)
     elif shared.config.opening_mode == "wait_for_user":

@@ -699,6 +699,8 @@ async def run_room_session(ctx: Any, config: LiveKitAgentWorkerConfig) -> None:
     from latency_metrics import LatencyRecorder
     latency_recorder = LatencyRecorder(session_state["call_id"])
     latency_recorder.mark("call_start")
+    latency_recorder.mark("participant_joined")
+    latency_recorder.mark("room_joined")
 
     # Set up runtime
     from core.state_machine import StateMachine
@@ -758,10 +760,14 @@ async def run_room_session(ctx: Any, config: LiveKitAgentWorkerConfig) -> None:
     @session.on("user_state_changed")
     def on_user_state_changed(ev):
         state_str = str(ev.new_state).lower()
+        old_state_str = str(ev.old_state).lower()
         if "speaking" in state_str:
+            latency_recorder.mark("stt_speech_start_hook_called")
             latency_recorder.mark("user_speech_start")
         elif "listening" in state_str or "idle" in state_str:
-            latency_recorder.mark("user_speech_end")
+            if "speaking" in old_state_str:
+                latency_recorder.mark("stt_speech_end_hook_called")
+                latency_recorder.mark("user_speech_end")
 
     @session.on("agent_state_changed")
     def on_agent_state_changed(ev):
@@ -780,7 +786,10 @@ async def run_room_session(ctx: Any, config: LiveKitAgentWorkerConfig) -> None:
     @session.on("user_input_transcribed")
     def on_user_input_transcribed(event):
         if event.is_final:
+            latency_recorder.mark("stt_final_transcript")
             latency_recorder.mark("transcript_final")
+        else:
+            latency_recorder.mark("stt_interim_transcript")
 
     # Define minimal dummy agent class compatible with SDK requirements
     from livekit.agents import Agent as LkAgent
@@ -798,13 +807,18 @@ async def run_room_session(ctx: Any, config: LiveKitAgentWorkerConfig) -> None:
             self.interrupted_at = None
 
         async def llm_node(self, chat_ctx, tools, model_settings):
+            latency_recorder.mark("llm_node_entered")
             # Read last turn and process it
             user_msg = chat_ctx.messages[-1] if chat_ctx.messages else None
             user_text = user_msg.content if user_msg else ""
             if user_text:
+                latency_recorder.mark("user_text_seen_by_llm_node")
                 latency_recorder.mark("llm_request_start")
                 await log_user_turn(session_state, user_text, shared.repository)
+                latency_recorder.mark("agent_runtime_process_user_turn_started")
                 agent_resp = await generate_agent_response(user_text, session_state, runtime)
+                self.current_turn_response = agent_resp
+                latency_recorder.mark("agent_response_text_created")
                 
                 # Fetch compliance warnings from runtime events
                 compliance_warnings = []
@@ -816,8 +830,6 @@ async def run_room_session(ctx: Any, config: LiveKitAgentWorkerConfig) -> None:
                 if compliance_warnings:
                     session_state.setdefault("compliance_warnings", [])
                     session_state["compliance_warnings"].extend(compliance_warnings)
-                
-                self.current_turn_response = agent_resp
                 
                 latency_recorder.mark("llm_done")
                 lat_dict = latency_recorder.to_dict().get("durations", {})
@@ -835,6 +847,8 @@ async def run_room_session(ctx: Any, config: LiveKitAgentWorkerConfig) -> None:
                 yield ChatChunk(choices=[Choice(delta=ChoiceDelta(content=agent_resp))])
 
     agent_instance = SimpleAgent()
+    if hasattr(shared.stt, "bind"):
+        session._stt = shared.stt.bind(session, agent_instance)
     session._vad = shared.vad.bind(session, agent_instance)
     await session.start(
         room=ctx.room,
@@ -862,7 +876,9 @@ async def run_room_session(ctx: Any, config: LiveKitAgentWorkerConfig) -> None:
     # Speak Greeting if enabled
     if config.greeting_enabled and config.greeting_text:
         logger.info(f"Greeting participant with text: '{config.greeting_text}'")
+        latency_recorder.mark("greeting_tts_started")
         await session.say(config.greeting_text)
+        latency_recorder.mark("greeting_audio_published")
         await log_agent_turn(session_state, config.greeting_text, shared.repository)
 
     try:

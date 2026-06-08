@@ -226,8 +226,20 @@ class HybridSTTRouter(stt.STT):
         async with AsyncTrackLocalSTTTask():
             return await self.local_stt._recognize_impl(buffer, language=language)
 
+    def bind(self, session, agent) -> "HybridSTTRouter":
+        import copy
+        bound = copy.copy(self)
+        bound._session = session
+        bound._agent = agent
+        if hasattr(self, "local_stt") and self.local_stt:
+            bound.local_stt = self.local_stt.bind(session, agent)
+        return bound
+
     def stream(self, *args, **kwargs) -> HybridSTTStream:
-        return HybridSTTStream(self, *args, **kwargs)
+        stt_stream = HybridSTTStream(self, *args, **kwargs)
+        if hasattr(self, "_session") and self._session:
+            self._session._active_stt_stream = stt_stream
+        return stt_stream
 
 
 class HybridSTTStream(stt.SpeechStream):
@@ -240,7 +252,12 @@ class HybridSTTStream(stt.SpeechStream):
         self.router = router
         self._preprocessor = router._preprocessor
 
+        self.session = getattr(router, "_session", None)
+        self.agent = getattr(router, "_agent", None)
         self.call_id = get_current_call_id() or "unknown"
+        if self.session and hasattr(self.session, "session_state") and self.session.session_state:
+            self.call_id = self.session.session_state.get("call_id") or self.call_id
+            
         self.campaign_id = get_current_campaign_id()
 
         self.provider = self.router.select_provider(self.call_id, self.campaign_id)
@@ -254,6 +271,11 @@ class HybridSTTStream(stt.SpeechStream):
             call_id=self.call_id,
             campaign_id=self.campaign_id,
         )
+
+        # Mark stt_stream_created
+        recorder = getattr(self.agent, "_latency_recorder", None)
+        if recorder and "stt_stream_created" not in recorder.events:
+            recorder.mark("stt_stream_created")
 
         # Create active stream delegate
         self.delegate_stt = self.router.local_stt
@@ -292,6 +314,10 @@ class HybridSTTStream(stt.SpeechStream):
     async def push_frame(self, frame: rtc.AudioFrame) -> None:
         if self._closed:
             return
+
+        recorder = getattr(self.agent, "_latency_recorder", None)
+        if recorder and "stt_frame_received" not in recorder.events:
+            recorder.mark("stt_frame_received")
 
         if self._preprocessor:
             try:

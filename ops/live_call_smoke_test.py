@@ -28,6 +28,8 @@ async def main_async() -> int:
     parser.add_argument("--to", required=False, help="Destination phone number in E.164 format (e.g. +1XXXXXXXXXX)")
     parser.add_argument("--from", dest="from_num", required=False, help="Outbound caller ID phone number in E.164 format (e.g. +1XXXXXXXXXX)")
     parser.add_argument("--dry-run", action="store_true", help="Validate configuration and run checklist without placing the call")
+    parser.add_argument("--expect-second-turn", action="store_true", help="Validate that a conversation loop has happened")
+    parser.add_argument("--interactive", action="store_true", help="Prompt operator to speak and verify agent response")
     args = parser.parse_args()
 
     # 1. Setup logging
@@ -183,6 +185,36 @@ async def main_async() -> int:
             logger.info(f"  SIP Call Status: {result.sip_call_status}")
             logger.info(f"  SIP Status Code: {result.sip_status_code}")
             logger.info(f"  SIP Status: {result.sip_status}")
+            
+            call_id = room_name.split("-")[-1]
+            logger.info(f"Resolved call_id for metrics check: {call_id}")
+            
+            if args.interactive:
+                input("\n>>> INTERACTIVE MODE ACTIVE: Answer the call on your phone, say 'Yes, I can hear you.', wait for Dana to respond back, and then press Enter here to continue...")
+                
+            if args.expect_second_turn:
+                logger.info("Polling database for timeline metrics verifying conversation loop...")
+                doctor_passed = False
+                broken_stage = "unknown"
+                for attempt in range(30):
+                    await asyncio.sleep(2.0)
+                    metrics = await repository._store.query("latency_metrics", {"call_id": call_id})
+                    if metrics:
+                        from ops.conversation_loop_doctor import analyze_timeline
+                        event_dict = {m["metric_name"]: m["metric_value_ms"] for m in metrics}
+                        ready, broken_stage = analyze_timeline(event_dict)
+                        if ready:
+                            logger.info("CONVERSATION_LOOP_READY=true - Second turn verified successfully!")
+                            doctor_passed = True
+                            break
+                        else:
+                            logger.info(f"Conversation loop progress: missing stage '{broken_stage}' (retrying...)")
+                    else:
+                        logger.info("No latency metrics recorded yet (retrying...)")
+                
+                if not doctor_passed:
+                    logger.error(f"CONVERSATION_LOOP_READY=false - Conversation loop check failed. Broken stage: {broken_stage}")
+                    return 1
             return 0
         else:
             logger.error(f"Live call placement failed: {result.message}")

@@ -104,7 +104,7 @@ class LatencyRecorder:
         }
 
     async def save_metrics(self, repository, stage: str = "opening") -> None:
-        """Persist all recorded durations and rates to database."""
+        """Persist all recorded durations, rates, and timeline events to database."""
         summary = self.to_dict()
         durations = summary.get("durations", {})
         
@@ -126,6 +126,19 @@ class LatencyRecorder:
                 )
             except Exception as e:
                 logger.error(f"Failed to save latency metric {name}: {e}")
+
+        # Also save raw timeline events as event_<name> metrics showing offset from call_start (or init_perf)
+        start = self.events.get("call_start") or self.init_perf
+        for name, val in list(self.events.items()):
+            try:
+                offset_ms = (val - start) * 1000.0
+                await repository.save_latency_metric(
+                    call_id=self.call_id,
+                    metric_name=f"event_{name}",
+                    metric_value_ms=round(offset_ms, 2)
+                )
+            except Exception as e:
+                logger.error(f"Failed to save latency event {name}: {e}")
 
     def log_summary(self):
         """Log call summary as one compact JSON line and output any warnings."""

@@ -155,3 +155,5 @@ class VoiceConfig:
             self.allow_cloud_tts_fallback = env_bool("DANA_ALLOW_CLOUD_TTS_FALLBACK", True)
             self.tts_provider = env_str("DANA_TTS_PROVIDER", "elevenlabs")
             self.enable_streaming_response = env_bool("DANA_ENABLE_STREAMING_RESPONSE", True)
+            self.stt_routing_mode = env_str("DANA_STT_ROUTING_MODE", "cloud")
+            self.stt_provider = env_str("DANA_STT_PROVIDER", "deepgram")

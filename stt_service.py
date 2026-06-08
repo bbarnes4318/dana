@@ -58,6 +58,13 @@ class LocallyHostedSTT(stt.STT):
         self._model: Optional[WhisperModel] = None
         self._initialized = False
         self._lock = asyncio.Lock()
+
+    def bind(self, session, agent) -> "LocallyHostedSTT":
+        import copy
+        bound = copy.copy(self)
+        bound._session = session
+        bound._agent = agent
+        return bound
         
     async def initialize(self):
         async with self._lock:
@@ -138,9 +145,19 @@ class LocallyHostedSTT(stt.STT):
             type=SpeechEventType.FINAL_TRANSCRIPT,
             alternatives=[SpeechData(text=text, language=language or self.config.language)]
         )
-    
     def stream(self, *, conn_options=None, **kwargs) -> "LocalSTTStream":
-        return LocalSTTStream(self, conn_options=conn_options, **kwargs)
+        stt_stream = LocalSTTStream(
+            self,
+            conn_options=conn_options,
+            session=getattr(self, "_session", None),
+            agent=getattr(self, "_agent", None),
+            **kwargs
+        )
+        if hasattr(self, "_session") and self._session:
+            self._session._active_stt_stream = stt_stream
+            if hasattr(self._session, "session_state") and self._session.session_state:
+                stt_stream._call_id = self._session.session_state.get("call_id") or stt_stream._call_id
+        return stt_stream
 
 
 class LocalSTTStream(stt.SpeechStream):
@@ -149,9 +166,11 @@ class LocalSTTStream(stt.SpeechStream):
     Optimized for low latency, zero-allocation rolling buffer ingestion.
     """
     
-    def __init__(self, stt_instance: LocallyHostedSTT, *, conn_options=None, **kwargs):
+    def __init__(self, stt_instance: LocallyHostedSTT, *, conn_options=None, session=None, agent=None, **kwargs):
         super().__init__(stt=stt_instance, conn_options=conn_options)
         self._stt = stt_instance
+        self._session = session
+        self._agent = agent
         self._is_speaking = False
         self._speech_start_time: Optional[float] = None
         self._speech_end_time: Optional[float] = None
@@ -160,7 +179,14 @@ class LocalSTTStream(stt.SpeechStream):
         # Register in the active streams
         from speech.context_registry import get_current_call_id
         self._call_id = get_current_call_id() or "default"
+        if self._session and hasattr(self._session, "session_state") and self._session.session_state:
+            self._call_id = self._session.session_state.get("call_id") or self._call_id
         LocallyHostedSTT._active_streams[self._call_id] = self
+
+        # Mark stt_stream_created
+        recorder = getattr(self._agent, "_latency_recorder", None)
+        if recorder and "stt_stream_created" not in recorder.events:
+            recorder.mark("stt_stream_created")
 
         # Buffer sizes: 30 seconds at 16kHz
         self._buffer_size = int(self._stt.config.sample_rate * self._stt.config.max_speech_duration_s)
@@ -180,6 +206,10 @@ class LocalSTTStream(stt.SpeechStream):
             self._speech_start_time = time.time()
             logger.info(f"STT: Speech start hook triggered at {self._speech_start_time}, write_cursor={self._write_cursor}")
             self._data_event.set()
+            
+            recorder = getattr(self._agent, "_latency_recorder", None)
+            if recorder and "stt_speech_start_hook_called" not in recorder.events:
+                recorder.mark("stt_speech_start_hook_called")
 
     def on_speech_end(self):
         if self._is_speaking:
@@ -188,7 +218,10 @@ class LocalSTTStream(stt.SpeechStream):
             self._speech_end_time = time.time()
             logger.info(f"STT: Speech end hook triggered at {self._speech_end_time}")
             self._data_event.set()
-
+            
+            recorder = getattr(self._agent, "_latency_recorder", None)
+            if recorder and "stt_speech_end_hook_called" not in recorder.events:
+                recorder.mark("stt_speech_end_hook_called")
     @property
     def speech_start_time(self) -> Optional[float]:
         return self._speech_start_time
@@ -342,13 +375,16 @@ class LocalSTTStream(stt.SpeechStream):
                     ))
             except Exception as e:
                 logger.error(f"Error in STT stream run loop: {e}", exc_info=True)
-
     async def push_frame(self, frame: rtc.AudioFrame):
         if self._closed:
             return
             
         await self._stt._ensure_initialized()
         
+        recorder = getattr(self._agent, "_latency_recorder", None)
+        if recorder and "stt_frame_received" not in recorder.events:
+            recorder.mark("stt_frame_received")
+            
         samples = np.frombuffer(frame.data, dtype=np.int16)
         n_samples = len(samples)
         if n_samples == 0:

@@ -1345,6 +1345,15 @@ async def check_telephony() -> tuple[bool, str]:
 
 async def check_stt() -> tuple[bool, str]:
     """Verify STT faster-whisper package and configuration are available."""
+    voice_mode = os.getenv("DANA_VOICE_MODE", "local_cost").strip().lower()
+    stt_routing_mode = os.getenv("DANA_STT_ROUTING_MODE", "cloud" if voice_mode == "premium_live" else "local").strip().lower()
+    
+    if voice_mode == "premium_live" and stt_routing_mode == "cloud":
+        dg_key = os.getenv("DEEPGRAM_API_KEY", "").strip()
+        if not dg_key or dg_key.lower() in ("replace_me", "replace-me", ""):
+            return False, "premium_live with stt_routing_mode=cloud requires DEEPGRAM_API_KEY to be set"
+        return True, "STT cloud configuration (Deepgram) verified"
+        
     try:
         import faster_whisper
         return True, "STT module (faster-whisper) available"

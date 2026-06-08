@@ -393,6 +393,17 @@ class ElderlySileroVADStream(silero.VADStream):
             if not isinstance(input_frame, rtc.AudioFrame):
                 continue
                 
+            recorder = getattr(self._agent, "_latency_recorder", None)
+            if recorder:
+                if "inbound_audio_frame_received" not in recorder.events:
+                    recorder.mark("inbound_audio_frame_received")
+                
+                samples = np.frombuffer(input_frame.data, dtype=np.int16)
+                if len(samples) > 0:
+                    rms = np.sqrt(np.mean(samples.astype(np.float64) ** 2))
+                    if rms > 0.0 and "inbound_audio_rms_nonzero" not in recorder.events:
+                        recorder.mark("inbound_audio_rms_nonzero")
+                
             # Handle resampling/channel conversion if frame formats mismatch
             if (self._last_input_sample_rate != input_frame.sample_rate or 
                 self._last_input_channels != input_frame.num_channels):
@@ -451,6 +462,10 @@ class ElderlySileroVADStream(silero.VADStream):
                     # Run inference on the actual ONNX session
                     p = await self._loop.run_in_executor(None, self._model, self._inference_f32_data)
                     p = self._exp_filter.apply(exp=1.0, sample=p)
+                    
+                    recorder = getattr(self._agent, "_latency_recorder", None)
+                    if recorder and "vad_inference_done" not in recorder.events:
+                        recorder.mark("vad_inference_done")
                     
                     window_duration = 512 / 16000  # 32ms
                     pub_current_sample += 512
@@ -542,17 +557,30 @@ class ElderlySileroVADStream(silero.VADStream):
                                 )
                                 
                                 # Notify active STT stream for this call
-                                call_id = None
-                                if self._session:
-                                    if hasattr(self._session, "session_state") and self._session.session_state:
-                                        call_id = self._session.session_state.get("call_id")
-                                if not call_id:
-                                    from speech.context_registry import get_current_call_id
-                                    call_id = get_current_call_id() or "default"
+                                recorder = getattr(self._agent, "_latency_recorder", None)
+                                if recorder and "vad_start_of_speech" not in recorder.events:
+                                    recorder.mark("vad_start_of_speech")
+
+                                stt_stream = None
+                                if self._session and hasattr(self._session, "_active_stt_stream"):
+                                    stt_stream = self._session._active_stt_stream
+                                if stt_stream and hasattr(stt_stream, "active_stream"):
+                                    stt_stream = stt_stream.active_stream
+                                    
+                                if not stt_stream:
+                                    call_id = None
+                                    if self._session:
+                                        if hasattr(self._session, "session_state") and self._session.session_state:
+                                            call_id = self._session.session_state.get("call_id")
+                                    if not call_id:
+                                        from speech.context_registry import get_current_call_id
+                                        call_id = get_current_call_id() or "default"
+                                    
+                                    from stt_service import LocallyHostedSTT
+                                    stt_stream = LocallyHostedSTT._active_streams.get(call_id)
                                 
-                                from stt_service import LocallyHostedSTT
-                                stt_stream = LocallyHostedSTT._active_streams.get(call_id)
                                 if stt_stream:
+                                    logger.info(f"VAD notifying active STT stream of speech start: {stt_stream}")
                                     stt_stream.on_speech_start()
                     else:
                         silence_threshold_duration += window_duration
@@ -580,17 +608,30 @@ class ElderlySileroVADStream(silero.VADStream):
                             _reset_write_cursor()
                             
                             # Notify active STT stream for this call
-                            call_id = None
-                            if self._session:
-                                if hasattr(self._session, "session_state") and self._session.session_state:
-                                    call_id = self._session.session_state.get("call_id")
-                            if not call_id:
-                                from speech.context_registry import get_current_call_id
-                                call_id = get_current_call_id() or "default"
+                            recorder = getattr(self._agent, "_latency_recorder", None)
+                            if recorder and "vad_end_of_speech" not in recorder.events:
+                                recorder.mark("vad_end_of_speech")
+
+                            stt_stream = None
+                            if self._session and hasattr(self._session, "_active_stt_stream"):
+                                stt_stream = self._session._active_stt_stream
+                            if stt_stream and hasattr(stt_stream, "active_stream"):
+                                stt_stream = stt_stream.active_stream
                                 
-                            from stt_service import LocallyHostedSTT
-                            stt_stream = LocallyHostedSTT._active_streams.get(call_id)
+                            if not stt_stream:
+                                call_id = None
+                                if self._session:
+                                    if hasattr(self._session, "session_state") and self._session.session_state:
+                                        call_id = self._session.session_state.get("call_id")
+                                if not call_id:
+                                    from speech.context_registry import get_current_call_id
+                                    call_id = get_current_call_id() or "default"
+                                
+                                from stt_service import LocallyHostedSTT
+                                stt_stream = LocallyHostedSTT._active_streams.get(call_id)
+                                
                             if stt_stream:
+                                logger.info(f"VAD notifying active STT stream of speech end: {stt_stream}")
                                 stt_stream.on_speech_end()
                             
                     # Interruption check
