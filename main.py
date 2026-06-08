@@ -432,9 +432,6 @@ class DanaAgent(Agent):
             tts=shared.tts,
             vad=shared.vad,
         )
-        self.llm = shared.llm
-        self.tts = shared.tts
-        self.stt = shared.stt
         self.prompt_loader = getattr(shared, "prompt_loader", None)
         self._config = shared.config
         self._latency_recorder = latency_recorder

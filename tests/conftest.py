@@ -258,6 +258,10 @@ class DummyAgent:
     def __init__(self, instructions: str = "", **kwargs):
         self.instructions = instructions
         self.tools = []
+        self.llm = kwargs.get("llm")
+        self.tts = kwargs.get("tts")
+        self.stt = kwargs.get("stt")
+        self.vad = kwargs.get("vad")
         for name in dir(self):
             try:
                 member = getattr(self, name)
