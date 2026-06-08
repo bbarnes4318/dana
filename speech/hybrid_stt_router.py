@@ -307,6 +307,8 @@ class HybridSTTStream(stt.SpeechStream):
                 )
                 self.delegate_stt = self.router.local_stt
 
+        self._stream_args = args
+        self._stream_kwargs = kwargs.copy()
         self.active_stream = self.delegate_stt.stream(*args, **kwargs)
         self._closed = False
         super().__init__(stt=stt_val, conn_options=conn_options)
@@ -330,9 +332,28 @@ class HybridSTTStream(stt.SpeechStream):
         except Exception as e:
             logger.error(f"STT stream push frame failed on ({self.provider}): {e}")
             
-            # Switch to fallback only at stream/session boundary or clean utterance boundary.
-            # Do NOT hot-swap providers mid-utterance.
-            if self.provider == "local":
+            if self.provider != "local":
+                logger.warning(f"Falling back to Local STT in push_frame due to error: {e}")
+                try:
+                    await self.active_stream.aclose()
+                except Exception:
+                    pass
+                self.router.log_decision(
+                    "local",
+                    reason=f"runtime_fallback_on_push_error: {e}",
+                    call_id=self.call_id,
+                    campaign_id=self.campaign_id,
+                )
+                self.provider = "local"
+                self.delegate_stt = self.router.local_stt
+                self.active_stream = self.delegate_stt.stream(*self._stream_args, **self._stream_kwargs)
+                try:
+                    await self.active_stream.push_frame(frame)
+                except Exception as local_err:
+                    logger.error(f"Fallback local STT push_frame also failed: {local_err}")
+                    self._closed = True
+                    raise local_err
+            else:
                 _local_failures[self.call_id] = _local_failures.get(self.call_id, 0) + 1
                 self.router.log_decision(
                     "local",
@@ -340,21 +361,39 @@ class HybridSTTStream(stt.SpeechStream):
                     call_id=self.call_id,
                     campaign_id=self.campaign_id,
                 )
-            self._closed = True
-            try:
-                await self.active_stream.aclose()
-            except Exception:
-                pass
-            raise e
+                self._closed = True
+                try:
+                    await self.active_stream.aclose()
+                except Exception:
+                    pass
+                raise e
 
     async def _run(self) -> None:
         """Forward speech events from the active stream delegate to our local event channel."""
-        try:
-            async for event in self.active_stream:
-                self._event_ch.send_nowait(event)
-        except Exception as e:
-            logger.error(f"Error in STT stream forwarding run loop: {e}")
-            raise e
+        while not self._closed:
+            try:
+                async for event in self.active_stream:
+                    self._event_ch.send_nowait(event)
+                break
+            except Exception as e:
+                logger.error(f"Error in STT stream forwarding run loop (provider={self.provider}): {e}")
+                if self.provider != "local" and not self._closed:
+                    logger.warning(f"Falling back to Local STT in _run due to error: {e}")
+                    try:
+                        await self.active_stream.aclose()
+                    except Exception:
+                        pass
+                    self.router.log_decision(
+                        "local",
+                        reason=f"runtime_fallback_on_run_error: {e}",
+                        call_id=self.call_id,
+                        campaign_id=self.campaign_id,
+                    )
+                    self.provider = "local"
+                    self.delegate_stt = self.router.local_stt
+                    self.active_stream = self.delegate_stt.stream(*self._stream_args, **self._stream_kwargs)
+                else:
+                    raise e
 
     async def aclose(self, *, wait: bool = True) -> None:
         self._closed = True
