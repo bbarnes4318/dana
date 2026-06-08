@@ -435,7 +435,7 @@ def create_stt(config: VoiceConfig) -> stt.STT:
     )
     local_stt = LocallyHostedSTT(stt_config)
 
-    provider = os.getenv("DANA_STT_PROVIDER", "local").lower()
+    provider = config.stt_provider.lower()
     mode = config.stt_routing_mode.lower()
     
     if provider == "deepgram" or mode == "cloud":
