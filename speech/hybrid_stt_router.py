@@ -248,7 +248,6 @@ class HybridSTTStream(stt.SpeechStream):
     def __init__(self, router: HybridSTTRouter, *args, **kwargs) -> None:
         stt_val = kwargs.pop("stt", router)
         conn_options = kwargs.get("conn_options")
-        super().__init__(stt=stt_val, conn_options=conn_options)
         self.router = router
         self._preprocessor = router._preprocessor
 
@@ -310,6 +309,7 @@ class HybridSTTStream(stt.SpeechStream):
 
         self.active_stream = self.delegate_stt.stream(*args, **kwargs)
         self._closed = False
+        super().__init__(stt=stt_val, conn_options=conn_options)
 
     async def push_frame(self, frame: rtc.AudioFrame) -> None:
         if self._closed:
