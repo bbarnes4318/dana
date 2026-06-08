@@ -6,6 +6,7 @@ livekit>=1.1.8
 livekit-api>=1.0.0
 livekit-agents[silero,turn-detector]>=1.5.12
 livekit-plugins-openai>=1.5.12
+livekit-plugins-elevenlabs>=1.5.12
 livekit-plugins-silero>=1.5.12
 livekit-plugins-deepgram>=1.5.12
 
