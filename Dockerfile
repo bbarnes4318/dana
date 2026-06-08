@@ -1,7 +1,7 @@
 # Sovereign Voice Stack - Voice Agent Dockerfile
 # Optimized for ultra-low-latency STT/TTS with CUDA support
 
-FROM nvidia/cuda:12.1-cudnn8-runtime-ubuntu22.04 AS base
+FROM nvidia/cuda:12.1.1-cudnn8-runtime-ubuntu22.04 AS base
 
 # Prevent interactive prompts during package installation
 ENV DEBIAN_FRONTEND=noninteractive
