@@ -150,7 +150,7 @@ async def main_async() -> int:
     logger.info("========== EXECUTING CONTROLLED LIVE CALL ==========")
     adapter = LiveKitOutboundAdapter()
     
-    room_name = f"smoke-test-room-{uuid.uuid4().hex[:8]}"
+    room_name = f"dana-smoke-test-{uuid.uuid4().hex[:8]}"
     part_identity = f"smoke-test-participant-{uuid.uuid4().hex[:8]}"
 
     dial_config = LiveKitDialConfig(
