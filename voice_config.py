@@ -153,7 +153,16 @@ class VoiceConfig:
             # Force / override values for premium_live
             self.tts_routing_mode = env_str("DANA_TTS_ROUTING_MODE", "cloud")
             self.allow_cloud_tts_fallback = env_bool("DANA_ALLOW_CLOUD_TTS_FALLBACK", True)
-            self.tts_provider = env_str("DANA_TTS_PROVIDER", "elevenlabs")
+            
+            tts_prov = env_str("DANA_TTS_PROVIDER", "elevenlabs").strip().lower()
+            if tts_prov == "local":
+                tts_prov = "elevenlabs"
+            self.tts_provider = tts_prov
+            
             self.enable_streaming_response = env_bool("DANA_ENABLE_STREAMING_RESPONSE", True)
             self.stt_routing_mode = env_str("DANA_STT_ROUTING_MODE", "cloud")
-            self.stt_provider = env_str("DANA_STT_PROVIDER", "deepgram")
+            
+            stt_prov = env_str("DANA_STT_PROVIDER", "deepgram").strip().lower()
+            if stt_prov == "local":
+                stt_prov = "deepgram"
+            self.stt_provider = stt_prov
