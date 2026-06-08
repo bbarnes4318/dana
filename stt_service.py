@@ -229,7 +229,7 @@ class LocalSTTStream(stt.SpeechStream):
             })
         return results
 
-    async def _run(self) -> AsyncIterator[SpeechEvent]:
+    async def _run(self) -> None:
         await self._stt._ensure_initialized()
         
         while not self._closed:
@@ -297,7 +297,7 @@ class LocalSTTStream(stt.SpeechStream):
                         logger.info(f"STT early emit triggered for token: '{first_word_text}' (confidence: {first_word.confidence:.2f})")
                         self._early_emitted = True
                         
-                        yield SpeechEvent(
+                        self._event_ch.send_nowait(SpeechEvent(
                             type=SpeechEventType.FINAL_TRANSCRIPT,
                             alternatives=[SpeechData(
                                 language=self._stt.config.language,
@@ -307,7 +307,7 @@ class LocalSTTStream(stt.SpeechStream):
                                 confidence=first_word.confidence,
                                 words=[first_word]
                             )]
-                        )
+                        ))
                         
                         self._speech_finalized = False
                         self._write_cursor = 0
@@ -317,7 +317,7 @@ class LocalSTTStream(stt.SpeechStream):
                     self._speech_finalized = False
                     self._write_cursor = 0
                     
-                    yield SpeechEvent(
+                    self._event_ch.send_nowait(SpeechEvent(
                         type=SpeechEventType.FINAL_TRANSCRIPT,
                         alternatives=[SpeechData(
                             language=self._stt.config.language,
@@ -327,9 +327,9 @@ class LocalSTTStream(stt.SpeechStream):
                             confidence=sum(w.confidence for w in words) / len(words) if words else 0.0,
                             words=words
                         )]
-                    )
+                    ))
                 else:
-                    yield SpeechEvent(
+                    self._event_ch.send_nowait(SpeechEvent(
                         type=SpeechEventType.INTERIM_TRANSCRIPT,
                         alternatives=[SpeechData(
                             language=self._stt.config.language,
@@ -339,7 +339,7 @@ class LocalSTTStream(stt.SpeechStream):
                             confidence=sum(w.confidence for w in words) / len(words) if words else 0.0,
                             words=words
                         )]
-                    )
+                    ))
             except Exception as e:
                 logger.error(f"Error in STT stream run loop: {e}", exc_info=True)
 
