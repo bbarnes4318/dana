@@ -26,8 +26,14 @@ print('✓ Whisper STT ready')
 echo "[3/4] Verifying Kokoro TTS model..."
 python -c "
 from kokoro_onnx import Kokoro
+import os
 print('Loading Kokoro ONNX...')
-kokoro = Kokoro('kokoro-v1.0')
+model_path = os.environ.get('KOKORO_MODEL_PATH', '/root/.cache/kokoro/kokoro-v1.0.onnx')
+voices_path = os.environ.get('KOKORO_VOICES_PATH', '/root/.cache/kokoro/voices-v1.0.bin')
+if not os.path.exists(model_path):
+    model_path = 'models/kokoro-v1.0.onnx'
+    voices_path = 'models/voices-v1.0.bin'
+kokoro = Kokoro(model_path, voices_path)
 print('✓ Kokoro TTS ready')
 "
 
