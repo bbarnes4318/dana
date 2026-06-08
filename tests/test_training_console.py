@@ -309,6 +309,8 @@ def test_cli_summary_outputs_json(temp_dir):
     env = os.environ.copy()
     env["PYTHONPATH"] = str(Path(".").resolve())
     env["DANA_DATA_DIR"] = str(temp_dir)
+    env["DATABASE_URL"] = ""
+    env["DATABASE_ADMIN_URL"] = ""
     res = subprocess.run(cmd, capture_output=True, text=True, env=env)
     assert res.returncode == 0
     data = json.loads(res.stdout.strip())
@@ -327,6 +329,8 @@ def test_cli_review_list_outputs_json(temp_dir):
     env = os.environ.copy()
     env["PYTHONPATH"] = str(Path(".").resolve())
     env["DANA_DATA_DIR"] = str(temp_dir)
+    env["DATABASE_URL"] = ""
+    env["DATABASE_ADMIN_URL"] = ""
     res = subprocess.run(cmd, capture_output=True, text=True, env=env)
     assert res.returncode == 0
     data = json.loads(res.stdout.strip())
@@ -345,11 +349,15 @@ def test_cli_readiness_outputs_json(temp_dir):
     env = os.environ.copy()
     env["PYTHONPATH"] = str(Path(".").resolve())
     env["DANA_DATA_DIR"] = str(temp_dir)
+    env["DATABASE_URL"] = ""
+    env["DATABASE_ADMIN_URL"] = ""
     res = subprocess.run(cmd, capture_output=True, text=True, env=env)
     assert res.returncode in (0, 1)
     data = json.loads(res.stdout.strip())
     assert "success" in data
     assert data["action"] == "run_readiness"
+
+
 
 
 # 17. test_no_live_prompt_file_modified

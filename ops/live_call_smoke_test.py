@@ -31,7 +31,19 @@ async def main_async() -> int:
     args = parser.parse_args()
 
     # 1. Setup logging
-    log_dir = root_dir / "data" / "live_call_smoke_tests"
+    data_dir_env = os.getenv("DANA_DATA_DIR")
+    if data_dir_env:
+        log_dir = Path(data_dir_env) / "live_call_smoke_tests"
+    else:
+        test_dir = root_dir / "data"
+        try:
+            test_dir.mkdir(parents=True, exist_ok=True)
+            dummy_file = test_dir / ".write_test"
+            dummy_file.write_text("test")
+            dummy_file.unlink()
+            log_dir = root_dir / "data" / "live_call_smoke_tests"
+        except Exception:
+            log_dir = Path("/tmp/live_call_smoke_tests")
     log_dir.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     log_file = log_dir / f"smoke_test_{timestamp}.log"

@@ -118,10 +118,12 @@ def test_worker_builds_config_from_env():
 
 # 6. test_worker_generates_safe_fallback_greeting
 def test_worker_generates_safe_fallback_greeting():
-    with patch.dict(os.environ, {}, clear=True):
-        config = build_worker_config_from_env()
-        greeting = config.greeting_text
-        assert greeting == "Hello?"
+    with patch("config.runtime_env.load_environment"):
+        with patch.dict(os.environ, {}, clear=True):
+            config = build_worker_config_from_env()
+            greeting = config.greeting_text
+            assert greeting == "Hello?"
+
 
 # 7. test_generate_agent_response_uses_agent_runtime
 @pytest.mark.asyncio

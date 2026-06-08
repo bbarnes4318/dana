@@ -12,7 +12,7 @@ from typing import Dict, Optional
 if "DANA_RUNTIME_ENV" not in os.environ:
     os.environ["DANA_RUNTIME_ENV"] = "test"
 
-from config.runtime_env import get_runtime_env
+from config.runtime_env import get_runtime_env, is_test
 from voice_config import VoiceConfig
 from main import SharedComponents
 from latency_metrics import LatencyRecorder
@@ -44,7 +44,7 @@ async def run_canary() -> bool:
     env = get_runtime_env()
     
     # If in test mode or no LiveKit credentials, fall back to dry run to prevent hanging or external connection errors
-    if env == "test" or not os.getenv("LIVEKIT_URL") or os.getenv("LIVEKIT_URL").startswith("wss://replace-me"):
+    if is_test() or not os.getenv("LIVEKIT_URL") or os.getenv("LIVEKIT_URL").startswith("wss://replace-me"):
         return await run_canary_dry_run()
         
     print(f"Canary [LIVE]: Initializing production components (Env: {env})...")

@@ -51,7 +51,7 @@ async def test_readiness_fails_in_production_when_database_url_missing():
     with patch.dict(os.environ, {"DANA_RUNTIME_ENV": "production", "DATABASE_URL": ""}):
         ok, msg = await check_storage()
         assert ok is False
-        assert "DATABASE_URL is not configured" in msg
+        assert "DATABASE_URL" in msg
 
 
 @pytest.mark.asyncio

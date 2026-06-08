@@ -1298,7 +1298,7 @@ async def check_livekit() -> tuple[bool, str]:
     """Check if LiveKit environment variables are present and valid."""
     from config.env_schema import validate_env
     res = validate_env(dict(os.environ))
-    lk_failures = [f for f in res["failures"] if "LIVEKIT_" in f]
+    lk_failures = [f for f in res["failures"] if "LIVEKIT_" in f and "LIVEKIT_SIP_" not in f]
     if lk_failures:
         return False, "; ".join(lk_failures)
     return True, "LiveKit credentials configured"

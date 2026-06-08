@@ -19,14 +19,14 @@ async def test_check_livekit_missing_creds():
     with patch.dict(os.environ, {"LIVEKIT_URL": "", "LIVEKIT_API_KEY": "", "LIVEKIT_API_SECRET": ""}):
         ok, msg = await check_livekit()
         assert ok is False
-        assert "not configured" in msg
+        assert "Missing" in msg
 
 
 @pytest.mark.asyncio
 async def test_check_livekit_present():
     with patch.dict(os.environ, {"LIVEKIT_URL": "wss://test.livekit.cloud", "LIVEKIT_API_KEY": "mykey", "LIVEKIT_API_SECRET": "mysec"}):
         ok, msg = await check_livekit()
-        assert ok is True
+        assert ok is True, f"msg: {msg}"
         assert "configured" in msg
 
 

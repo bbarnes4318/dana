@@ -1,7 +1,15 @@
 """Tests for PlatformScorecard threshold evaluations."""
 
+import os
 import pytest
+from unittest.mock import patch
 from qa.platform_scorecard import PlatformScorecard, DEFAULT_THRESHOLDS
+
+@pytest.fixture(autouse=True)
+def clean_env():
+    with patch.dict(os.environ, {"DANA_RUNTIME_ENV": "development", "DANA_ALLOW_MOCK_TTS": "false"}):
+        yield
+
 
 
 def get_base_mock_data() -> dict:

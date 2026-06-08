@@ -6,6 +6,12 @@ import sys
 import pytest
 from unittest.mock import patch
 
+@pytest.fixture(autouse=True)
+def clean_env():
+    with patch.dict(os.environ, {"DANA_RUNTIME_ENV": "development", "DANA_ALLOW_MOCK_TTS": "false"}):
+        yield
+
+
 
 def get_base_mock_data() -> dict:
     """Returns a valid, passing base benchmark run results structure."""
