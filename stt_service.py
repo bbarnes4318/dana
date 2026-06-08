@@ -139,7 +139,7 @@ class LocallyHostedSTT(stt.STT):
             alternatives=[SpeechData(text=text, language=language or self.config.language)]
         )
     
-    def stream(self) -> "LocalSTTStream":
+    def stream(self, *, conn_options=None, **kwargs) -> "LocalSTTStream":
         return LocalSTTStream(self)
 
 

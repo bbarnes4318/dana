@@ -492,10 +492,13 @@ class ElderlySileroVADStream(silero.VADStream):
                     else:
                         pub_silence_duration += window_duration
                         
-                    # Retrieve a frame from the pre-allocated inference frame pool (zero-allocation)
-                    inf_frame = self._inf_frame_pool[self._inf_pool_index]
-                    self._inf_pool_index = (self._inf_pool_index + 1) % len(self._inf_frame_pool)
-                    inf_frame.data[:1024] = memoryview(self._input_buffer[:512]).cast('B')
+                    # Instantiated as immutable AudioFrame to comply with LiveKit API
+                    inf_frame = rtc.AudioFrame(
+                        sample_rate=16000,
+                        num_channels=1,
+                        samples_per_channel=512,
+                        data=self._input_buffer[:512].tobytes()
+                    )
                     
                     self._event_ch.send_nowait(
                         vad.VADEvent(
