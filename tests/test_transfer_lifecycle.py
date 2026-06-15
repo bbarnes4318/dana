@@ -287,3 +287,65 @@ async def test_transfer_mode_routing(monkeypatch):
 
         assert res.success is True
         assert res.transfer_mode == "warm_bridge"
+
+
+@pytest.mark.asyncio
+async def test_dana_leave_strategy_fails_in_production(monkeypatch):
+    """Test that in production/live mode, execute_leave returns False if remove_participant fails
+    or if lkapi is missing, and warm_bridge fails with dana_leave_failed."""
+    monkeypatch.setenv("DANA_TRANSFER_MODE", "warm_bridge")
+    monkeypatch.setenv("DANA_CONFIRM_TRANSFER_CALL", "yes")
+    monkeypatch.setenv("LIVEKIT_URL", "ws://mock-livekit")
+    monkeypatch.setenv("LIVEKIT_API_KEY", "key")
+    monkeypatch.setenv("LIVEKIT_API_SECRET", "secret")
+    monkeypatch.setenv("LIVEKIT_SIP_OUTBOUND_TRUNK_ID", "trunk_id")
+    # Set to production mode
+    monkeypatch.setenv("DANA_RUNTIME_ENV", "production")
+
+    strategy = DanaLeaveStrategy()
+    
+    # 1. execute_leave should return False if lkapi is missing in production
+    assert await strategy.execute_leave("room-123", "dana_voice_agent", lkapi=None) is False
+
+    # 2. execute_leave should return False if remove_participant raises an exception in production
+    mock_lkapi_fail = MagicMock()
+    mock_lkapi_fail.room = MagicMock()
+    mock_lkapi_fail.room.remove_participant = MagicMock(side_effect=Exception("API offline"))
+    assert await strategy.execute_leave("room-123", "dana_voice_agent", lkapi=mock_lkapi_fail) is False
+
+    # 3. propagate to initiate_warm_bridge returning success=False
+    agent = LicensedAgent(
+        agent_id="agent-prod-fail",
+        name="Prod Agent",
+        phone_number="+15551234569",
+        licensed_states=["*"],
+        status="available"
+    )
+    _agent_store.add_agent(agent)
+
+    mock_participant = MagicMock()
+    mock_participant.participant_id = "part-prod-fail"
+
+    mock_lkapi = MagicMock()
+    mock_lkapi.aclose = AsyncMock()
+    mock_lkapi.sip = MagicMock()
+    mock_lkapi.sip.create_sip_participant = AsyncMock(return_value=mock_participant)
+    # Make remove_participant fail
+    mock_lkapi.room = MagicMock()
+    mock_lkapi.room.remove_participant = MagicMock(side_effect=Exception("API offline"))
+
+    with patch("livekit.api.LiveKitAPI", return_value=mock_lkapi):
+        res = await fe_transfer(
+            room_name="test-room",
+            prospect_identity="Gary Lead",
+            licensed_agent_phone_number="+15551234569",
+            call_summary="Summary",
+            transfer_reason="Consent",
+            lead_profile={"lead_id": "lead-prod-fail", "lead_phone_e164": "+15550000002"},
+            lead_state=None,
+            call_id="call-prod-fail"
+        )
+
+        assert res.success is False
+        assert res.reason == "dana_leave_failed"
+        assert res.transfer_mode == "failed"
