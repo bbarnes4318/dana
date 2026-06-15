@@ -98,6 +98,8 @@ class Call(BaseModel):
     campaign_id: Optional[str] = None
     phone_e164: Optional[str] = None
     caller_id: Optional[str] = None
+    room_name: Optional[str] = None
+    sip_participant_id: Optional[str] = None
     started_at: Optional[datetime] = None
     answered_at: Optional[datetime] = None
     ended_at: Optional[datetime] = None

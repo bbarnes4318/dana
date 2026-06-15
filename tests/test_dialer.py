@@ -463,7 +463,8 @@ async def test_real_mode_without_amd_result_instantly_bridges_call(
     # Set environment variables for real placement and quick timeout
     env_patches = {
         "DANA_CONFIRM_PLACE_CALL": "yes",
-        "DANA_AMD_TIMEOUT": "0.05"
+        "DANA_AMD_TIMEOUT": "0.05",
+        "DANA_CONTROLLED_LIVE_TEST": "yes"
     }
 
     with mock.patch.dict(os.environ, env_patches):

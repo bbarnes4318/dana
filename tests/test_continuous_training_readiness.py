@@ -72,8 +72,8 @@ TABLE_COLUMNS = {
     # Migrations
     migrations_dir = base_dir / "migrations"
     migrations_dir.mkdir(parents=True, exist_ok=True)
-    (migrations_dir / "005_continuous_training.sql").write_text("CREATE TABLE test;", encoding="utf-8")
-    (migrations_dir / "006_telephony_campaigns.sql").write_text("CREATE TABLE test;", encoding="utf-8")
+    (migrations_dir / "006_continuous_training.sql").write_text("CREATE TABLE test;", encoding="utf-8")
+    (migrations_dir / "008_telephony_campaigns.sql").write_text("CREATE TABLE test;", encoding="utf-8")
 
     # Telephony modules
     telephony_dir = base_dir / "telephony"

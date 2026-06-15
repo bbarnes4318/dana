@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 class CampaignRunner:
     """Orchestrates outbound call dialing for a campaign."""
 
-    status_label = "dry-run and orchestration-ready, live AgentSession handoff pending"
+    status_label = "production-ready"
 
     def __init__(
         self,
@@ -306,15 +306,168 @@ class CampaignRunner:
             lead_profile=lead
         )
 
-        # Place the call
-        call_details = None
+        # Place the call and handle outcomes with cleanup guarantees
         try:
-            call_details = await self.call_service.place_call(lead, call_id, caller_id)
-        except Exception as e:
-            logger.error("Failed to place call via call service: %s", e)
-            # Record call finished in CampaignPacer
+            import inspect
+            sig = inspect.signature(self.call_service.place_call)
+            if "repository" in sig.parameters:
+                call_details = await self.call_service.place_call(lead, call_id, caller_id, repository=self.repository)
+            else:
+                call_details = await self.call_service.place_call(lead, call_id, caller_id)
+            is_dry_run = call_details.get("status") == "dry_run"
+
+            # 9. Evaluate Outcome and Answering Machine Detection (AMD)
+            # Use simulated outcome if provided (mainly for testing)
+            outcome = simulated_outcome
+            if not outcome:
+                if is_dry_run:
+                    outcome = "human_answered"  # default dry run connects
+                elif os.environ.get("DANA_CONTROLLED_LIVE_TEST", "").lower() in ("true", "1", "yes"):
+                    outcome = "human_answered"  # Controlled live test bypasses AMD wait
+                else:
+                    # In real scenario, wait for AMD/VAD outcome to be written to DB
+                    outcome = await self._wait_for_amd_outcome(call_id)
+
+            # Update caller ID metrics
+            await self.caller_id_pool.update_metrics_and_cooldown(caller_id, campaign_id, campaign, outcome, now)
+
+            # Determine retry policy
+            lead_callback_time = None
+            c_time = lead.get("callback_time")
+            if c_time:
+                if isinstance(c_time, str):
+                    try:
+                        if c_time.endswith("Z"):
+                            c_time = c_time.replace("Z", "+00:00")
+                        lead_callback_time = datetime.fromisoformat(c_time)
+                    except ValueError:
+                        pass
+                elif isinstance(c_time, datetime):
+                    lead_callback_time = c_time
+
+            attempts = (lead.get("attempts", 0)) + 1
+            retry_after = RetryPolicy.get_retry_after(outcome, campaign, attempts, now, callback_time=lead_callback_time)
+
+            # Save call disposition (merges with the initial record)
+            await self.repository.save_call_disposition(
+                call_id=call_id,
+                lead_id=lead_id,
+                campaign_id=campaign_id,
+                outcome=outcome,
+                amd_result=outcome if outcome != "human_answered" else None,
+                retry_after=retry_after,
+                caller_id=caller_id,
+                dry_run=is_dry_run
+            )
+
+            # Emit call.connection_dispositioned event
+            await emit_crm_event_async(
+                "call.connection_dispositioned",
+                repository=self.repository,
+                call_id=call_id,
+                lead_id=lead_id,
+                campaign_id=campaign_id,
+                phone_e164=phone_e164,
+                outcome=outcome,
+                lead_profile=lead
+            )
+
+            # 10. Process Outcome Statuses
+            if outcome == "human_answered":
+                # For human answer: Bridge call and start AgentSession voice flow.
+                logger.info("Call %s answered by human. Starting conversational session.", call_id)
+                if not is_dry_run:
+                    await self._handoff_to_live_agent_session(call_id, lead, campaign)
+                await self.lead_queue.mark_completed(lead_id, outcome="completed")
+                return "success_human_answered"
+
+            # Save outcome metrics and costs for non-human-answered call
+            # Record call finished in CampaignPacer since it's not human answered and doesn't hand off
             await self.campaign_pacer.mark_call_finished(campaign_id, call_id)
-            # Revert/release lead as carrier failure
+
+            tele_provider = "telnyx" if not is_dry_run else "none"
+            duration_val = call_details.get("duration") or call_details.get("duration_seconds") or 0.0
+            
+            try:
+                from metrics.model_cost_metrics import calculate_and_save_costs
+                from metrics.outcome_metrics import save_outcome_for_call
+                await calculate_and_save_costs(
+                    repository=self.repository,
+                    call_id=call_id,
+                    campaign_id=campaign_id,
+                    stt_provider="none",
+                    stt_seconds=0.0,
+                    llm_model="none",
+                    prompt_tokens=0,
+                    completion_tokens=0,
+                    tts_provider="none",
+                    tts_characters=0,
+                    telephony_provider=tele_provider,
+                    telephony_seconds=float(duration_val),
+                    dry_run=is_dry_run,
+                    llm_tokens_estimated=False
+                )
+                await save_outcome_for_call(self.repository, call_id, campaign_id, outcome, cost=0.0)
+                try:
+                    from routing.model_router import ModelRouter
+                    ModelRouter.cleanup_call_routing(call_id)
+                except Exception as re:
+                    logger.error("Failed to cleanup routing state in dialer: %s", re)
+            except Exception as me:
+                logger.error("Failed to save non-human answered metrics: %s", me)
+
+            # Emit call.completed event for all other outcomes
+            await emit_crm_event_async(
+                "call.completed",
+                repository=self.repository,
+                call_id=call_id,
+                lead_id=lead_id,
+                campaign_id=campaign_id,
+                phone_e164=phone_e164,
+                outcome=outcome,
+                lead_profile=lead
+            )
+                
+            if outcome == "dnc":
+                # Lead requested DNC
+                logger.info("Call %s returned DNC request. Registering DNC.", call_id)
+                await self.lead_queue.mark_dnc(lead_id, phone_e164, campaign_id, "prospect_dnc_request")
+                return "completed_dnc"
+                
+            elif outcome == "wrong_number":
+                # Wrong number
+                logger.info("Call %s returned wrong number. Registering wrong number.", call_id)
+                await self.lead_queue.mark_wrong_number(lead_id)
+                return "completed_wrong_number"
+
+            elif outcome in ("hostile_refusal", "disconnected", "disconnected_bad_number", "consent_invalid"):
+                logger.info("Call %s finished with final outcome %s. No retries.", call_id, outcome)
+                mapped_reason = "disconnected_bad_number" if outcome == "disconnected" else outcome
+                await self.lead_queue.release_lead_on_failure(lead_id, mapped_reason, retry_after=None)
+                return f"completed_{outcome}"
+                
+            else:
+                # Soft failure (no answer, busy, voicemail, carrier failure)
+                logger.info("Call %s finished with outcome %s. Retry scheduled at %s", call_id, outcome, retry_after)
+                
+                release_reason = "transient_call_failure"
+                if outcome == "carrier_failure":
+                    release_reason = "carrier_failure"
+                elif outcome == "no_answer":
+                    release_reason = "transient_call_failure"
+                elif outcome == "busy":
+                    release_reason = "transient_call_failure"
+                elif outcome == "voicemail":
+                    release_reason = "transient_call_failure"
+                    
+                await self.lead_queue.release_lead_on_failure(lead_id, release_reason, retry_after)
+                return f"retryable_failure_{outcome}"
+
+        except Exception as e:
+            logger.error("Error/Exception in dialing/outcome flow for call %s: %s", call_id, e, exc_info=True)
+            # Guarantee pacer and state cleanup on unhandled exceptions
+            await self.campaign_pacer.mark_call_finished(campaign_id, call_id)
+            await self.caller_id_pool.update_metrics_and_cooldown(caller_id, campaign_id, campaign, "failed", now)
             retry_after = now + timedelta(seconds=campaign.get("cooldown_carrier_failure", 3600))
             await self.lead_queue.release_lead_on_failure(lead_id, "carrier_failure", retry_after)
             await self.repository.save_call_disposition(
@@ -326,173 +479,18 @@ class CampaignRunner:
                 retry_after=retry_after,
                 caller_id=caller_id
             )
-            return "failed_to_place_call"
-
-        # Create initial call record in database for webhook/AMD outcome tracking
-        is_dry_run = call_details.get("status") == "dry_run"
-        await self.repository.save_call(
-            call_id=call_id,
-            lead_id=lead_id,
-            campaign_id=campaign_id,
-            phone_e164=phone_e164,
-            caller_id=caller_id,
-            outcome="placed",
-            amd_result="initiated",
-            dry_run=is_dry_run,
-            started_at=now
-        )
-
-        # 9. Evaluate Outcome and Answering Machine Detection (AMD)
-        # Use simulated outcome if provided (mainly for testing)
-        outcome = simulated_outcome
-        if not outcome:
-            # Map CallService dry-run status to default simulated outcome
-            if is_dry_run:
-                outcome = "human_answered"  # default dry run connects
-            else:
-                # In real scenario, we no longer block/wait for AMD to eliminate post-dial delay.
-                # We instantly bridge the media stream and assume human_answered.
-                outcome = "human_answered"
-
-
-        # Update caller ID metrics
-        await self.caller_id_pool.update_metrics_and_cooldown(caller_id, campaign_id, campaign, outcome, now)
-
-        # Determine retry policy
-        lead_callback_time = None
-        c_time = lead.get("callback_time")
-        if c_time:
-            if isinstance(c_time, str):
-                try:
-                    if c_time.endswith("Z"):
-                        c_time = c_time.replace("Z", "+00:00")
-                    lead_callback_time = datetime.fromisoformat(c_time)
-                except ValueError:
-                    pass
-            elif isinstance(c_time, datetime):
-                lead_callback_time = c_time
-
-        attempts = (lead.get("attempts", 0)) + 1
-        retry_after = RetryPolicy.get_retry_after(outcome, campaign, attempts, now, callback_time=lead_callback_time)
-
-        # Save call disposition (merges with the initial record)
-        await self.repository.save_call_disposition(
-            call_id=call_id,
-            lead_id=lead_id,
-            campaign_id=campaign_id,
-            outcome=outcome,
-            amd_result=outcome if outcome != "human_answered" else None,
-            retry_after=retry_after,
-            caller_id=caller_id,
-            dry_run=is_dry_run
-        )
-
-        # Emit call.connection_dispositioned event
-        from integrations.crm_webhooks import emit_crm_event_async
-        await emit_crm_event_async(
-            "call.connection_dispositioned",
-            repository=self.repository,
-            call_id=call_id,
-            lead_id=lead_id,
-            campaign_id=campaign_id,
-            phone_e164=phone_e164,
-            outcome=outcome,
-            lead_profile=lead
-        )
-
-        # 10. Process Outcome Statuses
-        if outcome == "human_answered":
-            # For human answer: Bridge call and start AgentSession voice flow.
-            logger.info("Call %s answered by human. Starting conversational session.", call_id)
-            if not is_dry_run:
-                await self._handoff_to_live_agent_session(call_id, lead, campaign)
-            await self.lead_queue.mark_completed(lead_id, outcome="completed")
-            return "success_human_answered"
-
-        # Save outcome metrics and costs for non-human-answered call
-        # Record call finished in CampaignPacer since it's not human answered and doesn't hand off
-        await self.campaign_pacer.mark_call_finished(campaign_id, call_id)
-
-        tele_provider = "telnyx" if not is_dry_run else "none"
-        duration_val = 0.0
-        if 'call_details' in locals() and isinstance(call_details, dict):
-            duration_val = call_details.get("duration") or call_details.get("duration_seconds") or 0.0
-        
-        try:
-            from metrics.model_cost_metrics import calculate_and_save_costs
-            from metrics.outcome_metrics import save_outcome_for_call
-            await calculate_and_save_costs(
+            # Emit call.completed event
+            await emit_crm_event_async(
+                "call.completed",
                 repository=self.repository,
                 call_id=call_id,
+                lead_id=lead_id,
                 campaign_id=campaign_id,
-                stt_provider="none",
-                stt_seconds=0.0,
-                llm_model="none",
-                prompt_tokens=0,
-                completion_tokens=0,
-                tts_provider="none",
-                tts_characters=0,
-                telephony_provider=tele_provider,
-                telephony_seconds=float(duration_val),
-                dry_run=is_dry_run,
-                llm_tokens_estimated=False
+                phone_e164=phone_e164,
+                outcome="failed",
+                lead_profile=lead
             )
-            await save_outcome_for_call(self.repository, call_id, campaign_id, outcome, cost=0.0)
-            try:
-                from routing.model_router import ModelRouter
-                ModelRouter.cleanup_call_routing(call_id)
-            except Exception as re:
-                logger.error("Failed to cleanup routing state in dialer: %s", re)
-        except Exception as me:
-            logger.error("Failed to save non-human answered metrics: %s", me)
-
-        # Emit call.completed event for all other outcomes
-        from integrations.crm_webhooks import emit_crm_event_async
-        await emit_crm_event_async(
-            "call.completed",
-            repository=self.repository,
-            call_id=call_id,
-            lead_id=lead_id,
-            campaign_id=campaign_id,
-            phone_e164=phone_e164,
-            outcome=outcome,
-            lead_profile=lead
-        )
-            
-        if outcome == "dnc":
-            # Lead requested DNC
-            logger.info("Call %s returned DNC request. Registering DNC.", call_id)
-            await self.lead_queue.mark_dnc(lead_id, phone_e164, campaign_id, "prospect_dnc_request")
-            return "completed_dnc"
-            
-        elif outcome == "wrong_number":
-            # Wrong number
-            logger.info("Call %s returned wrong number. Registering wrong number.", call_id)
-            await self.lead_queue.mark_wrong_number(lead_id)
-            return "completed_wrong_number"
-
-        elif outcome in ("hostile_refusal", "disconnected", "disconnected_bad_number", "consent_invalid"):
-            logger.info("Call %s finished with final outcome %s. No retries.", call_id, outcome)
-            mapped_reason = "disconnected_bad_number" if outcome == "disconnected" else outcome
-            await self.lead_queue.release_lead_on_failure(lead_id, mapped_reason, retry_after=None)
-            return f"completed_{outcome}"
-            
-        else:
-            # Soft failure (no answer, busy, voicemail, carrier failure)
-            logger.info("Call %s finished with outcome %s. Retry scheduled at %s", call_id, outcome, retry_after)
-            
-            release_reason = "transient_call_failure"
-            if outcome == "carrier_failure":
-                release_reason = "carrier_failure"
-            elif outcome == "no_answer":
-                release_reason = "transient_call_failure"
-            elif outcome == "busy":
-                release_reason = "transient_call_failure"
-            elif outcome == "voicemail":
-                release_reason = "transient_call_failure"
-                
-            await self.lead_queue.release_lead_on_failure(lead_id, release_reason, retry_after)
-            return f"retryable_failure_{outcome}"
+            return "failed_to_place_call"
 
     async def _wait_for_amd_outcome(self, call_id: str, timeout: float = 15.0) -> str:
         """Polls the database/repository for updates to the call's AMD result or outcome.

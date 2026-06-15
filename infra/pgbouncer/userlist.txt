@@ -1,1 +1,1 @@
-"dana_user" "dana_secure_pass"
+# Dynamically generated at startup from env/secrets

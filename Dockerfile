@@ -29,12 +29,12 @@ RUN update-alternatives --install /usr/bin/python python /usr/bin/python3.11 1 \
 # Create app directory
 WORKDIR /app
 
-# Copy requirements first for better layer caching
-COPY requirements.txt .
+# Copy requirements and constraints first for better layer caching
+COPY requirements.txt constraints.txt ./
 
 # Install Python dependencies
 RUN pip install --no-cache-dir --upgrade pip setuptools wheel \
-    && pip install --no-cache-dir -r requirements.txt
+    && pip install --no-cache-dir -r requirements.txt -c constraints.txt
 
 # ============================================
 # Model Download Stage - Pre-download all models

@@ -235,15 +235,15 @@ class ContinuousTrainingReadinessAuditor:
             ))
 
         # 5. Migration files
-        migration_exists = self.file_exists("migrations/005_continuous_training.sql")
+        migration_exists = self.file_exists("migrations/006_continuous_training.sql")
         checks.append(ReadinessCheckResult(
-            check_id="db_migration_005",
+            check_id="db_migration_006",
             name="Verify continuous training database migration script",
             category=category,
             passed=migration_exists,
             severity="high",
-            message="Database migration 005_continuous_training.sql exists." if migration_exists else "Database migration script migrations/005_continuous_training.sql is missing.",
-            remediation=None if migration_exists else "Restore or draft migrations/005_continuous_training.sql to create database tables."
+            message="Database migration 006_continuous_training.sql exists." if migration_exists else "Database migration script migrations/006_continuous_training.sql is missing.",
+            remediation=None if migration_exists else "Restore or draft migrations/006_continuous_training.sql to create database tables."
         ))
 
         return checks
@@ -1551,10 +1551,10 @@ async def check_storage() -> tuple[bool, str]:
                 
             # Verify migrations are applied
             expected_migrations = [
-                "001_initial", "002_cost_accounting", "002_dialer", "003_integrations",
-                "004_metrics", "005_continuous_training", "006_pgvector_rag_documents",
-                "006_telephony_campaigns", "007_prompt_versioning_indexes", "008_dids",
-                "009_training_notes_review"
+                "001_initial", "002_cost_accounting", "003_dialer", "004_integrations",
+                "005_metrics", "006_continuous_training", "007_pgvector_rag_documents",
+                "008_telephony_campaigns", "009_prompt_versioning_indexes", "010_dids",
+                "011_training_notes_review", "012_call_livekit_metadata", "013_call_turns_metadata"
             ]
             
             try:

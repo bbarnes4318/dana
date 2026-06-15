@@ -47,6 +47,32 @@ from safety.pii_redaction import PIIRedactor
 from storage.repository import Repository
 from core.livekit_runtime_adapter import LiveKitRuntimeAdapter
 
+_active_repository: Optional[Repository] = None
+
+def register_signal_handlers():
+    import signal
+    
+    def handle_exit(sig, frame):
+        logger.info(f"Signal {sig} received. Initiating graceful shutdown...")
+        global _active_repository
+        
+        try:
+            loop = asyncio.get_running_loop()
+            if loop.is_running():
+                loop.create_task(graceful_shutdown(_active_repository))
+                return
+        except RuntimeError:
+            pass
+            
+        asyncio.run(graceful_shutdown(_active_repository))
+
+    try:
+        signal.signal(signal.SIGINT, handle_exit)
+        signal.signal(signal.SIGTERM, handle_exit)
+        logger.info("Signal handlers registered successfully.")
+    except Exception as e:
+        logger.warning(f"Could not register signal handlers: {e}")
+
 # Load environment variables
 load_dotenv()
 
@@ -420,6 +446,9 @@ class SharedComponents:
         self.output_validator = OutputValidator()
         self.pii_redactor = PIIRedactor()
         self.repository = Repository()
+        global _active_repository
+        _active_repository = self.repository
+        graceful_startup_integrations(self.repository)
 
         logger.info("All shared components initialized successfully")
 
@@ -964,10 +993,63 @@ async def entrypoint(ctx: JobContext):
         shared = SharedComponents(config)
         await shared.initialize()
         ctx.proc.userdata["shared_components"] = shared
-        
-    call_id = str(uuid.uuid4())
+
+    # Connect to room (audio only)
+    await ctx.connect(auto_subscribe=AutoSubscribe.AUDIO_ONLY)
+    
+    # Wait for participant
+    participant = await ctx.wait_for_participant()
+    logger.info(f"Participant joined: {participant.identity}")
+
+    # Resolve call identity and metadata from room metadata and participant metadata
+    call_id = None
+    lead_id = None
+    campaign_id = None
+
+    import json
+    if ctx.room and ctx.room.metadata:
+        try:
+            data = json.loads(ctx.room.metadata)
+            if isinstance(data, dict):
+                call_id = data.get("call_id") or data.get("callId")
+                lead_id = data.get("lead_id") or data.get("leadId")
+                campaign_id = data.get("campaign_id") or data.get("campaignId")
+        except Exception:
+            pass
+
+    if participant and participant.metadata:
+        try:
+            data = json.loads(participant.metadata)
+            if isinstance(data, dict):
+                if not call_id:
+                    call_id = data.get("call_id") or data.get("callId")
+                if not lead_id:
+                    lead_id = data.get("lead_id") or data.get("leadId")
+                if not campaign_id:
+                    campaign_id = data.get("campaign_id") or data.get("campaignId")
+        except Exception:
+            pass
+
+    if not call_id:
+        call_id = str(uuid.uuid4())
+
+    if not campaign_id and participant.identity:
+        try:
+            lead_data = await shared.repository.get_lead_by_phone(participant.identity)
+            if lead_data:
+                campaign_id = lead_data.get("campaign_id")
+                if not lead_id:
+                    lead_id = lead_data.get("id") or lead_data.get("lead_id")
+        except Exception as e:
+            logger.error(f"Failed to fetch lead campaign_id: {e}")
+
+    if not campaign_id:
+        campaign_id = "unknown"
+
     latency_recorder = LatencyRecorder(call_id)
     latency_recorder.mark("call_start")
+    latency_recorder.mark("participant_joined")
+    latency_recorder.mark("room_joined")
     
     # Configure low-latency turn handling
     turn_handling = TurnHandlingOptions(
@@ -1119,9 +1201,6 @@ async def entrypoint(ctx: JobContext):
                     res = detector.process_transcript(partial_text, stage=stage)
                     safe_update_endpointing(session, res.recommended_min_delay, res.recommended_max_delay)
             
-    # Connect to room (audio only)
-    await ctx.connect(auto_subscribe=AutoSubscribe.AUDIO_ONLY)
-    
     # Track listener for AMD
     def start_amd_for_track(track):
         if os.getenv("DANA_CONTROLLED_LIVE_TEST", "false").lower() in ("true", "1", "yes"):
@@ -1137,49 +1216,13 @@ async def entrypoint(ctx: JobContext):
     def on_track_subscribed(track: rtc.Track, publication: rtc.TrackPublication, participant: rtc.RemoteParticipant):
         logger.info(f"[TRACK_SUBSCRIBED_LOG] participant={participant.identity} kind={track.kind} source={publication.source} sid={track.sid}")
         start_amd_for_track(track)
-    
-    # Wait for participant
-    participant = await ctx.wait_for_participant()
-    latency_recorder.mark("participant_joined")
-    latency_recorder.mark("room_joined")
-    logger.info(f"Participant joined: {participant.identity}")
 
     for publication in participant.track_publications.values():
         logger.info(f"[EXISTING_TRACK_LOG] participant={participant.identity} source={publication.source} track_present={publication.track is not None}")
         if publication.track:
             start_amd_for_track(publication.track)
     
-    # Resolve campaign_id from room metadata, participant metadata, or lead profile in database
-    campaign_id = None
-    import json
-    if ctx.room and ctx.room.metadata:
-        try:
-            data = json.loads(ctx.room.metadata)
-            if isinstance(data, dict):
-                campaign_id = data.get("campaign_id") or data.get("campaignId")
-        except Exception:
-            pass
-
-    if not campaign_id and participant and participant.metadata:
-        try:
-            data = json.loads(participant.metadata)
-            if isinstance(data, dict):
-                campaign_id = data.get("campaign_id") or data.get("campaignId")
-        except Exception:
-            pass
-
-    if not campaign_id and participant.identity:
-        try:
-            lead_data = await shared.repository.get_lead_by_phone(participant.identity)
-            if lead_data:
-                campaign_id = lead_data.get("campaign_id")
-        except Exception as e:
-            logger.error(f"Failed to fetch lead campaign_id: {e}")
-
     # Register call in context registry
-    if not campaign_id:
-        campaign_id = "unknown"
-
     from speech.context_registry import register_call, update_call_stage
     register_call(call_id, campaign_id)
     update_call_stage(call_id, "OPENING")
@@ -1209,6 +1252,12 @@ async def entrypoint(ctx: JobContext):
         pii_redactor=shared.pii_redactor,
         repository=shared.repository,
     )
+
+    # Set lead details directly on agent.adapter.lead
+    if agent.adapter and agent.adapter.lead:
+        agent.adapter.lead.lead_id = lead_id
+        agent.adapter.lead.campaign_id = campaign_id
+        agent.adapter.lead.lead_phone_e164 = participant.identity or "unknown"
     
     # Configure interruption profile callback on stage transition
     if hasattr(agent.adapter, "state_machine") and agent.adapter.state_machine:
@@ -1725,6 +1774,7 @@ async def request_fnc(req: JobRequest) -> None:
 
 if __name__ == "__main__":
     import os
+    register_signal_handlers()
     num_idle = int(os.getenv("DANA_NUM_IDLE_PROCESSES", "1"))
     logger.info(f"Starting agent worker with num_idle_processes={num_idle}")
     cli.run_app(

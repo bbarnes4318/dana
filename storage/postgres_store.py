@@ -23,7 +23,7 @@ TABLE_COLUMNS: dict[str, set[str]] = {
     "schema_migrations": {"version", "applied_at"},
     "campaigns": {"id", "campaign_id", "name", "status", "config", "created_at", "updated_at"},
     "leads": {"id", "lead_id", "phone_e164", "campaign_id", "consent_artifact_id", "source_vendor", "created_at", "updated_at", "status", "payload", "attempts", "last_attempt_at", "retry_after", "lock_holder_id", "locked_at", "callback_time", "priority"},
-    "calls": {"id", "call_id", "lead_id", "campaign_id", "phone_e164", "caller_id", "started_at", "answered_at", "ended_at", "duration_seconds", "outcome", "recording_url", "transcript", "qualification", "compliance_flags", "latency_summary", "qa_score", "created_at", "updated_at", "amd_result", "retry_after", "dry_run"},
+    "calls": {"id", "call_id", "lead_id", "campaign_id", "phone_e164", "caller_id", "room_name", "sip_participant_id", "started_at", "answered_at", "ended_at", "duration_seconds", "outcome", "recording_url", "transcript", "qualification", "compliance_flags", "latency_summary", "qa_score", "created_at", "updated_at", "amd_result", "retry_after", "dry_run"},
     "call_turns": {
         "id", "call_id", "turn_number", "speaker", "text", "stage", "created_at",
         "call_attempt_id", "campaign_id", "lead_id", "livekit_room_name", "participant_id",
@@ -77,7 +77,8 @@ TABLE_COLUMNS: dict[str, set[str]] = {
     "call_attempts": {
         "id", "campaign_id", "lead_id", "provider_config_id", "status", "phone_number_redacted",
         "phone_number_hash", "livekit_room_name", "livekit_participant_id", "livekit_sip_call_id",
-        "provider_call_id", "started_at", "answered_at", "ended_at", "duration_seconds",
+        "provider_call_id", "sip_call_status", "sip_status_code", "sip_status",
+        "started_at", "answered_at", "ended_at", "duration_seconds",
         "outcome", "failure_reason", "transfer_consent", "transfer_attempted", "transfer_successful",
         "post_call_export_path", "metadata", "created_at", "updated_at"
     },
@@ -169,15 +170,17 @@ class PostgresStore(BaseStore):
             if not self._migrations_checked:
                 logger.info("Ensuring database migrations are applied...")
                 # Connect directly using DATABASE_ADMIN_URL to avoid running migrations via PgBouncer
-                admin_dsn = os.environ.get("DATABASE_ADMIN_URL") or self._dsn
-                if admin_dsn:
-                    logger.info("Running migrations via direct admin connection to bypass PgBouncer...")
-                    conn = await asyncpg.connect(admin_dsn)
-                    try:
-                        from storage.migrations import run_migrations
-                        await run_migrations(conn)
-                    finally:
-                        await conn.close()
+                admin_dsn = os.environ.get("DATABASE_ADMIN_URL")
+                if not admin_dsn:
+                    raise ValueError("DATABASE_ADMIN_URL must be configured to run migrations directly and bypass PgBouncer.")
+                
+                logger.info("Running migrations via direct admin connection to bypass PgBouncer...")
+                conn = await asyncpg.connect(admin_dsn)
+                try:
+                    from storage.migrations import run_migrations
+                    await run_migrations(conn)
+                finally:
+                    await conn.close()
                 self._migrations_checked = True
 
     async def close(self) -> None:

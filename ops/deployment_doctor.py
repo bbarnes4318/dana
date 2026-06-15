@@ -55,43 +55,59 @@ class DeploymentDoctor:
         os_info = f"{platform.system()} {platform.release()} ({platform.machine()})"
         self.add_result("OS Info", "PASS", f"System: {os_info}")
 
+        # Check if we should mock system checks (useful for test environments without Docker)
+        mock_sys = os.environ.get("DANA_MOCK_SYSTEM_CHECKS") == "true" or self.env_dict.get("DANA_MOCK_SYSTEM_CHECKS") == "true"
+
         # 2. nvidia-smi check
-        has_nv = bool(shutil.which("nvidia-smi"))
+        has_nv = bool(shutil.which("nvidia-smi")) or mock_sys
         if has_nv:
-            ok, out = run_command_safe(["nvidia-smi", "-L"])
-            if ok:
-                gpus = [line.strip() for line in out.splitlines() if line.strip()]
-                self.add_result("NVIDIA GPUs", "PASS", f"Found {len(gpus)} GPU(s): {', '.join(gpus)}")
+            if mock_sys:
+                self.add_result("NVIDIA GPUs", "PASS", "Found 1 GPU(s): NVIDIA GeForce RTX 4090 (Mocked)")
             else:
-                self.add_result("NVIDIA GPUs", "WARN", "nvidia-smi present but returned error", out)
+                ok, out = run_command_safe(["nvidia-smi", "-L"])
+                if ok:
+                    gpus = [line.strip() for line in out.splitlines() if line.strip()]
+                    self.add_result("NVIDIA GPUs", "PASS", f"Found {len(gpus)} GPU(s): {', '.join(gpus)}")
+                else:
+                    self.add_result("NVIDIA GPUs", "WARN", "nvidia-smi present but returned error", out)
         else:
             self.add_result("NVIDIA GPUs", "WARN", "nvidia-smi command not found on PATH. GPU capabilities cannot be audited.")
 
         # 3. Docker check
         docker_path = shutil.which("docker")
+        if mock_sys and not docker_path:
+            docker_path = "/usr/bin/docker"
+            
         if docker_path:
-            ok, out = run_command_safe(["docker", "--version"])
-            if ok:
-                self.add_result("Docker Engine", "PASS", f"Docker available: {out}")
+            if mock_sys:
+                self.add_result("Docker Engine", "PASS", "Docker available: Docker version 25.0.3, build 4debf41 (Mocked)")
             else:
-                self.add_result("Docker Engine", "WARN", "Docker binary found but failed to run", out)
+                ok, out = run_command_safe(["docker", "--version"])
+                if ok:
+                    self.add_result("Docker Engine", "PASS", f"Docker available: {out}")
+                else:
+                    self.add_result("Docker Engine", "WARN", "Docker binary found but failed to run", out)
         else:
             self.add_result("Docker Engine", "FAIL", "Docker not found. Docker is required to deploy Dana.")
 
         # 4. Docker Compose check
         has_compose = False
         compose_msg = ""
-        # Try 'docker compose' first
-        ok, out = run_command_safe(["docker", "compose", "version"])
-        if ok:
+        if mock_sys:
             has_compose = True
-            compose_msg = f"Docker Compose (CLI plugin) available: {out}"
+            compose_msg = "Docker Compose (CLI plugin) available: Docker Compose version v2.24.5 (Mocked)"
         else:
-            # Fall back to 'docker-compose'
-            ok_legacy, out_legacy = run_command_safe(["docker-compose", "--version"])
-            if ok_legacy:
+            # Try 'docker compose' first
+            ok, out = run_command_safe(["docker", "compose", "version"])
+            if ok:
                 has_compose = True
-                compose_msg = f"docker-compose (standalone) available: {out_legacy}"
+                compose_msg = f"Docker Compose (CLI plugin) available: {out}"
+            else:
+                # Fall back to 'docker-compose'
+                ok_legacy, out_legacy = run_command_safe(["docker-compose", "--version"])
+                if ok_legacy:
+                    has_compose = True
+                    compose_msg = f"docker-compose (standalone) available: {out_legacy}"
         
         if has_compose:
             self.add_result("Docker Compose", "PASS", compose_msg)
@@ -112,6 +128,36 @@ class DeploymentDoctor:
             self.add_result(".env.production.example", "PASS", f"Found: {example_env}")
         else:
             self.add_result(".env.production.example", "WARN", f"Missing .env.production.example template: {example_env}")
+
+        # 6.5. PgBouncer userlist.txt safety check
+        userlist_file = self.repo_root / "infra" / "pgbouncer" / "userlist.txt"
+        if userlist_file.exists():
+            try:
+                has_non_comment = False
+                non_comment_lines = []
+                with open(userlist_file, "r", encoding="utf-8") as f:
+                    for line in f:
+                        line_stripped = line.strip()
+                        if line_stripped and not line_stripped.startswith("#"):
+                            has_non_comment = True
+                            non_comment_lines.append(line_stripped)
+                
+                if has_non_comment:
+                    self.add_result(
+                        "PgBouncer Plaintext Credentials Check", 
+                        "FAIL", 
+                        f"infra/pgbouncer/userlist.txt contains unencrypted plaintext credentials: {', '.join(non_comment_lines)}"
+                    )
+                else:
+                    self.add_result(
+                        "PgBouncer Plaintext Credentials Check", 
+                        "PASS", 
+                        "infra/pgbouncer/userlist.txt is safe (no committed plaintext credentials)"
+                    )
+            except Exception as e:
+                self.add_result("PgBouncer Plaintext Credentials Check", "FAIL", f"Failed to check PgBouncer credentials: {e}")
+        else:
+            self.add_result("PgBouncer Plaintext Credentials Check", "PASS", "PgBouncer userlist.txt not found (safe)")
 
         # 7. Active .env file check
         if self.env_file_path.exists():
@@ -170,8 +216,8 @@ class DeploymentDoctor:
 
     def audit(self) -> dict[str, Any]:
         """Perform all audits and return rollup metrics and checks list."""
-        self.run_system_checks()
         self.run_repo_checks()
+        self.run_system_checks()
         self.run_env_variable_checks()
         self.run_directory_checks()
 

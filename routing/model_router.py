@@ -262,7 +262,10 @@ class ModelRouter:
 
     def _get_cloud_provider(self, component: str) -> str:
         if component == "stt":
-            return self.config.stt_provider.strip().lower()
+            prov = self.config.stt_provider.strip().lower()
+            if prov == "local":
+                return "deepgram"
+            return prov
         elif component == "llm":
             return "openai"
         elif component == "tts":

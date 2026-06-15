@@ -395,11 +395,29 @@ def start_webhook_outbox_worker(repository: Repository, poll_interval: float = 1
     logger.info("Starting outbox worker %s with poll interval %.1fs", resolved_worker_id, poll_interval)
     
     async def _worker_loop():
+        from runtime.hot_state import get_hot_state_store
+        hot_store = await get_hot_state_store()
+        lock_name = "webhook_outbox_lock"
+        lock_expiry = 30
+        
         while True:
             try:
-                await drain_pending_webhook_events(repository, resolved_worker_id)
+                # Try to acquire or refresh lock
+                has_lock = await hot_store.acquire_lock(lock_name, resolved_worker_id, lock_expiry)
+                if not has_lock:
+                    # Maybe we already have it, let's try heartbeat
+                    has_lock = await hot_store.heartbeat(lock_name, resolved_worker_id, lock_expiry)
+                
+                if has_lock:
+                    await drain_pending_webhook_events(repository, resolved_worker_id)
+                else:
+                    logger.debug("Another worker holds the webhook outbox lock. Skipping drain.")
             except asyncio.CancelledError:
                 logger.info("Outbox worker loop cancelled.")
+                try:
+                    await hot_store.release_lock(lock_name, resolved_worker_id)
+                except Exception:
+                    pass
                 raise
             except Exception as e:
                 logger.exception("Outbox worker encountered error: %s", e)

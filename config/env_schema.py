@@ -193,6 +193,16 @@ def validate_env(env_dict: dict[str, str]) -> dict[str, Any]:
             replacement = DEPRECATED_ALIASES[key]
             warnings.append(f"Deprecated alias used: {key} (use {replacement} instead)")
 
+    # 1.5 Check for default/placeholder substrings in ANY environment variable value
+    placeholder_substrings = ["replace_me", "replace-me", "dana_secure_pass"]
+    for key, val in env_dict.items():
+        if val:
+            val_lower = val.lower()
+            for ph in placeholder_substrings:
+                if ph in val_lower:
+                    failures.append(f"Variable {key} contains default/placeholder substring '{ph}'")
+                    break
+
     # 2. Check required variables
     all_required = []
     for category, vars_list in REQUIRED_PRODUCTION_VARS.items():

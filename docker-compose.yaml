@@ -13,10 +13,13 @@ services:
   # ============================================
   # PostgreSQL Database (Source of Truth)
   # ============================================
+  # ============================================
+  # PostgreSQL Database (Source of Truth)
+  # ============================================
   postgres:
-    image: postgres:16-alpine
+    image: postgres:16.3-alpine
     container_name: dana-postgres
-    restart: always
+    restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-dana_user}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-dana_secure_pass}
@@ -25,6 +28,16 @@ services:
       - pg-data:/var/lib/postgresql/data
       - ./infra/postgres/postgresql.conf:/etc/postgresql/postgresql.conf:ro
     command: postgres -c 'config_file=/etc/postgresql/postgresql.conf'
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 4096M
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-dana_user} -d $${POSTGRES_DB:-dana}"]
       interval: 10s
@@ -35,9 +48,15 @@ services:
   # PgBouncer Connection Pooler (Production)
   # ============================================
   pgbouncer:
-    image: edoburu/pgbouncer:latest
+    image: edoburu/pgbouncer:1.22.1
     container_name: dana-pgbouncer
-    restart: always
+    restart: unless-stopped
+    entrypoint: >
+      /bin/sh -c "
+      mkdir -p /etc/pgbouncer &&
+      echo \"\\\"$${DB_USER}\\\" \\\"$${DB_PASSWORD}\\\"\" > /etc/pgbouncer/userlist.txt &&
+      exec /entrypoint.sh
+      "
     environment:
       - DB_USER=${POSTGRES_USER:-dana_user}
       - DB_PASSWORD=${POSTGRES_PASSWORD:-dana_secure_pass}
@@ -52,7 +71,16 @@ services:
       - "127.0.0.1:6432:6432"
     volumes:
       - ./infra/pgbouncer/pgbouncer.ini:/etc/pgbouncer/pgbouncer.ini:ro
-      - ./infra/pgbouncer/userlist.txt:/etc/pgbouncer/userlist.txt:ro
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
     depends_on:
       postgres:
         condition: service_healthy
@@ -66,13 +94,23 @@ services:
   # Redis (Hot State & Ephemeral Cache)
   # ============================================
   redis:
-    image: redis:7-alpine
+    image: redis:7.2.4-alpine
     container_name: dana-redis
-    restart: always
+    restart: unless-stopped
     ports:
       - "127.0.0.1:6379:6379"
     volumes:
       - redis-data:/data
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1024M
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -83,10 +121,10 @@ services:
   # vLLM Server — LLM Inference (PRIVATE)
   # ============================================
   vllm-server:
-    image: vllm/vllm-openai:latest
+    image: vllm/vllm-openai:v0.5.3
     container_name: dana-vllm
     runtime: nvidia
-    restart: "no"
+    restart: unless-stopped
     ipc: host
     shm_size: "16gb"
     environment:
@@ -106,8 +144,15 @@ services:
       --host 0.0.0.0
       --port 8000
       --trust-remote-code
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
     deploy:
       resources:
+        limits:
+          memory: 32G
         reservations:
           devices:
             - driver: nvidia
@@ -131,7 +176,7 @@ services:
     container_name: dana-voice-agent
     command: python main.py start
     runtime: nvidia
-    restart: "no"
+    restart: unless-stopped
     ipc: host
     shm_size: "16gb"
     depends_on:
@@ -192,10 +237,16 @@ services:
       # ---- Logging ----
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
     volumes:
-      - ./:/app:ro
       - agent-cache:/root/.cache
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
     deploy:
       resources:
+        limits:
+          memory: 16G
         reservations:
           devices:
             - driver: nvidia
@@ -212,9 +263,9 @@ services:
   # LiveKit Server (local testing ONLY)
   # ============================================
   livekit:
-    image: livekit/livekit-server:latest
+    image: livekit/livekit-server:v1.7.2
     container_name: dana-livekit-local
-    restart: "no"
+    restart: unless-stopped
     ports:
       - "7880:7880"      # HTTP API
       - "7881:7881"      # RTC (WebRTC)
@@ -222,6 +273,16 @@ services:
     environment:
       - LIVEKIT_KEYS=${LIVEKIT_API_KEY:-devkey}:${LIVEKIT_API_SECRET:-devsecret}
     command: --dev --bind 0.0.0.0
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1024M
     profiles:
       - local-testing
 
