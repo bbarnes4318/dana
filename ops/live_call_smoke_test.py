@@ -30,7 +30,22 @@ async def main_async() -> int:
     parser.add_argument("--dry-run", action="store_true", help="Validate configuration and run checklist without placing the call")
     parser.add_argument("--expect-second-turn", action="store_true", help="Validate that a conversation loop has happened")
     parser.add_argument("--interactive", action="store_true", help="Prompt operator to speak and verify agent response")
+    parser.add_argument("--inject-fake-metrics-for-test", action="store_true", help="For test/offline diagnostics: inject fake timeline metrics instead of querying the DB")
     args = parser.parse_args()
+
+    # Environment validation for inject-fake-metrics-for-test
+    if args.inject_fake_metrics_for_test:
+        runtime_env = os.getenv("DANA_RUNTIME_ENV", "development").strip().lower()
+        controlled_live = os.getenv("DANA_CONTROLLED_LIVE_TEST", "false").lower() in ("true", "1", "yes")
+        if runtime_env == "production":
+            logger.error("Error: --inject-fake-metrics-for-test is not allowed in production.")
+            return 1
+        if controlled_live:
+            logger.error("Error: --inject-fake-metrics-for-test is not allowed when DANA_CONTROLLED_LIVE_TEST is enabled.")
+            return 1
+        if runtime_env not in ("test", "testing", "development", "dev"):
+            logger.error(f"Error: --inject-fake-metrics-for-test is only allowed in test or development environments (got '{runtime_env}').")
+            return 1
 
     # 1. Setup logging
     data_dir_env = os.getenv("DANA_DATA_DIR")
@@ -106,13 +121,20 @@ async def main_async() -> int:
     
     logger.info("All readiness checks PASSED.")
 
+    repository = None
+    if not args.dry_run:
+        try:
+            repository = Repository()
+        except Exception as e:
+            logger.error(f"Repository initialization failed: {e}")
+            logger.error("Repository is required for live --expect-second-turn verification")
+            return 1
+
     # 5. Check DNC and suppression lists
     logger.info(f"Checking DNC/suppression list for destination number {to_number}...")
-    if os.getenv("DANA_MOCK_SYSTEM_CHECKS") == "true":
-        logger.info("DNC and suppression checks bypassed/mocked due to DANA_MOCK_SYSTEM_CHECKS=true.")
-        repository = None
+    if args.dry_run or os.getenv("DANA_MOCK_SYSTEM_CHECKS") == "true":
+        logger.info("DNC and suppression checks bypassed/mocked.")
     else:
-        repository = Repository()
         try:
             importer = CampaignLeadImporter(repository)
             suppressed, dnc_reason = await importer.is_suppressed(to_number)
@@ -207,7 +229,7 @@ async def main_async() -> int:
                 broken_stage = "unknown"
                 for attempt in range(30):
                     await asyncio.sleep(2.0)
-                    if repository is None:
+                    if args.inject_fake_metrics_for_test:
                         metrics = [
                             {"metric_name": "room_joined", "metric_value_ms": 100},
                             {"metric_name": "participant_joined", "metric_value_ms": 200},
@@ -224,6 +246,9 @@ async def main_async() -> int:
                             {"metric_name": "second_turn_audio_published", "metric_value_ms": 1300},
                         ]
                     else:
+                        if repository is None:
+                            logger.error("Repository is required for live --expect-second-turn verification")
+                            return 1
                         metrics = await repository._store.query("latency_metrics", {"call_id": call_id})
                     if metrics:
                         from ops.conversation_loop_doctor import analyze_timeline
@@ -239,7 +264,15 @@ async def main_async() -> int:
                         logger.info("No latency metrics recorded yet (retrying...)")
                 
                 if not doctor_passed:
-                    logger.error(f"CONVERSATION_LOOP_READY=false - Conversation loop check failed. Broken stage: {broken_stage}")
+                    if not args.inject_fake_metrics_for_test:
+                        if repository is None:
+                            logger.error("Repository is required for live --expect-second-turn verification")
+                            return 1
+                        final_metrics = await repository._store.query("latency_metrics", {"call_id": call_id})
+                        if not final_metrics:
+                            logger.error(f"No real latency_metrics found for call_id={call_id}; conversation loop was not verified")
+                            return 1
+                    logger.error(f"CONVERSATION_LOOP_READY=false - Broken stage: {broken_stage}")
                     return 1
             return 0
         else:
