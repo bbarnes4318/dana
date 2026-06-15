@@ -52,6 +52,17 @@ _cold_transfer_provider = TelnyxColdTransferProvider()
 _transfer_router = TransferRouter(_agent_store)
 
 
+_reserved_agents_by_call: dict[str, str] = {}
+
+
+async def release_call_agent(call_id: str) -> None:
+    """Release any agent reserved for the given call ID."""
+    agent_id = _reserved_agents_by_call.pop(call_id, None)
+    if agent_id:
+        logger.info("Releasing reserved agent '%s' for call '%s'", agent_id, call_id)
+        await _agent_store.release_agent(agent_id, call_id)
+
+
 async def fe_transfer(
     room_name: str,
     prospect_identity: Optional[str],
@@ -61,6 +72,7 @@ async def fe_transfer(
     lead_profile: dict[str, Any],
     lead_state: Optional[str],
     call_id: str,
+    call_control_id: Optional[str] = None,
 ) -> FeTransferResult:
     """Bridge qualified prospect to a licensed agent using TransferRouter routing logic."""
     logger.info("Initializing fe_transfer routing for room: %s", room_name)
@@ -118,15 +130,25 @@ async def fe_transfer(
         summary_text = build_handoff_summary(lead_profile)
         
         # Execute warm bridge
-        res = await _warm_bridge_provider.initiate_warm_bridge(
-            room_name=room_name,
-            agent=decision.agent,
-            summary=summary_text
-        )
+        try:
+            res = await _warm_bridge_provider.initiate_warm_bridge(
+                room_name=room_name,
+                agent=decision.agent,
+                summary=summary_text,
+                call_id=call_id,
+                prospect_identity=prospect_identity
+            )
+        except Exception as e:
+            logger.exception("Failed to execute warm bridge: %s", e)
+            await _agent_store.release_agent(decision.agent.agent_id, call_id)
+            raise
         
         # If warm bridge execution failed, release agent
         if not res.success:
             await _agent_store.release_agent(decision.agent.agent_id, call_id)
+        else:
+            # Register the reserved agent ID for the call session
+            _reserved_agents_by_call[call_id] = decision.agent.agent_id
 
         transfer_meta = {
             "call_id": call_id,
@@ -146,6 +168,20 @@ async def fe_transfer(
         else:
             await emit_crm_event_async("transfer.failed", repository=repo, call_id=call_id, lead_id=lead_id, campaign_id=campaign_id, phone_e164=phone_e164, transfer=transfer_meta)
 
+        try:
+            await repo.save_transfer(
+                call_id=call_id,
+                lead_id=lead_id,
+                transfer_mode="warm",
+                agent_id=decision.agent.agent_id,
+                target_phone=decision.phone_number,
+                success=res.success,
+                failure_reason=None if res.success else res.reason,
+                provider_call_id=res.provider_call_id
+            )
+        except Exception as db_err:
+            logger.error("Failed to record transfer in repository: %s", db_err)
+
         return FeTransferResult(
             success=res.success,
             reason=res.reason,
@@ -159,7 +195,8 @@ async def fe_transfer(
         # Execute cold transfer
         res = await _cold_transfer_provider.initiate_cold_transfer(
             room_name=room_name,
-            phone_number=decision.phone_number
+            phone_number=decision.phone_number,
+            call_control_id=call_control_id
         )
 
         transfer_meta = {
@@ -179,6 +216,20 @@ async def fe_transfer(
             await emit_crm_event_async("lead.transferred", repository=repo, call_id=call_id, lead_id=lead_id, campaign_id=campaign_id, phone_e164=phone_e164, transfer=transfer_meta)
         else:
             await emit_crm_event_async("transfer.failed", repository=repo, call_id=call_id, lead_id=lead_id, campaign_id=campaign_id, phone_e164=phone_e164, transfer=transfer_meta)
+
+        try:
+            await repo.save_transfer(
+                call_id=call_id,
+                lead_id=lead_id,
+                transfer_mode="cold",
+                agent_id=None,
+                target_phone=decision.phone_number,
+                success=res.success,
+                failure_reason=None if res.success else res.reason,
+                provider_call_id=res.provider_call_id
+            )
+        except Exception as db_err:
+            logger.error("Failed to record transfer in repository: %s", db_err)
 
         return FeTransferResult(
             success=res.success,
@@ -202,6 +253,20 @@ async def fe_transfer(
         "provider_call_id": None
     }
     await emit_crm_event_async("transfer.failed", repository=repo, call_id=call_id, lead_id=lead_id, campaign_id=campaign_id, phone_e164=phone_e164, transfer=transfer_meta)
+
+    try:
+        await repo.save_transfer(
+            call_id=call_id,
+            lead_id=lead_id,
+            transfer_mode="callback_required",
+            agent_id=None,
+            target_phone=None,
+            success=False,
+            failure_reason=fail_reason,
+            provider_call_id=None
+        )
+    except Exception as db_err:
+        logger.error("Failed to record transfer fallback in repository: %s", db_err)
 
     return FeTransferResult(
         success=False,
