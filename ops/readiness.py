@@ -1619,6 +1619,18 @@ def get_readiness_status(
 
 async def run_readiness_checks() -> tuple[bool, dict[str, tuple[bool, str]]]:
     """Execute all readiness checks and return global status."""
+    if os.getenv("DANA_MOCK_SYSTEM_CHECKS") == "true":
+        results = {
+            "livekit": (True, "LiveKit credentials configured (mocked)"),
+            "telephony": (True, "Telephony configuration verified (mocked)"),
+            "stt": (True, "STT module (faster-whisper) available (mocked)"),
+            "llm": (True, "vLLM server is reachable (mocked)"),
+            "tts": (True, "Local Kokoro model/voices files available (mocked)"),
+            "vad": (True, "VAD module (silero-vad) available (mocked)"),
+            "storage": (True, "Storage configuration verified (mocked)"),
+        }
+        return True, results
+
     checks = {
         "livekit": check_livekit(),
         "telephony": check_telephony(),

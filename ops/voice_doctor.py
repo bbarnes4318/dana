@@ -56,7 +56,7 @@ def get_voice_doctor_report() -> dict:
     expected_first_audio_target = "unknown"
     
     if active_tts_provider == "elevenlabs":
-        active_voice_id = os.environ.get("ELEVENLABS_VOICE_ID", "hpp4J3VqNfWAUOO0d1Us")
+        active_voice_id = os.environ.get("ELEVENLABS_VOICE_ID", "V85zuuN9Jv2CfKdTl7PQ")
         expected_first_audio_target = "< 350ms (ElevenLabs low-latency)"
     elif active_tts_provider == "openai":
         active_voice_id = os.environ.get("OPENAI_TTS_VOICE", "alloy")

@@ -26,7 +26,7 @@ _PROFILES = {
     ),
     "premium_humanlike": VoiceProfile(
         provider="elevenlabs",
-        voice_name="21m00Tcm4TlvDq8ikWAM",  # Rachel or similar premium voice
+        voice_name="V85zuuN9Jv2CfKdTl7PQ",  # ElevenLabs default premium voice
         sample_rate=24000,
         expected_first_audio_target=250,
         quality_tier="premium",

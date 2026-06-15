@@ -142,7 +142,7 @@ SAFE_DEFAULTS = {
     "DANA_STT_PROVIDER": "local",
     "DANA_STT_MODEL": "large-v3-turbo",
     "DANA_STT_COMPUTE_TYPE": "float16",
-    "DANA_TTS_VOICE": "af_bella",
+    "DANA_TTS_VOICE": "V85zuuN9Jv2CfKdTl7PQ",
     "DANA_TTS_SPEED": "1.03",
     "DANA_RECORD_INTERRUPTION_TELEMETRY": "true",
     "DANA_ENABLE_FAST_INTERRUPTION": "false",
@@ -283,6 +283,20 @@ def validate_env(env_dict: dict[str, str]) -> dict[str, Any]:
             oa_key = env_dict.get("OPENAI_API_KEY", "").strip()
             if not oa_key or oa_key.lower() in PLACEHOLDER_VALUES or oa_key == "":
                 failures.append("DANA_LLM_ROUTING_MODE=cloud requires OPENAI_API_KEY to be set")
+
+    # Check HF_TOKEN if the configured model is a gated model (like llama-3 or meta-llama)
+    vllm_model = env_dict.get("VLLM_MODEL", "").lower()
+    if any(gated in vllm_model for gated in ["meta-llama", "llama-3", "gemma", "mistralai"]):
+        hf_token = env_dict.get("HF_TOKEN", "").strip()
+        if not hf_token or hf_token.lower() in PLACEHOLDER_VALUES or hf_token == "":
+            failures.append(f"Gated model '{env_dict.get('VLLM_MODEL')}' requires HF_TOKEN to be set in production")
+
+    # Check DANA_CRM_WEBHOOK_SECRET when CRM webhooks are enabled
+    crm_enabled = env_dict.get("DANA_CRM_WEBHOOK_ENABLED", "false").strip().lower() in ("true", "1", "yes")
+    if crm_enabled:
+        wh_secret = env_dict.get("DANA_CRM_WEBHOOK_SECRET", "").strip()
+        if not wh_secret or wh_secret.lower() in PLACEHOLDER_VALUES or wh_secret == "":
+            failures.append("DANA_CRM_WEBHOOK_ENABLED=true requires DANA_CRM_WEBHOOK_SECRET to be set in production")
 
 
     # 5. Check DANA_CONTROLLED_LIVE_TEST warning / prevention of default production-ready status

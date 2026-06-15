@@ -21,9 +21,9 @@ services:
     container_name: dana-postgres
     restart: unless-stopped
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-dana_user}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-dana_secure_pass}
-      POSTGRES_DB: ${POSTGRES_DB:-dana}
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER is required}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB is required}
     volumes:
       - pg-data:/var/lib/postgresql/data
       - ./infra/postgres/postgresql.conf:/etc/postgresql/postgresql.conf:ro
@@ -39,7 +39,7 @@ services:
           cpus: '2.0'
           memory: 4096M
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-dana_user} -d $${POSTGRES_DB:-dana}"]
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -58,11 +58,11 @@ services:
       exec /entrypoint.sh
       "
     environment:
-      - DB_USER=${POSTGRES_USER:-dana_user}
-      - DB_PASSWORD=${POSTGRES_PASSWORD:-dana_secure_pass}
+      - DB_USER=${POSTGRES_USER:?POSTGRES_USER is required}
+      - DB_PASSWORD=${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
       - DB_HOST=postgres
       - DB_PORT=5432
-      - DB_NAME=${POSTGRES_DB:-dana}
+      - DB_NAME=${POSTGRES_DB:?POSTGRES_DB is required}
       - POOL_MODE=transaction
       - MAX_CLIENT_CONN=1000
       - DEFAULT_POOL_SIZE=50
@@ -85,7 +85,7 @@ services:
       postgres:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -h localhost -p 6432 -U $${POSTGRES_USER:-dana_user} -d $${POSTGRES_DB:-dana}"]
+      test: ["CMD-SHELL", "pg_isready -h localhost -p 6432 -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -192,8 +192,8 @@ services:
       - NVIDIA_VISIBLE_DEVICES=0
       - CUDA_VISIBLE_DEVICES=0
       # ---- Database / PgBouncer ----
-      - DATABASE_URL=postgresql://${POSTGRES_USER:-dana_user}:${POSTGRES_PASSWORD:-dana_secure_pass}@pgbouncer:6432/${POSTGRES_DB:-dana}
-      - DATABASE_ADMIN_URL=postgresql://${POSTGRES_USER:-dana_user}:${POSTGRES_PASSWORD:-dana_secure_pass}@postgres:5432/${POSTGRES_DB:-dana}
+      - DATABASE_URL=postgresql://${POSTGRES_USER:?POSTGRES_USER is required}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@pgbouncer:6432/${POSTGRES_DB:?POSTGRES_DB is required}
+      - DATABASE_ADMIN_URL=postgresql://${POSTGRES_USER:?POSTGRES_USER is required}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@postgres:5432/${POSTGRES_DB:?POSTGRES_DB is required}
       # ---- Redis Hot State ----
       - REDIS_URL=redis://redis:6379/0
       - DANA_USE_REDIS_HOT_STATE=true
@@ -206,9 +206,13 @@ services:
       # ---- vLLM (internal network) ----
       - VLLM_BASE_URL=http://vllm-server:8000/v1
       # ---- LiveKit ----
-      - LIVEKIT_URL=${LIVEKIT_URL:-wss://replace-me.livekit.cloud}
-      - LIVEKIT_API_KEY=${LIVEKIT_API_KEY:-replace_me}
-      - LIVEKIT_API_SECRET=${LIVEKIT_API_SECRET:-replace_me}
+      - LIVEKIT_URL=${LIVEKIT_URL:?LIVEKIT_URL is required}
+      - LIVEKIT_API_KEY=${LIVEKIT_API_KEY:?LIVEKIT_API_KEY is required}
+      - LIVEKIT_API_SECRET=${LIVEKIT_API_SECRET:?LIVEKIT_API_SECRET is required}
+      - LIVEKIT_SIP_OUTBOUND_TRUNK_ID=${LIVEKIT_SIP_OUTBOUND_TRUNK_ID:?LIVEKIT_SIP_OUTBOUND_TRUNK_ID is required}
+      # ---- Webhooks ----
+      - DANA_CRM_WEBHOOK_ENABLED=${DANA_CRM_WEBHOOK_ENABLED:-false}
+      - DANA_CRM_WEBHOOK_SECRET=${DANA_CRM_WEBHOOK_SECRET:-}
       # ---- Agent Identity ----
       - DANA_AGENT_NAME=${DANA_AGENT_NAME:-Alex}
       - DANA_COMPANY_NAME=${DANA_COMPANY_NAME:-American Beneficiary}
@@ -222,14 +226,24 @@ services:
       - DANA_TEMPERATURE=${DANA_TEMPERATURE:-0.45}
       - DANA_TOP_P=${DANA_TOP_P:-0.9}
       # ---- STT ----
-      - DANA_STT_PROVIDER=${DANA_STT_PROVIDER:-local}
+      - DANA_STT_PROVIDER=${DANA_STT_PROVIDER:-deepgram}
       - DANA_STT_MODEL=${DANA_STT_MODEL:-large-v3-turbo}
       - DANA_STT_COMPUTE_TYPE=${DANA_STT_COMPUTE_TYPE:-float16}
       - DANA_VAD_THRESHOLD=${DANA_VAD_THRESHOLD:-0.5}
       - DANA_MIN_SILENCE_MS=${DANA_MIN_SILENCE_MS:-180}
+      - DANA_STT_ROUTING_MODE=${DANA_STT_ROUTING_MODE:-cloud}
       # ---- TTS ----
-      - DANA_TTS_VOICE=${DANA_TTS_VOICE:-af_bella}
+      - DANA_TTS_VOICE=${DANA_TTS_VOICE:-V85zuuN9Jv2CfKdTl7PQ}
+      - DANA_TTS_PROVIDER=${DANA_TTS_PROVIDER:-elevenlabs}
       - DANA_TTS_SPEED=${DANA_TTS_SPEED:-1.03}
+      - DANA_TTS_ROUTING_MODE=${DANA_TTS_ROUTING_MODE:-cloud}
+      # ---- Premium Live Voice Mode ----
+      - DANA_VOICE_MODE=${DANA_VOICE_MODE:-premium_live}
+      - DANA_ENABLE_STREAMING_RESPONSE=${DANA_ENABLE_STREAMING_RESPONSE:-true}
+      - DANA_ENABLE_AUDIO_FILTERS=${DANA_ENABLE_AUDIO_FILTERS:-false}
+      - ELEVENLABS_VOICE_ID=${ELEVENLABS_VOICE_ID:-V85zuuN9Jv2CfKdTl7PQ}
+      - ELEVENLABS_API_KEY=${ELEVENLABS_API_KEY:-}
+      - DEEPGRAM_API_KEY=${DEEPGRAM_API_KEY:-}
       # ---- Turn-Taking ----
       - DANA_TURN_MIN_DELAY=${DANA_TURN_MIN_DELAY:-0.15}
       - DANA_TURN_MAX_DELAY=${DANA_TURN_MAX_DELAY:-0.55}
@@ -271,7 +285,7 @@ services:
       - "7881:7881"      # RTC (WebRTC)
       - "7882:7882/udp"  # RTC UDP
     environment:
-      - LIVEKIT_KEYS=${LIVEKIT_API_KEY:-devkey}:${LIVEKIT_API_SECRET:-devsecret}
+      - LIVEKIT_KEYS=${LIVEKIT_API_KEY:?LIVEKIT_API_KEY is required}:${LIVEKIT_API_SECRET:?LIVEKIT_API_SECRET is required}
     command: --dev --bind 0.0.0.0
     logging:
       driver: "json-file"

@@ -312,7 +312,7 @@ class SharedComponents:
                     cloud_tts = OpenAI_TTS(voice=openai_voice, model=openai_model)
                 else:
                     from livekit.plugins import elevenlabs
-                    el_voice_id = os.getenv("ELEVENLABS_VOICE_ID", "hpp4J3VqNfWAUOO0d1Us").strip()
+                    el_voice_id = os.getenv("ELEVENLABS_VOICE_ID", "V85zuuN9Jv2CfKdTl7PQ").strip()
                     el_model_id = os.getenv("ELEVENLABS_MODEL_ID", "eleven_turbo_v2_5").strip()
                     logger.info(f"Initializing ElevenLabs TTS with voice_id={el_voice_id}, model_id={el_model_id}")
                     cloud_tts = elevenlabs.TTS(
@@ -509,15 +509,54 @@ class DanaAgent(Agent):
             if not m:
                 return ""
             try:
+                # If mock, handle mock objects
                 if type(m).__name__ in ("MagicMock", "Mock", "AsyncMock") or hasattr(m, "_mock_self") or "mock" in type(m).__name__.lower():
                     return "mock message content"
+                
+                # Check direct text_content
                 tc = getattr(m, "text_content", None)
-                if isinstance(tc, str):
-                    return tc
+                if isinstance(tc, str) and tc.strip():
+                    return tc.strip()
+                
+                # Check direct text
+                t = getattr(m, "text", None)
+                if isinstance(t, str) and t.strip():
+                    return t.strip()
+
+                # Check direct content
                 c = getattr(m, "content", None)
-                if isinstance(c, str):
-                    return c
-            except Exception:
+                if isinstance(c, str) and c.strip():
+                    return c.strip()
+
+                # If content is a list or tuple (nested content parts)
+                if isinstance(c, (list, tuple)):
+                    parts = []
+                    for part in c:
+                        if not part:
+                            continue
+                        if isinstance(part, str):
+                            parts.append(part)
+                        else:
+                            # Try attributes on the part
+                            part_text = getattr(part, "text", None) or getattr(part, "content", None) or getattr(part, "text_content", None)
+                            if isinstance(part_text, str) and part_text.strip():
+                                parts.append(part_text.strip())
+                            else:
+                                # Fallback string conversion for the part
+                                part_str = str(part)
+                                if part_str and not (part_str.startswith("<") and part_str.endswith(">")):
+                                    parts.append(part_str)
+                    combined = " ".join(parts).strip()
+                    if combined:
+                        return combined
+
+                # Fallback string representation of m itself if it is a transcript-like object or has custom __str__
+                m_str = str(m)
+                if m_str and not (m_str.startswith("<") and m_str.endswith(">")):
+                    return m_str.strip()
+
+            except Exception as e:
+                logger.error(f"Error in get_msg_text: {e}")
                 pass
             return ""
 
@@ -531,7 +570,6 @@ class DanaAgent(Agent):
                 return msgs()
             return msgs
 
-        
         # Get the latest user message
         ctx_msgs = get_messages(chat_ctx)
         user_msg = ctx_msgs[-1] if ctx_msgs else None
@@ -540,7 +578,45 @@ class DanaAgent(Agent):
             self._latency_recorder.mark("user_text_seen_by_llm_node")
         
         if not user_text:
-            logger.warning("llm_node called but no user message found in chat_ctx")
+            msg_role = getattr(user_msg, "role", None) if user_msg else None
+            msg_type = type(user_msg).__name__ if user_msg else None
+            msg_content = getattr(user_msg, "content", None) if user_msg else None
+            
+            if msg_content is None:
+                content_shape = "None"
+            elif isinstance(msg_content, str):
+                content_shape = f"str(len={len(msg_content)})"
+            elif isinstance(msg_content, (list, tuple)):
+                content_shape = f"{type(msg_content).__name__}(len={len(msg_content)})"
+            else:
+                content_shape = f"{type(msg_content).__name__}"
+            
+            call_id = self.adapter.call_id if self.adapter else None
+            num_messages = len(ctx_msgs)
+            
+            logger.warning(
+                f"[NO_USER_TEXT] role={msg_role}, msg_type={msg_type}, content_shape={content_shape}, "
+                f"num_messages={num_messages}, call_id={call_id}"
+            )
+            
+            self._latency_recorder.mark("llm_no_user_text")
+            self._latency_recorder.mark("agent_response_text_created")
+            
+            recovery_text = "Sorry, I didn’t catch that. Could you say that one more time?"
+            if self.adapter:
+                async for chunk in self.adapter.convert_response_to_stream(recovery_text):
+                    yield chunk
+            else:
+                import uuid
+                chunk_id = f"chunk-{uuid.uuid4()}"
+                yield llm.ChatChunk(
+                    id=chunk_id,
+                    delta=llm.ChoiceDelta(role="assistant", content="")
+                )
+                yield llm.ChatChunk(
+                    id=chunk_id,
+                    delta=llm.ChoiceDelta(role="assistant", content=recovery_text)
+                )
             self._latency_recorder.mark("llm_done")
             return
  
@@ -742,6 +818,7 @@ class DanaAgent(Agent):
         # Process user turn via the adapter exactly once
         result = await self.adapter.process_user_turn(user_text, chat_fn, interrupted=interrupted)
         self.current_turn_response = result.agent_response or ""
+        self._latency_recorder.mark("agent_response_text_created")
         
         delay = getattr(result, "pre_speech_delay", 0.0)
         if delay > 0:
@@ -824,6 +901,7 @@ class DanaAgent(Agent):
         text: AsyncIterable[str],
         model_settings: any,
     ) -> AsyncIterable[rtc.AudioFrame]:
+        self.tts_turn_count = getattr(self, "tts_turn_count", 0) + 1
         tts_stream = self.tts.stream()
         first_text = True
         
@@ -834,7 +912,7 @@ class DanaAgent(Agent):
                     if chunk and first_text:
                         first_text = False
                         self._latency_recorder.mark("tts_first_text")
-                        if "greeting_tts_started" in self._latency_recorder.events:
+                        if self.tts_turn_count >= 2 or "greeting_tts_started" in self._latency_recorder.events:
                             self._latency_recorder.mark("second_turn_tts_first_text")
                     tts_stream.push_text(chunk)
                 tts_stream.flush()
@@ -852,7 +930,7 @@ class DanaAgent(Agent):
                     first_audio = False
                     self._latency_recorder.mark("tts_first_audio")
                     self._latency_recorder.mark("first_audio_published")
-                    if "greeting_tts_started" in self._latency_recorder.events:
+                    if self.tts_turn_count >= 2 or "greeting_tts_started" in self._latency_recorder.events:
                         self._latency_recorder.mark("second_turn_tts_first_audio")
                         self._latency_recorder.mark("second_turn_audio_published")
                 yield ev.frame
@@ -925,8 +1003,10 @@ async def run_amd_worker(track: rtc.Track, session: AgentSession, agent: any, ro
                     else:
                         speech_duration += frame_duration
             
-            if speech_duration >= 1.5:
-                logger.info("AMD: Voicemail greeting detected (speech_duration=%.2fs >= 1.5s). Triggering MachineDetected teardown.", speech_duration)
+            if speech_duration >= 2.5:
+                recorder = getattr(agent, "_latency_recorder", None) or getattr(agent, "latency_recorder", None)
+                markers = list(recorder.events.keys()) if recorder else []
+                logger.info("AMD: Voicemail detected (speech_duration=%.2fs >= 2.5s). Reason: continuous speech exceeded voicemail threshold. Current latency markers: %s", speech_duration, markers)
                 agent.is_voicemail = True
                 
                 # Switch LLM state machine to voicemail/end stage
@@ -1203,8 +1283,10 @@ async def entrypoint(ctx: JobContext):
             
     # Track listener for AMD
     def start_amd_for_track(track):
-        if os.getenv("DANA_CONTROLLED_LIVE_TEST", "false").lower() in ("true", "1", "yes"):
-            logger.info("Bypassing AMD parallel worker for track %s (controlled live test enabled)", track.sid)
+        controlled_live = os.getenv("DANA_CONTROLLED_LIVE_TEST", "false").lower() in ("true", "1", "yes")
+        enable_amd = os.getenv("DANA_ENABLE_AMD_WORKER", "false").lower() in ("true", "1", "yes")
+        if controlled_live and not enable_amd:
+            logger.info("Bypassing AMD parallel worker for track %s (controlled live test enabled and DANA_ENABLE_AMD_WORKER is not true)", track.sid)
             return
         if track.kind == rtc.TrackKind.KIND_AUDIO:
             if not getattr(agent, "_amd_started", False):
@@ -1342,6 +1424,7 @@ async def entrypoint(ctx: JobContext):
     finally:
         from ops.worker_capacity import WorkerCapacity
         WorkerCapacity.decrement_calls()
+        latency_recorder.mark("room_disconnected")
         latency_recorder.log_summary()
         from speech.context_registry import unregister_call
         unregister_call(call_id)
@@ -1518,12 +1601,15 @@ async def entrypoint(ctx: JobContext):
             from metrics.model_cost_metrics import calculate_and_save_costs
             from metrics.outcome_metrics import save_outcome_for_call
             
-            tts_prov = "kokoro"
-            voice_lower = shared.config.tts_voice.lower()
-            if "eleven" in voice_lower:
-                tts_prov = "elevenlabs"
-            elif "openai" in voice_lower:
-                tts_prov = "openai"
+            tts_prov = shared.config.tts_provider.lower()
+            if tts_prov == "local":
+                voice_lower = shared.config.tts_voice.lower()
+                if "eleven" in voice_lower:
+                    tts_prov = "elevenlabs"
+                elif "openai" in voice_lower:
+                    tts_prov = "openai"
+                else:
+                    tts_prov = "kokoro"
                 
             # Save model costs (legacy call_costs records)
             await calculate_and_save_costs(

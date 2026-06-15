@@ -61,9 +61,11 @@ async def test_smoke_test_expect_second_turn_success(monkeypatch):
                 
                 # Setup metrics in database matching all required stages
                 required_markers = [
-                    "room_joined", "greeting_audio_published", "inbound_audio_frame_received",
-                    "stt_stream_created", "stt_final_transcript", "llm_node_entered",
-                    "agent_response_text_created", "second_turn_tts_first_audio", "second_turn_audio_published"
+                    "room_joined", "participant_joined", "inbound_audio_frame_received",
+                    "vad_start_of_speech", "vad_end_of_speech", "stt_stream_created",
+                    "transcript_final", "llm_node_entered", "user_text_seen_by_llm_node",
+                    "agent_response_text_created", "tts_first_text", "tts_first_audio",
+                    "second_turn_audio_published"
                 ]
                 metrics_data = [
                     {"metric_name": f"event_{marker}", "metric_value_ms": 100.0} for marker in required_markers

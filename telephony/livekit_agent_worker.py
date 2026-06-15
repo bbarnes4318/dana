@@ -588,8 +588,10 @@ async def run_amd_worker(track: rtc.Track, session: any, agent: any, room: rtc.R
                     else:
                         speech_duration += frame_duration
             
-            if speech_duration >= 1.5:
-                logger.info("AMD: Voicemail greeting detected (speech_duration=%.2fs >= 1.5s). Triggering MachineDetected teardown.", speech_duration)
+            if speech_duration >= 2.5:
+                recorder = getattr(agent, "_latency_recorder", None) or getattr(agent, "latency_recorder", None) or getattr(session, "latency_recorder", None)
+                markers = list(recorder.events.keys()) if recorder else []
+                logger.info("AMD: Voicemail detected (speech_duration=%.2fs >= 2.5s). Reason: continuous speech exceeded voicemail threshold. Current latency markers: %s", speech_duration, markers)
                 agent.is_voicemail = True
                 
                 # Switch LLM state machine to voicemail/end stage
@@ -621,6 +623,11 @@ async def run_room_session(ctx: Any, config: LiveKitAgentWorkerConfig) -> None:
     
     # Track listener for AMD
     def start_amd_for_track(track):
+        controlled_live = os.getenv("DANA_CONTROLLED_LIVE_TEST", "false").lower() in ("true", "1", "yes")
+        enable_amd = os.getenv("DANA_ENABLE_AMD_WORKER", "false").lower() in ("true", "1", "yes")
+        if controlled_live and not enable_amd:
+            logger.info("Bypassing AMD parallel worker for track %s (controlled live test enabled and DANA_ENABLE_AMD_WORKER is not true)", track.sid)
+            return
         if track.kind == rtc.TrackKind.KIND_AUDIO:
             if not getattr(agent_instance, "_amd_started", False):
                 agent_instance._amd_started = True

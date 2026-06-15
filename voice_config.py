@@ -108,7 +108,7 @@ class VoiceConfig:
     local_stt_max_concurrent_tasks: int = field(default_factory=lambda: env_int("DANA_LOCAL_STT_MAX_CONCURRENT_TASKS", 3))
 
     # ---- TTS ----
-    tts_voice: str = field(default_factory=lambda: env_str("DANA_TTS_VOICE", "af_bella"))
+    tts_voice: str = field(default_factory=lambda: env_str("DANA_TTS_VOICE", "V85zuuN9Jv2CfKdTl7PQ"))
     tts_speed: float = field(default_factory=lambda: env_float("DANA_TTS_SPEED", 1.03))
     runtime_env: str = field(default_factory=lambda: env_str("DANA_RUNTIME_ENV", "development"))
     allow_mock_tts: bool = field(default_factory=lambda: env_bool("DANA_ALLOW_MOCK_TTS", False))
