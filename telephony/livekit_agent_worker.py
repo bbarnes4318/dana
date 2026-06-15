@@ -894,6 +894,11 @@ async def run_room_session(ctx: Any, config: LiveKitAgentWorkerConfig) -> None:
             await asyncio.sleep(1.0)
     finally:
         logger.info(f"Room session closed for call {session_state['call_id']}")
+        try:
+            from telephony.fe_transfer import release_call_agent
+            await release_call_agent(session_state["call_id"])
+        except Exception as ra_err:
+            logger.error("Failed to release call agent: %s", ra_err)
         
         ended_at = datetime.now(timezone.utc)
         started_at = datetime.fromisoformat(session_state["started_at"])
