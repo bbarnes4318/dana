@@ -36,6 +36,12 @@ class DanaLeaveStrategy:
     ) -> bool:
         """Remove Dana's participant or mute audio so the humans can talk privately."""
         logger.info("Executing DanaLeaveStrategy: Removing agent participant '%s' from room '%s'", agent_identity, room_name)
+        
+        is_production_or_live = (
+            os.getenv("DANA_RUNTIME_ENV") == "production"
+            or os.getenv("DANA_CONTROLLED_LIVE_TEST", "").strip().lower() == "true"
+        )
+        
         if lkapi:
             try:
                 import inspect
@@ -48,6 +54,12 @@ class DanaLeaveStrategy:
                 return True
             except Exception as e:
                 logger.exception("Failed to remove Dana's participant via LiveKit API: %s", e)
+                if is_production_or_live:
+                    return False
+        else:
+            if is_production_or_live:
+                logger.error("No lkapi provided for DanaLeaveStrategy in production/controlled live mode. Cannot proceed.")
+                return False
         
         logger.info("DANA_LEFT_OR_MUTED_AFTER_BRIDGE: Simulating leave/mute for agent participant '%s' in room '%s'", agent_identity, room_name)
         return True
@@ -160,7 +172,15 @@ class LiveKitWarmBridgeProvider(WarmBridgeProvider):
             # Whisper Summary & Execute Dana leave strategy
             # Note: Whisper audio playback would be triggered here in production.
             # Then execute leave strategy to remove Dana from room.
-            await self.leave_strategy.execute_leave(room_name, dana_identity, lkapi=lkapi)
+            leave_success = await self.leave_strategy.execute_leave(room_name, dana_identity, lkapi=lkapi)
+            if not leave_success:
+                logger.error("Dana leave strategy failed.")
+                return WarmBridgeResult(
+                    success=False,
+                    reason="dana_leave_failed",
+                    provider_call_id=participant_id,
+                    transfer_mode="failed"
+                )
 
             logger.info("TRANSFER_READY_FOR_HUMAN_AGENT: Warm bridge completed. Prospect and agent are now connected in room '%s'", room_name)
 
