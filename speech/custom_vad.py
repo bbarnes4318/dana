@@ -2,6 +2,7 @@ from __future__ import annotations
 import asyncio
 import time
 import logging
+import os
 from typing import Literal
 import numpy as np
 
@@ -270,7 +271,13 @@ class ElderlySileroVADStream(silero.VADStream):
         super().__init__(vad, opts, model)
         self._session = session
         self._agent = agent
-        self._interruption_speech_threshold = 0.12
+        
+        self._allow_agent_barge_in = os.getenv("DANA_ALLOW_AGENT_BARGE_IN", "false").strip().lower() == "true"
+        self._enable_fast_interruption = os.getenv("DANA_ENABLE_FAST_INTERRUPTION", "false").strip().lower() == "true"
+        try:
+            self._interruption_speech_threshold = float(os.getenv("DANA_INTERRUPTION_SPEECH_THRESHOLD", "0.65"))
+        except ValueError:
+            self._interruption_speech_threshold = 0.65
         
         # Pre-allocate frames pool (no allocations on hot path)
         self._pool_size = 32
@@ -639,14 +646,15 @@ class ElderlySileroVADStream(silero.VADStream):
                         agent_state = getattr(self._session, "agent_state", None)
                         agent_speaking = agent_state == "speaking" or getattr(agent_state, "value", None) == "speaking"
                         if agent_speaking:
-                            speech_duration = pub_speech_duration if pub_speaking else speech_threshold_duration
-                            threshold = getattr(self, "_interruption_speech_threshold", 0.12)
-                            if speech_duration >= threshold:
-                                agent = self._agent
-                                if agent and not getattr(agent, "interrupted_current_turn", False):
-                                    agent.interrupted_current_turn = True
-                                    agent.interrupted_at = time.perf_counter()
-                                    asyncio.create_task(execute_emergency_flush(self._session, agent))
+                            if self._allow_agent_barge_in and self._enable_fast_interruption:
+                                speech_duration = pub_speech_duration if pub_speaking else speech_threshold_duration
+                                threshold = self._interruption_speech_threshold
+                                if speech_duration >= threshold and p >= self._opts.activation_threshold:
+                                    agent = self._agent
+                                    if agent and not getattr(agent, "interrupted_current_turn", False):
+                                        agent.interrupted_current_turn = True
+                                        agent.interrupted_at = time.perf_counter()
+                                        asyncio.create_task(execute_emergency_flush(self._session, agent))
 
                     # In-place shift input_buffer by 512 samples (zero-allocation)
                     self._input_buffer[: self._input_len - 512] = self._input_buffer[512 : self._input_len]

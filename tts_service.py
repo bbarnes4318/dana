@@ -28,6 +28,17 @@ active_audio_source: Optional[rtc.AudioSource] = None
 # Active TTS Stream reference for emergency interruption abort
 active_tts_stream: Optional["LocalTTSStream"] = None
 
+def apply_tts_gain(audio: np.ndarray) -> np.ndarray:
+    """Scale local float32 audio and clip values to [-1.0, 1.0] to prevent clipping distortion."""
+    try:
+        gain = float(os.getenv("DANA_TTS_OUTPUT_GAIN", "1.20"))
+    except ValueError:
+        gain = 1.20
+    if gain != 1.0 and len(audio) > 0:
+        audio = audio * gain
+        np.clip(audio, -1.0, 1.0, out=audio)
+    return audio
+
 # Design digital filters for senior hearing profile at 16kHz
 # 1. 5th order Butterworth low-pass filter with a cutoff of 3400Hz
 # fs = 16000, Nyquist = 8000. Cutoff = 3400Hz.
@@ -302,7 +313,7 @@ class LocallyHostedKokoro(tts.TTS):
             )
             audio_resampled = resample_to_16k(audio, orig_fs=24000)
             audio_filtered = apply_senior_audio_filters(audio_resampled)
-            return audio_filtered
+            return apply_tts_gain(audio_filtered)
         
         audio = await loop.run_in_executor(None, _run_synthesis)
         return audio
@@ -341,7 +352,7 @@ class LocallyHostedKokoro(tts.TTS):
         )
         audio_resampled = resample_to_16k(audio, orig_fs=24000)
         audio_filtered = apply_senior_audio_filters(audio_resampled)
-        return audio_filtered
+        return apply_tts_gain(audio_filtered)
     
     def synthesize(
         self,
@@ -493,13 +504,14 @@ class LocalTTSStream(tts.SynthesizeStream):
                 pcm_bytes = block_int16.tobytes()
                 
                 # Direct FFI push
-                active_src = active_audio_source
-                if active_src and not active_src._ffi_handle.disposed:
-                    frame = rtc.AudioFrame(pcm_bytes, sample_rate, num_channels, samples_per_frame)
-                    req = proto_ffi.FfiRequest()
-                    req.capture_audio_frame.source_handle = active_src._ffi_handle.handle
-                    req.capture_audio_frame.buffer.CopyFrom(frame._proto_info())
-                    FfiClient.instance.request(req)
+                if os.getenv("DANA_ENABLE_DIRECT_FFI_TTS_PUSH", "false").strip().lower() == "true":
+                    active_src = active_audio_source
+                    if active_src and not active_src._ffi_handle.disposed:
+                        frame = rtc.AudioFrame(pcm_bytes, sample_rate, num_channels, samples_per_frame)
+                        req = proto_ffi.FfiRequest()
+                        req.capture_audio_frame.source_handle = active_src._ffi_handle.handle
+                        req.capture_audio_frame.buffer.CopyFrom(frame._proto_info())
+                        FfiClient.instance.request(req)
                     
                 # Main thread queue push
                 frame = rtc.AudioFrame(pcm_bytes, sample_rate, num_channels, samples_per_frame)
@@ -529,13 +541,14 @@ class LocalTTSStream(tts.SynthesizeStream):
                     block_int16 = (block * 32767).astype(np.int16)
                     pcm_bytes = block_int16.tobytes()
                     
-                    active_src = active_audio_source
-                    if active_src and not active_src._ffi_handle.disposed:
-                        frame = rtc.AudioFrame(pcm_bytes, sample_rate, num_channels, samples_per_frame)
-                        req = proto_ffi.FfiRequest()
-                        req.capture_audio_frame.source_handle = active_src._ffi_handle.handle
-                        req.capture_audio_frame.buffer.CopyFrom(frame._proto_info())
-                        FfiClient.instance.request(req)
+                    if os.getenv("DANA_ENABLE_DIRECT_FFI_TTS_PUSH", "false").strip().lower() == "true":
+                        active_src = active_audio_source
+                        if active_src and not active_src._ffi_handle.disposed:
+                            frame = rtc.AudioFrame(pcm_bytes, sample_rate, num_channels, samples_per_frame)
+                            req = proto_ffi.FfiRequest()
+                            req.capture_audio_frame.source_handle = active_src._ffi_handle.handle
+                            req.capture_audio_frame.buffer.CopyFrom(frame._proto_info())
+                            FfiClient.instance.request(req)
                         
                     frame = rtc.AudioFrame(pcm_bytes, sample_rate, num_channels, samples_per_frame)
                     sa = tts.SynthesizedAudio(

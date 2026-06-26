@@ -37,80 +37,83 @@ except ImportError:
 logger = logging.getLogger("telephony.agent_worker")
 
 # Monkeypatch _ParticipantAudioOutput to support event-loop bypass for direct FFI playback
-try:
-    import livekit.agents.voice.room_io._output as room_io_output
-    import time
-    
-    original_forward_audio = room_io_output._ParticipantAudioOutput._forward_audio
-    original_wait_for_playout = room_io_output._ParticipantAudioOutput._wait_for_playout
-    
-    async def patched_forward_audio(self):
-        if getattr(self, "_bypass_main_loop", False):
-            # Bypass native push to self._audio_source and sleep instead to simulate playback pacing
-            # This maintains all events and callbacks on the main loop without blocking/scheduling native writes.
-            self._playing = True
-            try:
-                async for frame in self._audio_buf:
-                    if not self._playback_enabled.is_set():
-                        await self._playback_enabled.wait()
+if os.getenv("DANA_ENABLE_LIVEKIT_AUDIO_MONKEYPATCH", "false").strip().lower() == "true":
+    try:
+        import livekit.agents.voice.room_io._output as room_io_output
+        import time
+        
+        original_forward_audio = room_io_output._ParticipantAudioOutput._forward_audio
+        original_wait_for_playout = room_io_output._ParticipantAudioOutput._wait_for_playout
+        
+        async def patched_forward_audio(self):
+            if getattr(self, "_bypass_main_loop", False):
+                # Bypass native push to self._audio_source and sleep instead to simulate playback pacing
+                # This maintains all events and callbacks on the main loop without blocking/scheduling native writes.
+                self._playing = True
+                try:
+                    async for frame in self._audio_buf:
+                        if not self._playback_enabled.is_set():
+                            await self._playback_enabled.wait()
+                            
+                        if self._interrupted_event.is_set() or self._pushed_duration == 0:
+                            if self._interrupted_event.is_set() and self._flush_task:
+                                await self._flush_task
+                            continue
+                            
+                        if not self._first_frame_event.is_set():
+                            self._first_frame_event.set()
+                            self.on_playback_started(created_at=time.time())
                         
-                    if self._interrupted_event.is_set() or self._pushed_duration == 0:
-                        if self._interrupted_event.is_set() and self._flush_task:
-                            await self._flush_task
-                        continue
-                        
-                    if not self._first_frame_event.is_set():
-                        self._first_frame_event.set()
-                        self.on_playback_started(created_at=time.time())
-                    
-                    await asyncio.sleep(frame.duration)
-            finally:
-                self._playing = False
-        else:
-            await original_forward_audio(self)
-
-    async def patched_wait_for_playout(self):
-        if getattr(self, "_bypass_main_loop", False):
-            wait_for_interruption = asyncio.create_task(self._interrupted_event.wait())
-
-            async def _wait_buffered_audio() -> None:
-                while not self._audio_buf.empty() or getattr(self, "_playing", False):
-                    if not self._playback_enabled.is_set():
-                        await self._playback_enabled.wait()
-                    # Sleep instead of calling self._audio_source.wait_for_playout()
-                    await asyncio.sleep(0.02)
-
-            wait_for_playout = asyncio.create_task(_wait_buffered_audio())
-            await asyncio.wait(
-                [wait_for_playout, wait_for_interruption],
-                return_when=asyncio.FIRST_COMPLETED,
-            )
-
-            interrupted = self._interrupted_event.is_set()
-            pushed_duration = self._pushed_duration
-
-            if interrupted:
-                queued_duration = 0
-                while not self._audio_buf.empty():
-                    queued_duration += self._audio_buf.recv_nowait().duration
-
-                pushed_duration = max(pushed_duration - queued_duration, 0)
-                wait_for_playout.cancel()
+                        await asyncio.sleep(frame.duration)
+                finally:
+                    self._playing = False
             else:
-                wait_for_interruption.cancel()
+                await original_forward_audio(self)
 
-            self._pushed_duration = 0
-            self._interrupted_event.clear()
-            self._first_frame_event.clear()
-            self.on_playback_finished(playback_position=pushed_duration, interrupted=interrupted)
-        else:
-            await original_wait_for_playout(self)
-            
-    room_io_output._ParticipantAudioOutput._forward_audio = patched_forward_audio
-    room_io_output._ParticipantAudioOutput._wait_for_playout = patched_wait_for_playout
-    logger.info("Successfully monkeypatched _ParticipantAudioOutput._forward_audio and _wait_for_playout for event-loop bypass.")
-except Exception as e:
-    logger.error(f"Failed to monkeypatch _ParticipantAudioOutput: {e}")
+        async def patched_wait_for_playout(self):
+            if getattr(self, "_bypass_main_loop", False):
+                wait_for_interruption = asyncio.create_task(self._interrupted_event.wait())
+
+                async def _wait_buffered_audio() -> None:
+                    while not self._audio_buf.empty() or getattr(self, "_playing", False):
+                        if not self._playback_enabled.is_set():
+                            await self._playback_enabled.wait()
+                        # Sleep instead of calling self._audio_source.wait_for_playout()
+                        await asyncio.sleep(0.02)
+
+                wait_for_playout = asyncio.create_task(_wait_buffered_audio())
+                await asyncio.wait(
+                    [wait_for_playout, wait_for_interruption],
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+
+                interrupted = self._interrupted_event.is_set()
+                pushed_duration = self._pushed_duration
+
+                if interrupted:
+                    queued_duration = 0
+                    while not self._audio_buf.empty():
+                        queued_duration += self._audio_buf.recv_nowait().duration
+
+                    pushed_duration = max(pushed_duration - queued_duration, 0)
+                    wait_for_playout.cancel()
+                else:
+                    wait_for_interruption.cancel()
+
+                self._pushed_duration = 0
+                self._interrupted_event.clear()
+                self._first_frame_event.clear()
+                self.on_playback_finished(playback_position=pushed_duration, interrupted=interrupted)
+            else:
+                await original_wait_for_playout(self)
+                
+        room_io_output._ParticipantAudioOutput._forward_audio = patched_forward_audio
+        room_io_output._ParticipantAudioOutput._wait_for_playout = patched_wait_for_playout
+        logger.info("Successfully monkeypatched _ParticipantAudioOutput._forward_audio and _wait_for_playout for event-loop bypass.")
+    except Exception as e:
+        logger.error(f"Failed to monkeypatch _ParticipantAudioOutput: {e}")
+else:
+    logger.info("LiveKit audio monkeypatch is disabled by default.")
 
 class DependencyStatusDict(dict):
     """Dict wrapper that supports unpacking for backwards compatibility: ok, err = check_worker_dependencies()"""
@@ -625,6 +628,19 @@ async def run_amd_worker(track: rtc.Track, session: any, agent: any, room: rtc.R
             if not room.is_connected() or getattr(agent, "is_voicemail", False):
                 break
                 
+            # Safeguard: Never run AMD after the first real user transcript is received or any turn has occurred.
+            if getattr(agent, "user_transcript_received", False):
+                logger.info("AMD: User transcript has been received. Stopping AMD worker.")
+                break
+
+            turn_count = 0
+            if hasattr(agent, "adapter") and agent.adapter and hasattr(agent.adapter, "state_machine") and agent.adapter.state_machine:
+                if hasattr(agent.adapter.state_machine, "call_state") and agent.adapter.state_machine.call_state:
+                    turn_count = getattr(agent.adapter.state_machine.call_state, "turn_count", 0)
+            if turn_count > 0:
+                logger.info("AMD: Active human conversation detected (turn_count=%d > 0). Stopping AMD worker.", turn_count)
+                break
+                
             if time.time() - start_time > 10.0:
                 logger.info("AMD: Call exceeded 10.0 seconds without voicemail detection. Stopping AMD worker.")
                 break
@@ -670,17 +686,27 @@ async def run_amd_worker(track: rtc.Track, session: any, agent: any, room: rtc.R
                     else:
                         speech_duration += frame_duration
             
-            if speech_duration >= 1.5:
-                logger.info("AMD: Voicemail greeting detected (speech_duration=%.2fs >= 1.5s). Triggering MachineDetected teardown.", speech_duration)
+            if speech_duration >= 4.0:
+                logger.info("AMD: Voicemail greeting detected (speech_duration=%.2fs >= 4.0s).", speech_duration)
                 agent.is_voicemail = True
+                agent.possible_voicemail = True
                 
                 # Switch LLM state machine to voicemail/end stage
                 if hasattr(agent, "adapter") and agent.adapter and agent.adapter.state_machine:
                     from core.call_state import CallStage
                     agent.adapter.state_machine.call_state.transition_to(CallStage.END)
                 
-                # Free up outbound port immediately by disconnecting room
-                asyncio.create_task(room.disconnect())
+                # Re-verify turn count and user transcript before disconnecting
+                turn_count = 0
+                if hasattr(agent, "adapter") and agent.adapter and hasattr(agent.adapter, "state_machine") and agent.adapter.state_machine:
+                    if hasattr(agent.adapter.state_machine, "call_state") and agent.adapter.state_machine.call_state:
+                        turn_count = getattr(agent.adapter.state_machine.call_state, "turn_count", 0)
+                        
+                if turn_count == 0 and not getattr(agent, "user_transcript_received", False):
+                    logger.info("AMD: High confidence voicemail detected (duration >= 4.0s, no human turns). Disconnecting room.")
+                    asyncio.create_task(room.disconnect())
+                else:
+                    logger.info("AMD: Not disconnecting room because turn_count=%d or user transcript received", turn_count)
                 break
                 
     except asyncio.CancelledError:
@@ -871,6 +897,15 @@ async def run_room_session(ctx: Any, config: LiveKitAgentWorkerConfig) -> None:
 
     @session.on("user_input_transcribed")
     def on_user_input_transcribed(event):
+        # Mark that user transcript/speech was detected to bypass AMD
+        partial_text = ""
+        if hasattr(event, "text") and event.text:
+            partial_text = event.text
+        elif hasattr(event, "alternatives") and event.alternatives:
+            partial_text = event.alternatives[0].text
+        if partial_text.strip():
+            agent_instance.user_transcript_received = True
+
         if event.is_final:
             latency_recorder.mark("stt_final_transcript")
             latency_recorder.mark("transcript_final")
