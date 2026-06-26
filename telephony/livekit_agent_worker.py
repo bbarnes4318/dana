@@ -853,7 +853,7 @@ async def run_room_session(ctx: Any, config: LiveKitAgentWorkerConfig) -> None:
             "max_delay": vcfg.turn_max_delay,
         },
         interruption={
-            "enabled": os.getenv("DANA_ALLOW_AGENT_BARGE_IN", "false").lower() == "true",
+            "enabled": True,
             "mode": "adaptive",
             "resume_false_interruption": True,
             "false_interruption_timeout": 1.0,
@@ -989,15 +989,10 @@ async def run_room_session(ctx: Any, config: LiveKitAgentWorkerConfig) -> None:
     if hasattr(session, "_room_io") and session._room_io:
         audio_output = session._room_io.audio_output
         if hasattr(audio_output, "_audio_source"):
-            direct_push = os.getenv("DANA_ENABLE_DIRECT_FFI_TTS_PUSH", "false").lower() == "true"
-            monkeypatch = os.getenv("DANA_ENABLE_LIVEKIT_AUDIO_MONKEYPATCH", "false").lower() == "true"
-            if direct_push and monkeypatch:
-                import tts_service
-                tts_service.active_audio_source = audio_output._audio_source
-                audio_output._bypass_main_loop = True
-                logger.info("Direct audio source registered in tts_service and main-loop bypass enabled.")
-            else:
-                logger.info("Direct audio push / monkeypatch disabled; bypass main loop not set.")
+            import tts_service
+            tts_service.active_audio_source = audio_output._audio_source
+            audio_output._bypass_main_loop = True
+            logger.info("Direct audio source registered in tts_service and main-loop bypass enabled.")
 
     # Speak Greeting if enabled
     if config.greeting_enabled and config.greeting_text:

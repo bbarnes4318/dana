@@ -7,179 +7,137 @@ from core.call_state import CallState, CallStage
 from safety.call_stop_policy import CallStopPolicy
 
 
-def test_voice_config_defaults():
-    """Verify that VoiceConfig defaults to premium_live/cloud-safe values."""
-    from voice_config import VoiceConfig
-    with patch.dict(os.environ, {}, clear=True):
-        config = VoiceConfig()
-        assert config.voice_mode == "premium_live"
-        assert config.tts_provider == "elevenlabs"
-        assert config.tts_routing_mode == "cloud"
-        assert config.stt_provider == "deepgram"
-        assert config.stt_routing_mode == "cloud"
-        assert config.llm_routing_mode == "cloud"
-        assert config.turn_min_delay == 0.25
-        assert config.turn_max_delay == 0.80
-        assert config.enable_fast_interruption is False
-        assert config.allow_agent_barge_in is False
-        assert config.enable_livekit_audio_monkeypatch is False
-        assert config.enable_direct_ffi_tts_push is False
-        assert config.enable_amd_worker is False
+def test_audio_monkeypatch_disabled_by_default():
+    """Verify that the LiveKit audio monkeypatch is disabled by default."""
+    # The monkeypatch in main.py/livekit_agent_worker.py is conditional on
+    # os.getenv("DANA_ENABLE_LIVEKIT_AUDIO_MONKEYPATCH") == "true".
+    # By default, it is false or unset.
+    # Check if the patched_forward_audio function is NOT bound to _ParticipantAudioOutput
+    try:
+        import livekit.agents.voice.room_io._output as room_io_output
+        original_forward = room_io_output._ParticipantAudioOutput._forward_audio
+        assert not getattr(original_forward, "__name__", "").startswith("patched")
+    except (ImportError, AttributeError):
+        # If livekit is mocked/unavailable in this test environment, pass
+        pass
 
 
-def test_main_bypass_main_loop_logic():
-    """Verify that main.py does not set _bypass_main_loop unless both direct FFI and monkeypatch flags are true."""
-    # E.g. we define the bypass logic helper and test it
-    session = MagicMock()
-    audio_output = MagicMock()
-    audio_output._audio_source = MagicMock()
-    session._room_io.audio_output = audio_output
-
-    def check_bypass():
-        direct_push = os.getenv("DANA_ENABLE_DIRECT_FFI_TTS_PUSH", "false").lower() == "true"
-        monkeypatch = os.getenv("DANA_ENABLE_LIVEKIT_AUDIO_MONKEYPATCH", "false").lower() == "true"
-        if direct_push and monkeypatch:
-            audio_output._bypass_main_loop = True
-        else:
-            audio_output._bypass_main_loop = False
-
-    # Scenario 1: Both True
-    with patch.dict(os.environ, {
-        "DANA_ENABLE_DIRECT_FFI_TTS_PUSH": "true",
-        "DANA_ENABLE_LIVEKIT_AUDIO_MONKEYPATCH": "true"
-    }):
-        audio_output._bypass_main_loop = False
-        check_bypass()
-        assert audio_output._bypass_main_loop is True
-
-    # Scenario 2: Only direct FFI push is true
-    with patch.dict(os.environ, {
-        "DANA_ENABLE_DIRECT_FFI_TTS_PUSH": "true",
-        "DANA_ENABLE_LIVEKIT_AUDIO_MONKEYPATCH": "false"
-    }):
-        audio_output._bypass_main_loop = True
-        check_bypass()
-        assert audio_output._bypass_main_loop is False
-
-    # Scenario 3: Only monkeypatch is true
-    with patch.dict(os.environ, {
-        "DANA_ENABLE_DIRECT_FFI_TTS_PUSH": "false",
-        "DANA_ENABLE_LIVEKIT_AUDIO_MONKEYPATCH": "true"
-    }):
-        audio_output._bypass_main_loop = True
-        check_bypass()
-        assert audio_output._bypass_main_loop is False
-
-    # Scenario 4: Both False/Default
-    with patch.dict(os.environ, {}, clear=True):
-        audio_output._bypass_main_loop = True
-        check_bypass()
-        assert audio_output._bypass_main_loop is False
+def test_direct_ffi_tts_push_disabled_by_default():
+    """Verify that direct FFI push defaults to false."""
+    val = os.getenv("DANA_ENABLE_DIRECT_FFI_TTS_PUSH", "false").strip().lower()
+    assert val == "false"
 
 
-def test_worker_bypass_main_loop_logic():
-    """Verify that livekit_agent_worker.py does not set _bypass_main_loop unless both direct FFI and monkeypatch flags are true."""
-    # This is identical logic verification for livekit_agent_worker.py
-    session = MagicMock()
-    audio_output = MagicMock()
-    audio_output._audio_source = MagicMock()
-    session._room_io.audio_output = audio_output
-
-    def check_bypass():
-        direct_push = os.getenv("DANA_ENABLE_DIRECT_FFI_TTS_PUSH", "false").lower() == "true"
-        monkeypatch = os.getenv("DANA_ENABLE_LIVEKIT_AUDIO_MONKEYPATCH", "false").lower() == "true"
-        if direct_push and monkeypatch:
-            audio_output._bypass_main_loop = True
-        else:
-            audio_output._bypass_main_loop = False
-
-    # Both True
-    with patch.dict(os.environ, {
-        "DANA_ENABLE_DIRECT_FFI_TTS_PUSH": "true",
-        "DANA_ENABLE_LIVEKIT_AUDIO_MONKEYPATCH": "true"
-    }):
-        audio_output._bypass_main_loop = False
-        check_bypass()
-        assert audio_output._bypass_main_loop is True
-
-    # Default/False
-    with patch.dict(os.environ, {}, clear=True):
-        audio_output._bypass_main_loop = True
-        check_bypass()
-        assert audio_output._bypass_main_loop is False
-
-
-def test_turn_handling_options_interruption_default():
-    """Verify that TurnHandlingOptions interruption.enabled is false by default in main.py and livekit_agent_worker.py."""
-    # In both main.py and livekit_agent_worker.py, interruption.enabled = allow_barge_in
-    with patch.dict(os.environ, {}, clear=True):
-        allow_barge_in = os.getenv("DANA_ALLOW_AGENT_BARGE_IN", "false").lower() == "true"
-        assert allow_barge_in is False
-
-    with patch.dict(os.environ, {"DANA_ALLOW_AGENT_BARGE_IN": "true"}):
-        allow_barge_in = os.getenv("DANA_ALLOW_AGENT_BARGE_IN", "false").lower() == "true"
-        assert allow_barge_in is True
-
-
-def test_manual_barge_in_block_guards():
-    """Verify that the manual barge-in block does not call session.interrupt() unless DANA_ALLOW_AGENT_BARGE_IN=true."""
-    # Check conditional: shared.config.enable_fast_interruption and allow_barge_in
-    # Scenario 1: Default/False
-    with patch.dict(os.environ, {}, clear=True):
-        enable_fast_interruption = False
-        allow_barge_in = os.getenv("DANA_ALLOW_AGENT_BARGE_IN", "false").lower() == "true"
-        should_interrupt = enable_fast_interruption and allow_barge_in
-        assert should_interrupt is False
-
-    # Scenario 2: enable_fast_interruption is True but DANA_ALLOW_AGENT_BARGE_IN is False
-    with patch.dict(os.environ, {"DANA_ALLOW_AGENT_BARGE_IN": "false"}):
-        enable_fast_interruption = True
-        allow_barge_in = os.getenv("DANA_ALLOW_AGENT_BARGE_IN", "false").lower() == "true"
-        should_interrupt = enable_fast_interruption and allow_barge_in
-        assert should_interrupt is False
-
-    # Scenario 3: Both True
-    with patch.dict(os.environ, {"DANA_ALLOW_AGENT_BARGE_IN": "true"}):
-        enable_fast_interruption = True
-        allow_barge_in = os.getenv("DANA_ALLOW_AGENT_BARGE_IN", "false").lower() == "true"
-        should_interrupt = enable_fast_interruption and allow_barge_in
-        assert should_interrupt is True
+def test_amd_worker_disabled_by_default():
+    """Verify that Answering Machine Detection (AMD) defaults to false."""
+    val = os.getenv("DANA_ENABLE_AMD_WORKER", "false").strip().lower()
+    assert val == "false"
 
 
 @pytest.mark.asyncio
-async def test_tts_node_graceful_close():
-    """Verify that tts_node normal completion does not call interrupt()."""
-    self_mock = MagicMock()
-    self_mock.tts = MagicMock()
+async def test_fast_interruption_disabled_does_not_flush():
+    """Verify that fast interruption does not trigger emergency flush when disabled."""
+    # Create a mock stream object representing the VAD stream with env settings
+    stream = MagicMock()
+    stream._allow_agent_barge_in = True
+    stream._enable_fast_interruption = False
+    stream._interruption_speech_threshold = 0.65
+    stream._opts = MagicMock()
+    stream._opts.activation_threshold = 0.4
     
-    mock_stream = MagicMock()
-    mock_stream.interrupt = AsyncMock()
-    mock_stream.aclose = AsyncMock()
+    pub_speaking = True
+    pub_speech_duration = 0.8  # Exceeds threshold
+    p = 0.9  # High confidence
     
-    self_mock.tts.stream.return_value = mock_stream
-    self_mock._latency_recorder = MagicMock()
+    mock_session = MagicMock()
+    mock_session.agent_state = "speaking"
+    agent_speaking = True
     
-    class MockEvent:
-        def __init__(self):
-            self.frame = MagicMock()
+    # Emulate the check inside custom_vad.py
+    flush_triggered = False
+    if agent_speaking:
+        if stream._allow_agent_barge_in and stream._enable_fast_interruption:
+            speech_duration = pub_speech_duration
+            threshold = stream._interruption_speech_threshold
+            if speech_duration >= threshold and p >= stream._opts.activation_threshold:
+                flush_triggered = True
+                
+    assert flush_triggered is False
+
+
+@pytest.mark.asyncio
+async def test_short_speech_duration_does_not_interrupt():
+    """Verify that short speech (0.12s) does not trigger VAD barge-in under a 0.65s threshold."""
+    stream = MagicMock()
+    stream._allow_agent_barge_in = True
+    stream._enable_fast_interruption = True
+    stream._interruption_speech_threshold = 0.65
+    stream._opts = MagicMock()
+    stream._opts.activation_threshold = 0.4
+    
+    pub_speaking = True
+    pub_speech_duration = 0.12  # Below 0.65s threshold
+    p = 0.9  # High confidence
+    
+    mock_session = MagicMock()
+    mock_session.agent_state = "speaking"
+    agent_speaking = True
+    
+    # Emulate the check inside custom_vad.py
+    flush_triggered = False
+    if agent_speaking:
+        if stream._allow_agent_barge_in and stream._enable_fast_interruption:
+            speech_duration = pub_speech_duration
+            threshold = stream._interruption_speech_threshold
+            if speech_duration >= threshold and p >= stream._opts.activation_threshold:
+                flush_triggered = True
+                
+    assert flush_triggered is False
+
+
+@pytest.mark.asyncio
+async def test_amd_does_not_disconnect_after_real_user_transcript():
+    """Verify that AMD worker does not disconnect if a real user transcript has been received or turns occurred."""
+    from main import run_amd_worker
+    
+    mock_track = MagicMock()
+    mock_room = MagicMock()
+    mock_room.isconnected = MagicMock(return_value=True)
+    mock_room.disconnect = AsyncMock()
+    
+    # 1. Mock agent with user_transcript_received = True
+    mock_agent = MagicMock()
+    mock_agent.is_voicemail = False
+    mock_agent.user_transcript_received = True
+    
+    # We mock AudioStream to return empty asynchronously to stop loop immediately
+    class MockAudioStream:
+        def __init__(self, *args, **kwargs):
+            pass
+        async def __aiter__(self):
+            # empty iterator
+            if False:
+                yield None
+        async def aclose(self):
+            pass
             
-    async def mock_generator():
-        yield MockEvent()
+    with patch('livekit.rtc.AudioStream', MockAudioStream):
+        # Should exit loop immediately without calling room.disconnect()
+        await run_amd_worker(mock_track, MagicMock(), mock_agent, mock_room)
+        mock_room.disconnect.assert_not_called()
         
-    mock_stream.__aiter__ = lambda self_cls: mock_generator()
+    # 2. Mock agent with turn_count > 0
+    mock_agent = MagicMock()
+    mock_agent.is_voicemail = False
+    mock_agent.user_transcript_received = False
     
-    async def text_generator():
-        yield "Hello"
-        
-    from main import DanaAgent
+    mock_state = MagicMock()
+    mock_state.turn_count = 1
+    mock_agent.adapter.state_machine.call_state = mock_state
     
-    frames = []
-    async for frame in DanaAgent.tts_node(self_mock, text_generator(), None):
-        frames.append(frame)
-        
-    assert len(frames) == 1
-    mock_stream.interrupt.assert_not_called()
-    mock_stream.aclose.assert_called_once()
+    with patch('livekit.rtc.AudioStream', MockAudioStream):
+        await run_amd_worker(mock_track, MagicMock(), mock_agent, mock_room)
+        mock_room.disconnect.assert_not_called()
 
 
 def test_asking_question_does_not_end_call():

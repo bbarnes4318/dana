@@ -501,27 +501,6 @@ class SharedComponents:
         _active_repository = self.repository
         graceful_startup_integrations(self.repository)
 
-        # Log active voice path parameters on worker startup
-        import os
-        monkeypatch = os.getenv("DANA_ENABLE_LIVEKIT_AUDIO_MONKEYPATCH", "false").lower() == "true"
-        direct_push = os.getenv("DANA_ENABLE_DIRECT_FFI_TTS_PUSH", "false").lower() == "true"
-        bypass_enabled = monkeypatch and direct_push
-        allow_barge_in = os.getenv("DANA_ALLOW_AGENT_BARGE_IN", "false").lower() == "true"
-        manual_barge_in = self.config.enable_fast_interruption and allow_barge_in
-        amd_enabled = os.getenv("DANA_ENABLE_AMD_WORKER", "false").lower() == "true"
-
-        logger.info(f"ACTIVE_VOICE_MODE: {self.config.voice_mode}")
-        logger.info(f"ACTIVE_STT_PROVIDER: {self.config.stt_provider}")
-        logger.info(f"ACTIVE_STT_ROUTING_MODE: {self.config.stt_routing_mode}")
-        logger.info(f"ACTIVE_TTS_PROVIDER: {self.config.tts_provider}")
-        logger.info(f"ACTIVE_TTS_ROUTING_MODE: {self.config.tts_routing_mode}")
-        logger.info(f"LIVEKIT_AUDIO_MONKEYPATCH_ENABLED: {str(monkeypatch).lower()}")
-        logger.info(f"DIRECT_FFI_TTS_PUSH_ENABLED: {str(direct_push).lower()}")
-        logger.info(f"AUDIO_BYPASS_MAIN_LOOP_ENABLED: {str(bypass_enabled).lower()}")
-        logger.info(f"LIVEKIT_INTERRUPTION_ENABLED: {str(allow_barge_in).lower()}")
-        logger.info(f"MANUAL_BARGE_IN_ENABLED: {str(manual_barge_in).lower()}")
-        logger.info(f"AMD_WORKER_ENABLED: {str(amd_enabled).lower()}")
-
         logger.info("All shared components initialized successfully")
 
 
@@ -918,7 +897,6 @@ class DanaAgent(Agent):
         push_task = asyncio.create_task(push_text_loop())
         
         first_audio = True
-        completed_successfully = False
         try:
             async for ev in tts_stream:
                 if first_audio:
@@ -929,10 +907,8 @@ class DanaAgent(Agent):
                         self._latency_recorder.mark("second_turn_tts_first_audio")
                         self._latency_recorder.mark("second_turn_audio_published")
                 yield ev.frame
-            completed_successfully = True
         finally:
-            if not completed_successfully:
-                await tts_stream.interrupt()
+            await tts_stream.interrupt()
             await tts_stream.aclose()
             push_task.cancel()
 
@@ -1164,7 +1140,7 @@ async def entrypoint(ctx: JobContext):
             "max_delay": shared.config.turn_max_delay,
         },
         interruption={
-            "enabled": os.getenv("DANA_ALLOW_AGENT_BARGE_IN", "false").lower() == "true",
+            "enabled": True,
             "mode": "adaptive",
             "resume_false_interruption": True,
             "false_interruption_timeout": 1.0,
@@ -1201,25 +1177,24 @@ async def entrypoint(ctx: JobContext):
             latency_recorder.mark("user_speech_start")
             
             # Check for barge-in interruption
-            if shared.config.enable_fast_interruption and os.getenv("DANA_ALLOW_AGENT_BARGE_IN", "false").lower() == "true":
-                if session.agent_state == "speaking" or getattr(session.agent_state, "value", None) == "speaking":
-                    # Do not allow interruption during the OPENING stage
-                    from speech.context_registry import get_current_call_stage
-                    stage = get_current_call_stage() or "OPENING"
-                    if stage != "OPENING":
-                        latency_recorder.mark("barge_in_detected")
-                        logger.info("Barge-in detected - interrupting agent response")
-                        agent.interrupted_current_turn = True
-                        agent.interrupted_at = time.perf_counter()
-                        
-                        # Interrupt the session
-                        if asyncio.iscoroutinefunction(session.interrupt):
-                            asyncio.create_task(session.interrupt())
-                        else:
-                            session.interrupt()
-                        latency_recorder.mark("barge_in_stopped_audio")
+            if session.agent_state == "speaking" or getattr(session.agent_state, "value", None) == "speaking":
+                # Do not allow interruption during the OPENING stage
+                from speech.context_registry import get_current_call_stage
+                stage = get_current_call_stage() or "OPENING"
+                if stage != "OPENING":
+                    latency_recorder.mark("barge_in_detected")
+                    logger.info("Barge-in detected - interrupting agent response")
+                    agent.interrupted_current_turn = True
+                    agent.interrupted_at = time.perf_counter()
+                    
+                    # Interrupt the session
+                    if asyncio.iscoroutinefunction(session.interrupt):
+                        asyncio.create_task(session.interrupt())
                     else:
-                        logger.info("Barge-in ignored during OPENING stage (greeting playback)")
+                        session.interrupt()
+                    latency_recorder.mark("barge_in_stopped_audio")
+                else:
+                    logger.info("Barge-in ignored during OPENING stage (greeting playback)")
                 
             # Cancellable fallback task cancellation on barge-in
             if getattr(agent, "fallback_disconnect_task", None):
@@ -1421,15 +1396,10 @@ async def entrypoint(ctx: JobContext):
     if hasattr(session, "_room_io") and session._room_io:
         audio_output = session._room_io.audio_output
         if hasattr(audio_output, "_audio_source"):
-            direct_push = os.getenv("DANA_ENABLE_DIRECT_FFI_TTS_PUSH", "false").lower() == "true"
-            monkeypatch = os.getenv("DANA_ENABLE_LIVEKIT_AUDIO_MONKEYPATCH", "false").lower() == "true"
-            if direct_push and monkeypatch:
-                import tts_service
-                tts_service.active_audio_source = audio_output._audio_source
-                audio_output._bypass_main_loop = True
-                logger.info("Direct audio source registered in tts_service and main-loop bypass enabled.")
-            else:
-                logger.info("Direct audio push / monkeypatch disabled; bypass main loop not set.")
+            import tts_service
+            tts_service.active_audio_source = audio_output._audio_source
+            audio_output._bypass_main_loop = True
+            logger.info("Direct audio source registered in tts_service and main-loop bypass enabled.")
             
     # Emit call.session_started event
     from integrations.crm_webhooks import emit_crm_event_async
