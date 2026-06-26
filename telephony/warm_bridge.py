@@ -28,40 +28,14 @@ class WarmBridgeResult:
 class DanaLeaveStrategy:
     """Defines how the voice agent leaves the room after bridging is complete."""
 
-    async def execute_leave(
-        self,
-        room_name: str,
-        agent_identity: str,
-        lkapi: Optional[Any] = None
-    ) -> bool:
-        """Remove Dana's participant or mute audio so the humans can talk privately."""
+    async def execute_leave(self, room_name: str, agent_identity: str) -> bool:
+        """Remove Dana's participant or mute audio so the humans can talk privately.
+        
+        Real implementation would query the LiveKitAPI room participant list and call:
+        await lkapi.room.remove_participant(room=room_name, identity=agent_identity)
+        """
         logger.info("Executing DanaLeaveStrategy: Removing agent participant '%s' from room '%s'", agent_identity, room_name)
-        
-        is_production_or_live = (
-            os.getenv("DANA_RUNTIME_ENV") == "production"
-            or os.getenv("DANA_CONTROLLED_LIVE_TEST", "").strip().lower() == "true"
-        )
-        
-        if lkapi:
-            try:
-                import inspect
-                from livekit.api import RoomParticipantIdentity
-                remove_req = RoomParticipantIdentity(room=room_name, identity=agent_identity)
-                res = lkapi.room.remove_participant(remove=remove_req)
-                if inspect.isawaitable(res):
-                    await res
-                logger.info("DANA_LEFT_OR_MUTED_AFTER_BRIDGE: Successfully removed Dana's participant '%s' from room '%s'", agent_identity, room_name)
-                return True
-            except Exception as e:
-                logger.exception("Failed to remove Dana's participant via LiveKit API: %s", e)
-                if is_production_or_live:
-                    return False
-        else:
-            if is_production_or_live:
-                logger.error("No lkapi provided for DanaLeaveStrategy in production/controlled live mode. Cannot proceed.")
-                return False
-        
-        logger.info("DANA_LEFT_OR_MUTED_AFTER_BRIDGE: Simulating leave/mute for agent participant '%s' in room '%s'", agent_identity, room_name)
+        # Safe stub: simulate success
         return True
 
 
@@ -73,9 +47,7 @@ class WarmBridgeProvider:
         room_name: str,
         agent: LicensedAgent,
         summary: str,
-        dana_identity: str = "dana_voice_agent",
-        call_id: Optional[str] = None,
-        prospect_identity: Optional[str] = None
+        dana_identity: str = "dana_voice_agent"
     ) -> WarmBridgeResult:
         """Place outbound call to agent, play summary, and bridge with prospect."""
         raise NotImplementedError
@@ -92,9 +64,7 @@ class LiveKitWarmBridgeProvider(WarmBridgeProvider):
         room_name: str,
         agent: LicensedAgent,
         summary: str,
-        dana_identity: str = "dana_voice_agent",
-        call_id: Optional[str] = None,
-        prospect_identity: Optional[str] = None
+        dana_identity: str = "dana_voice_agent"
     ) -> WarmBridgeResult:
         # 1. Safety Gate Check
         confirm_transfer = os.getenv("DANA_CONFIRM_TRANSFER_CALL", "no").strip().lower() == "yes"
@@ -106,8 +76,6 @@ class LiveKitWarmBridgeProvider(WarmBridgeProvider):
                 provider_call_id=None,
                 transfer_mode="dry_run"
             )
-
-        logger.info("DANA_TRANSFER_BRIDGE_STARTED: Initiating warm bridge transfer for room '%s' to agent '%s'", room_name, agent.name)
 
         # 2. Check Provider Credentials
         livekit_url = os.getenv("LIVEKIT_URL")
@@ -167,22 +135,12 @@ class LiveKitWarmBridgeProvider(WarmBridgeProvider):
             participant = await lkapi.sip.create_sip_participant(request)
             participant_id = getattr(participant, "participant_id", "unknown-participant-id")
             
-            logger.info("LICENSED_AGENT_SIP_PARTICIPANT_CREATED: SIP participant created successfully. Participant ID: %s", participant_id)
+            logger.info("LiveKit SIP Outbound call successfully initiated. Participant ID: %s", participant_id)
 
             # Whisper Summary & Execute Dana leave strategy
             # Note: Whisper audio playback would be triggered here in production.
             # Then execute leave strategy to remove Dana from room.
-            leave_success = await self.leave_strategy.execute_leave(room_name, dana_identity, lkapi=lkapi)
-            if not leave_success:
-                logger.error("Dana leave strategy failed.")
-                return WarmBridgeResult(
-                    success=False,
-                    reason="dana_leave_failed",
-                    provider_call_id=participant_id,
-                    transfer_mode="failed"
-                )
-
-            logger.info("TRANSFER_READY_FOR_HUMAN_AGENT: Warm bridge completed. Prospect and agent are now connected in room '%s'", room_name)
+            await self.leave_strategy.execute_leave(room_name, dana_identity)
 
             return WarmBridgeResult(
                 success=True,

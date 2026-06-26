@@ -378,25 +378,8 @@ class CampaignRunner:
                 logger.info("Call %s answered by human. Starting conversational session.", call_id)
                 if not is_dry_run:
                     await self._handoff_to_live_agent_session(call_id, lead, campaign)
-                    await self.lead_queue.mark_completed(lead_id, outcome="completed")
-                    return "success_human_answered"
-                else:
-                    # Dry-run: complete immediately and mark pacer finished
-                    await self.campaign_pacer.mark_call_finished(campaign_id, call_id)
-                    await self.lead_queue.mark_completed(lead_id, outcome="completed")
-                    
-                    # Emit call.completed event exactly once for dry run human answered
-                    await emit_crm_event_async(
-                        "call.completed",
-                        repository=self.repository,
-                        call_id=call_id,
-                        lead_id=lead_id,
-                        campaign_id=campaign_id,
-                        phone_e164=phone_e164,
-                        outcome=outcome,
-                        lead_profile=lead
-                    )
-                    return "success_human_answered"
+                await self.lead_queue.mark_completed(lead_id, outcome="completed")
+                return "success_human_answered"
 
             # Save outcome metrics and costs for non-human-answered call
             # Record call finished in CampaignPacer since it's not human answered and doesn't hand off

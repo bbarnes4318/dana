@@ -29,8 +29,7 @@ class ColdTransferProvider:
     async def initiate_cold_transfer(
         self,
         room_name: str,
-        phone_number: str,
-        call_control_id: Optional[str] = None
+        phone_number: str
     ) -> ColdTransferResult:
         """Execute cold transfer bridging the call directly to destination number."""
         raise NotImplementedError
@@ -42,23 +41,9 @@ class TelnyxColdTransferProvider(ColdTransferProvider):
     async def initiate_cold_transfer(
         self,
         room_name: str,
-        phone_number: str,
-        call_control_id: Optional[str] = None
+        phone_number: str
     ) -> ColdTransferResult:
-        # 1. Check if call_control_id is present
-        if not call_control_id:
-            logger.error(
-                "Cold transfer requires Telnyx Call Control call_control_id. "
-                "Current call path uses LiveKit SIP, so use warm_bridge instead."
-            )
-            return ColdTransferResult(
-                success=False,
-                reason="telnyx_call_control_not_available",
-                provider_call_id=None,
-                transfer_mode="failed"
-            )
-
-        # 2. Safety Gate Check
+        # 1. Safety Gate Check
         confirm_transfer = os.getenv("DANA_CONFIRM_TRANSFER_CALL", "no").strip().lower() == "yes"
         if not confirm_transfer:
             logger.warning("Cold transfer BLOCKED by safety gate (DANA_CONFIRM_TRANSFER_CALL != yes)")
@@ -69,7 +54,7 @@ class TelnyxColdTransferProvider(ColdTransferProvider):
                 transfer_mode="dry_run"
             )
 
-        # 3. Check Provider Credentials
+        # 2. Check Provider Credentials
         telnyx_api_key = os.getenv("TELNYX_API_KEY")
         if not telnyx_api_key or telnyx_api_key == "replace_me":
             logger.error("Telnyx provider is missing API key configuration.")
@@ -80,16 +65,11 @@ class TelnyxColdTransferProvider(ColdTransferProvider):
                 transfer_mode="failed"
             )
 
-        # 4. Telnyx REST API Call (SIP REFER or Call Control Transfer bridge)
+        # 3. Telnyx REST API Call (SIP REFER or Call Control Transfer bridge)
         # Note: In a production Telnyx integration, we would retrieve the Telnyx call control ID
         # associated with the room/session, and execute:
         # telnyx.Call.transfer(call_control_id=..., destination_number=phone_number)
-        logger.info(
-            "Executing Telnyx Cold Transfer for room '%s' to phone number '%s' using call_control_id '%s'...",
-            room_name,
-            phone_number,
-            call_control_id
-        )
+        logger.info("Executing Telnyx Cold Transfer for room '%s' to phone number '%s'...", room_name, phone_number)
         
         # Safe failure stub as actual API details depend on active call_control_id matching
         return ColdTransferResult(

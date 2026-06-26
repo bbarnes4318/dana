@@ -44,13 +44,3 @@ All scripts operate under strict safety gates to prevent accidental billing, res
 | `DANA_CONFIRM_TRANSFER_CALL` | `no` | Allow transferring calls or bridging live calls to licensed agents. |
 
 If these variables are not set to `yes`, all operations fall back to a dry-run / non-mutating logging mode, and **do not make active network mutation requests**.
-
----
-
-## Telnyx Connection ID vs Telnyx Call Control ID vs LiveKit SIP IDs
-
-- **`TELNYX_CONNECTION_ID`**: A static Telnyx connection/app config ID. Used for routing SIP credentials.
-- **`TELNYX_OUTBOUND_NUMBER`**: The caller ID/DID used for placing calls.
-- **`call_control_id`**: A unique identifier created per-call ONLY when using the Telnyx Call Control API/webhooks. It is required for carrier-level cold transfers via Telnyx.
-- **LiveKit Room / SIP IDs**: Dana currently places outbound calls through LiveKit SIP, which stores identifiers like `room_name`, `participant_identity`, and `sip_participant_id`. Because these calls go through LiveKit, there is no active Telnyx `call_control_id` available to our application.
-- **Production Routing**: Use `warm_bridge` (DANA_TRANSFER_MODE=warm_bridge) for production transfer. This routes the licensed agent as a new SIP participant into the existing LiveKit room. Do not use `cold_transfer` (which requires Telnyx `call_control_id`) unless/until the app is explicitly switched to direct Telnyx Call Control.
