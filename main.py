@@ -264,34 +264,58 @@ class SharedComponents:
             
             # Check credentials & provider config
             tts_provider = self.config.tts_provider.strip().lower()
+            tts_routing = self.config.tts_routing_mode.strip().lower()
             if tts_provider == "elevenlabs":
                 el_key = os.getenv("ELEVENLABS_API_KEY", "").strip()
                 if not el_key or el_key.lower() in ("replace_me", "replace-me", ""):
-                    raise RuntimeError("premium_live with elevenlabs requires ELEVENLABS_API_KEY to be set")
+                    if tts_routing == "cloud":
+                        raise RuntimeError("premium_live with elevenlabs requires ELEVENLABS_API_KEY to be set")
+                    else:
+                        logger.warning("ELEVENLABS_API_KEY is missing. ElevenLabs provider not configured.")
                 el_voice = os.getenv("ELEVENLABS_VOICE_ID", "").strip()
                 if not el_voice or el_voice.lower() in ("replace_me", "replace-me", ""):
-                    raise RuntimeError("premium_live with elevenlabs requires ELEVENLABS_VOICE_ID to be set")
+                    if tts_routing == "cloud":
+                        raise RuntimeError("premium_live with elevenlabs requires ELEVENLABS_VOICE_ID to be set")
+                    else:
+                        logger.warning("ELEVENLABS_VOICE_ID is missing. ElevenLabs provider not configured.")
             elif tts_provider == "openai":
                 oa_key = os.getenv("OPENAI_API_KEY", "").strip()
                 if not oa_key or oa_key.lower() in ("replace_me", "replace-me", ""):
-                    raise RuntimeError("premium_live with openai requires OPENAI_API_KEY to be set")
+                    if tts_routing == "cloud":
+                        raise RuntimeError("premium_live with openai requires OPENAI_API_KEY to be set")
+                    else:
+                        logger.warning("OPENAI_API_KEY is missing. OpenAI TTS provider not configured.")
                 oa_voice = os.getenv("OPENAI_TTS_VOICE", "").strip()
                 if not oa_voice or oa_voice.lower() in ("replace_me", "replace-me", ""):
-                    raise RuntimeError("premium_live with openai requires OPENAI_TTS_VOICE to be set")
+                    if tts_routing == "cloud":
+                        raise RuntimeError("premium_live with openai requires OPENAI_TTS_VOICE to be set")
+                    else:
+                        logger.warning("OPENAI_TTS_VOICE is missing. OpenAI TTS provider not configured.")
             else:
-                raise RuntimeError(f"premium_live requires a cloud provider (elevenlabs or openai), got '{self.config.tts_provider}'")
+                if tts_routing == "cloud":
+                    raise RuntimeError(f"premium_live requires a cloud provider (elevenlabs or openai), got '{self.config.tts_provider}'")
+                else:
+                    logger.warning(f"tts_provider is set to '{self.config.tts_provider}', which is not a known cloud provider.")
 
             llm_routing = self.config.llm_routing_mode.strip().lower()
             if llm_routing == "cloud":
                 oa_key = os.getenv("OPENAI_API_KEY", "").strip()
                 if not oa_key or oa_key.lower() in ("replace_me", "replace-me", ""):
                     raise RuntimeError("DANA_LLM_ROUTING_MODE=cloud requires OPENAI_API_KEY to be set")
+            elif llm_routing == "hybrid":
+                oa_key = os.getenv("OPENAI_API_KEY", "").strip()
+                if not oa_key or oa_key.lower() in ("replace_me", "replace-me", ""):
+                    logger.warning("OPENAI_API_KEY is missing. Hybrid LLM will fall back to local LLM.")
 
             stt_routing = self.config.stt_routing_mode.strip().lower()
             if stt_routing == "cloud":
                 dg_key = os.getenv("DEEPGRAM_API_KEY", "").strip()
                 if not dg_key or dg_key.lower() in ("replace_me", "replace-me", ""):
                     raise RuntimeError("premium_live with stt_routing_mode=cloud requires DEEPGRAM_API_KEY to be set")
+            elif stt_routing == "hybrid":
+                dg_key = os.getenv("DEEPGRAM_API_KEY", "").strip()
+                if not dg_key or dg_key.lower() in ("replace_me", "replace-me", ""):
+                    logger.warning("DEEPGRAM_API_KEY is missing. Hybrid STT will fall back to local STT.")
 
         from routing.model_router import ModelRouter
         self.router = ModelRouter(self.config)
@@ -501,6 +525,36 @@ class SharedComponents:
         _active_repository = self.repository
         graceful_startup_integrations(self.repository)
 
+        # Log active runtime configuration parameters at startup
+        deepgram_configured = bool(os.getenv("DEEPGRAM_API_KEY"))
+        elevenlabs_configured = bool(os.getenv("ELEVENLABS_API_KEY"))
+        openai_configured = bool(os.getenv("OPENAI_API_KEY"))
+        livekit_interruption_enabled = True
+        manual_barge_in_enabled = self.config.enable_fast_interruption and os.getenv("DANA_ALLOW_AGENT_BARGE_IN", "false").lower() == "true"
+        emergency_flush_enabled = False
+        amd_worker_enabled = os.getenv("DANA_ENABLE_AMD_WORKER", "false").lower() == "true"
+
+        logger.info(
+            f"\n"
+            f"============================================================\n"
+            f"DANA RUNTIME VOICE STACK CONFIGURATION\n"
+            f"------------------------------------------------------------\n"
+            f"  ACTIVE_VOICE_MODE:             {self.config.voice_mode}\n"
+            f"  ACTIVE_STT_PROVIDER:           {self.config.stt_provider}\n"
+            f"  ACTIVE_STT_ROUTING_MODE:       {self.config.stt_routing_mode}\n"
+            f"  ACTIVE_TTS_PROVIDER:           {self.config.tts_provider}\n"
+            f"  ACTIVE_TTS_ROUTING_MODE:       {self.config.tts_routing_mode}\n"
+            f"  ACTIVE_LLM_ROUTING_MODE:       {self.config.llm_routing_mode}\n"
+            f"  DEEPGRAM_CONFIGURED:           {str(deepgram_configured).lower()}\n"
+            f"  ELEVENLABS_CONFIGURED:         {str(elevenlabs_configured).lower()}\n"
+            f"  OPENAI_CONFIGURED:             {str(openai_configured).lower()}\n"
+            f"  LIVEKIT_INTERRUPTION_ENABLED:  {str(livekit_interruption_enabled).lower()}\n"
+            f"  MANUAL_BARGE_IN_ENABLED:       {str(manual_barge_in_enabled).lower()}\n"
+            f"  EMERGENCY_FLUSH_ENABLED:       {str(emergency_flush_enabled).lower()}\n"
+            f"  AMD_WORKER_ENABLED:            {str(amd_worker_enabled).lower()}\n"
+            f"============================================================"
+        )
+
         logger.info("All shared components initialized successfully")
 
 
@@ -526,6 +580,7 @@ class DanaAgent(Agent):
         self.should_disconnect = False
         self.warm_bridge_active = False
         self.fallback_disconnect_task: Optional[asyncio.Task] = None
+        self.final_transcript_count = 0
         # Metrics Accumulators
         self.stt_seconds = 0.0
         self.tts_characters = 0
@@ -677,6 +732,9 @@ class DanaAgent(Agent):
             result = getattr(self.adapter, "last_streaming_result", None)
             if result:
                 self.current_turn_response = result.agent_response or ""
+                logger.info(f"LLM_RESPONSE_TEXT_LENGTH: {len(self.current_turn_response)}")
+                if not self.current_turn_response.strip():
+                    logger.error("ERROR_EMPTY_LLM_RESPONSE")
                 self._latency_recorder.mark("agent_response_text_created")
                 
                 # Update stage in registry
@@ -793,6 +851,9 @@ class DanaAgent(Agent):
         # Process user turn via the adapter exactly once
         result = await self.adapter.process_user_turn(user_text, chat_fn, interrupted=interrupted)
         self.current_turn_response = result.agent_response or ""
+        logger.info(f"LLM_RESPONSE_TEXT_LENGTH: {len(self.current_turn_response)}")
+        if not self.current_turn_response.strip():
+            logger.error("ERROR_EMPTY_LLM_RESPONSE")
         
         delay = getattr(result, "pre_speech_delay", 0.0)
         if delay > 0:
@@ -897,20 +958,39 @@ class DanaAgent(Agent):
         push_task = asyncio.create_task(push_text_loop())
         
         first_audio = True
+        completed_successfully = False
         try:
             async for ev in tts_stream:
                 if first_audio:
                     first_audio = False
+                    logger.info("TTS_FIRST_AUDIO_SENT")
                     self._latency_recorder.mark("tts_first_audio")
                     self._latency_recorder.mark("first_audio_published")
                     if "greeting_tts_started" in self._latency_recorder.events:
                         self._latency_recorder.mark("second_turn_tts_first_audio")
                         self._latency_recorder.mark("second_turn_audio_published")
                 yield ev.frame
+            completed_successfully = True
+            logger.info("TTS_STREAM_COMPLETED")
         finally:
-            await tts_stream.interrupt()
-            await tts_stream.aclose()
             push_task.cancel()
+            if first_audio:
+                logger.error("ERROR_TTS_NO_AUDIO")
+                
+            should_interrupt = asyncio.current_task().cancelled() or getattr(self, "interrupted_current_turn", False)
+            if should_interrupt:
+                logger.info("tts_node: interrupting TTS stream due to cancel or barge-in")
+                try:
+                    await tts_stream.interrupt()
+                except Exception as e:
+                    logger.warning(f"Error interrupting tts_stream: {e}")
+            else:
+                logger.info("tts_node: closing TTS stream gracefully without interrupt")
+                
+            try:
+                await tts_stream.aclose()
+            except Exception as e:
+                logger.warning(f"Error closing tts_stream: {e}")
 
 
 async def run_amd_worker(track: rtc.Track, session: AgentSession, agent: any, room: rtc.Room):
@@ -1177,24 +1257,25 @@ async def entrypoint(ctx: JobContext):
             latency_recorder.mark("user_speech_start")
             
             # Check for barge-in interruption
-            if session.agent_state == "speaking" or getattr(session.agent_state, "value", None) == "speaking":
-                # Do not allow interruption during the OPENING stage
-                from speech.context_registry import get_current_call_stage
-                stage = get_current_call_stage() or "OPENING"
-                if stage != "OPENING":
-                    latency_recorder.mark("barge_in_detected")
-                    logger.info("Barge-in detected - interrupting agent response")
-                    agent.interrupted_current_turn = True
-                    agent.interrupted_at = time.perf_counter()
-                    
-                    # Interrupt the session
-                    if asyncio.iscoroutinefunction(session.interrupt):
-                        asyncio.create_task(session.interrupt())
+            if shared.config.enable_fast_interruption and os.getenv("DANA_ALLOW_AGENT_BARGE_IN", "false").lower() == "true":
+                if session.agent_state == "speaking" or getattr(session.agent_state, "value", None) == "speaking":
+                    # Do not allow interruption during the OPENING stage
+                    from speech.context_registry import get_current_call_stage
+                    stage = get_current_call_stage() or "OPENING"
+                    if stage != "OPENING":
+                        latency_recorder.mark("barge_in_detected")
+                        logger.info("Barge-in detected - interrupting agent response")
+                        agent.interrupted_current_turn = True
+                        agent.interrupted_at = time.perf_counter()
+                        
+                        # Interrupt the session
+                        if asyncio.iscoroutinefunction(session.interrupt):
+                            asyncio.create_task(session.interrupt())
+                        else:
+                            session.interrupt()
+                        latency_recorder.mark("barge_in_stopped_audio")
                     else:
-                        session.interrupt()
-                    latency_recorder.mark("barge_in_stopped_audio")
-                else:
-                    logger.info("Barge-in ignored during OPENING stage (greeting playback)")
+                        logger.info("Barge-in ignored during OPENING stage (greeting playback)")
                 
             # Cancellable fallback task cancellation on barge-in
             if getattr(agent, "fallback_disconnect_task", None):
@@ -1216,6 +1297,14 @@ async def entrypoint(ctx: JobContext):
                         if interrupted_dur < 0.8:
                             latency_recorder.mark("false_interruption_detected")
                             logger.info("False interruption detected (duration since interrupt < 800ms)")
+                
+                # Check if final transcript is received after speech end
+                final_count_at_end = getattr(agent, "final_transcript_count", 0)
+                async def check_final_transcript_timeout(expected_count):
+                    await asyncio.sleep(2.5)
+                    if getattr(agent, "final_transcript_count", 0) == expected_count:
+                        logger.error("ERROR_NO_FINAL_TRANSCRIPT_AFTER_USER_SPEECH")
+                asyncio.create_task(check_final_transcript_timeout(final_count_at_end))
                 
     @session.on("agent_state_changed")
     def on_agent_state_changed(ev):
@@ -1270,6 +1359,9 @@ async def entrypoint(ctx: JobContext):
             agent.user_transcript_received = True
 
         if event.is_final:
+            agent.final_transcript_count = getattr(agent, "final_transcript_count", 0) + 1
+            logger.info("USER_TRANSCRIPT_RECEIVED")
+            logger.info(f"FINAL_TRANSCRIPT_TEXT_LENGTH: {len(partial_text)}")
             latency_recorder.mark("transcript_final")
         else:
             enable_semantic = os.getenv("DANA_ENABLE_SEMANTIC_TURN_DETECTION", "false").strip().lower() in ("true", "1", "yes")
@@ -1396,10 +1488,13 @@ async def entrypoint(ctx: JobContext):
     if hasattr(session, "_room_io") and session._room_io:
         audio_output = session._room_io.audio_output
         if hasattr(audio_output, "_audio_source"):
-            import tts_service
-            tts_service.active_audio_source = audio_output._audio_source
-            audio_output._bypass_main_loop = True
-            logger.info("Direct audio source registered in tts_service and main-loop bypass enabled.")
+            if os.getenv("DANA_ENABLE_DIRECT_FFI_TTS_PUSH", "false").lower() == "true" and os.getenv("DANA_ENABLE_LIVEKIT_AUDIO_MONKEYPATCH", "false").lower() == "true":
+                import tts_service
+                tts_service.active_audio_source = audio_output._audio_source
+                audio_output._bypass_main_loop = True
+                logger.info("Direct audio source registered in tts_service and main-loop bypass enabled.")
+            else:
+                logger.info("Direct FFI TTS push or audio monkeypatch is disabled. Operating in native LiveKit voice path mode.")
             
     # Emit call.session_started event
     from integrations.crm_webhooks import emit_crm_event_async

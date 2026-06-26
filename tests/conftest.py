@@ -21,7 +21,13 @@ _telephony_keys = [
     "TELNYX_OUTBOUND_CALLER_ID",
     "DANA_OUTBOUND_CALLER_ID",
     "DANA_TEST_CALL_TO",
-    "TEST_CALL_TO"
+    "TEST_CALL_TO",
+    "DANA_VOICE_MODE",
+    "DANA_STT_PROVIDER",
+    "DANA_STT_ROUTING_MODE",
+    "DANA_TTS_PROVIDER",
+    "DANA_TTS_ROUTING_MODE",
+    "DANA_LLM_ROUTING_MODE"
 ]
 
 for k in _telephony_keys:

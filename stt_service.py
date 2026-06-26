@@ -436,10 +436,8 @@ def create_stt(config: VoiceConfig) -> stt.STT:
     provider = config.stt_provider.lower()
     mode = config.stt_routing_mode.lower()
     
-    if provider == "deepgram" or mode == "cloud":
+    if mode == "cloud":
         from speech.hybrid_stt_router import HybridSTTRouter
-        # Force cloud mode
-        config.stt_routing_mode = "cloud"
         router = HybridSTTRouter(config, local_stt)
         if not router.deepgram_stt:
             raise RuntimeError("Cloud STT requested but Deepgram provider is not configured.")

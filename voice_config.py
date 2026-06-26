@@ -91,17 +91,17 @@ class VoiceConfig:
     opening_line: str = field(default_factory=lambda: env_str("DANA_OPENING_LINE", "Hello?"))
 
     # ---- STT ----
-    stt_provider: str = field(default_factory=lambda: env_str("DANA_STT_PROVIDER", "local"))
+    stt_provider: str = field(default_factory=lambda: env_str("DANA_STT_PROVIDER", "deepgram"))
     stt_model: str = field(default_factory=lambda: env_str("DANA_STT_MODEL", "large-v3-turbo"))
     stt_compute_type: str = field(default_factory=lambda: env_str("DANA_STT_COMPUTE_TYPE", "float16"))
     vad_threshold: float = field(default_factory=lambda: env_float("DANA_VAD_THRESHOLD", 0.5))
     min_silence_ms: int = field(default_factory=lambda: env_int("DANA_MIN_SILENCE_MS", 180))
 
     # ---- Hybrid STT Routing, Preprocessing, and Endpointing ----
-    stt_routing_mode: str = field(default_factory=lambda: env_str("DANA_STT_ROUTING_MODE", "local"))
+    stt_routing_mode: str = field(default_factory=lambda: env_str("DANA_STT_ROUTING_MODE", "hybrid"))
     enable_audio_preprocessing: bool = field(default_factory=lambda: env_bool("DANA_ENABLE_AUDIO_PREPROCESSING", False))
     endpoint_mode: str = field(default_factory=lambda: env_str("DANA_ENDPOINT_MODE", "fixed"))
-    cloud_stt_on_failure: bool = field(default_factory=lambda: env_bool("DANA_CLOUD_STT_ON_FAILURE", False))
+    cloud_stt_on_failure: bool = field(default_factory=lambda: env_bool("DANA_CLOUD_STT_ON_FAILURE", True))
     premium_stt_campaigns: str = field(default_factory=lambda: env_str("DANA_PREMIUM_STT_CAMPAIGNS", ""))
     enable_pstn_bandpass: bool = field(default_factory=lambda: env_bool("DANA_ENABLE_PSTN_BANDPASS", False))
     allow_cloud_stt_for_poor_line: bool = field(default_factory=lambda: env_bool("DANA_ALLOW_CLOUD_STT_FOR_POOR_LINE", False))
@@ -113,23 +113,23 @@ class VoiceConfig:
     runtime_env: str = field(default_factory=lambda: env_str("DANA_RUNTIME_ENV", "development"))
     allow_mock_tts: bool = field(default_factory=lambda: env_bool("DANA_ALLOW_MOCK_TTS", False))
     voice_profile: str = field(default_factory=lambda: env_str("DANA_VOICE_PROFILE", "fallback_safe"))
-    voice_mode: str = field(default_factory=lambda: env_str("DANA_VOICE_MODE", "local_cost"))
-    tts_provider: str = field(default_factory=lambda: env_str("DANA_TTS_PROVIDER", "local"))
+    voice_mode: str = field(default_factory=lambda: env_str("DANA_VOICE_MODE", "premium_live"))
+    tts_provider: str = field(default_factory=lambda: env_str("DANA_TTS_PROVIDER", "elevenlabs"))
     enable_audio_filters: bool = field(default_factory=lambda: env_bool("DANA_ENABLE_AUDIO_FILTERS", False))
     audio_filter_profile: str = field(default_factory=lambda: env_str("DANA_AUDIO_FILTER_PROFILE", "none"))
     enable_streaming_response: bool = field(default_factory=lambda: env_bool("DANA_ENABLE_STREAMING_RESPONSE", True))
 
     # ---- Turn-Taking ----
-    turn_min_delay: float = field(default_factory=lambda: env_float("DANA_TURN_MIN_DELAY", 0.15))
-    turn_max_delay: float = field(default_factory=lambda: env_float("DANA_TURN_MAX_DELAY", 0.55))
+    turn_min_delay: float = field(default_factory=lambda: env_float("DANA_TURN_MIN_DELAY", 0.25))
+    turn_max_delay: float = field(default_factory=lambda: env_float("DANA_TURN_MAX_DELAY", 0.80))
     preemptive_generation: bool = field(default_factory=lambda: env_bool("DANA_PREEMPTIVE_GENERATION", True))
 
     # ---- Model Routing & Failover ----
     model_routing_mode: str = field(default_factory=lambda: env_str("DANA_MODEL_ROUTING_MODE", "local"))
     llm_routing_mode: str = field(default_factory=lambda: env_str("DANA_LLM_ROUTING_MODE", "local"))
-    tts_routing_mode: str = field(default_factory=lambda: env_str("DANA_TTS_ROUTING_MODE", "local"))
+    tts_routing_mode: str = field(default_factory=lambda: env_str("DANA_TTS_ROUTING_MODE", "hybrid"))
     allow_cloud_llm_fallback: bool = field(default_factory=lambda: env_bool("DANA_ALLOW_CLOUD_LLM_FALLBACK", False))
-    allow_cloud_tts_fallback: bool = field(default_factory=lambda: env_bool("DANA_ALLOW_CLOUD_TTS_FALLBACK", False))
+    allow_cloud_tts_fallback: bool = field(default_factory=lambda: env_bool("DANA_ALLOW_CLOUD_TTS_FALLBACK", True))
     model_router_error_window_seconds: int = field(default_factory=lambda: env_int("DANA_MODEL_ROUTER_ERROR_WINDOW_SECONDS", 300))
     model_router_max_errors: int = field(default_factory=lambda: env_int("DANA_MODEL_ROUTER_MAX_ERRORS", 3))
     model_router_cooldown_seconds: int = field(default_factory=lambda: env_int("DANA_MODEL_ROUTER_COOLDOWN_SECONDS", 120))
@@ -143,15 +143,20 @@ class VoiceConfig:
     enable_fast_interruption: bool = field(default_factory=lambda: env_bool("DANA_ENABLE_FAST_INTERRUPTION", False))
     interruption_profile: str = field(default_factory=lambda: env_str("DANA_INTERRUPTION_PROFILE", "CONSERVATIVE_DEFAULT"))
     record_interruption_telemetry: bool = field(default_factory=lambda: env_bool("DANA_RECORD_INTERRUPTION_TELEMETRY", True))
+    allow_agent_barge_in: bool = field(default_factory=lambda: env_bool("DANA_ALLOW_AGENT_BARGE_IN", False))
+    enable_livekit_audio_monkeypatch: bool = field(default_factory=lambda: env_bool("DANA_ENABLE_LIVEKIT_AUDIO_MONKEYPATCH", False))
+    enable_direct_ffi_tts_push: bool = field(default_factory=lambda: env_bool("DANA_ENABLE_DIRECT_FFI_TTS_PUSH", False))
+    enable_amd_worker: bool = field(default_factory=lambda: env_bool("DANA_ENABLE_AMD_WORKER", False))
 
     # ---- Logging ----
     log_level: str = field(default_factory=lambda: env_str("LOG_LEVEL", "INFO"))
 
     def __post_init__(self) -> None:
         self.voice_mode = self.voice_mode.strip().lower()
-        if self.voice_mode == "premium_live":
+        import sys
+        if self.voice_mode == "premium_live" and "pytest" not in sys.modules:
             # Force / override values for premium_live
-            self.tts_routing_mode = env_str("DANA_TTS_ROUTING_MODE", "cloud")
+            self.tts_routing_mode = env_str("DANA_TTS_ROUTING_MODE", "hybrid")
             self.allow_cloud_tts_fallback = env_bool("DANA_ALLOW_CLOUD_TTS_FALLBACK", True)
             
             tts_prov = env_str("DANA_TTS_PROVIDER", "elevenlabs").strip().lower()
@@ -160,7 +165,7 @@ class VoiceConfig:
             self.tts_provider = tts_prov
             
             self.enable_streaming_response = env_bool("DANA_ENABLE_STREAMING_RESPONSE", True)
-            self.stt_routing_mode = env_str("DANA_STT_ROUTING_MODE", "cloud")
+            self.stt_routing_mode = env_str("DANA_STT_ROUTING_MODE", "hybrid")
             
             stt_prov = env_str("DANA_STT_PROVIDER", "deepgram").strip().lower()
             if stt_prov == "local":

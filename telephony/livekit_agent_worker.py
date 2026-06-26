@@ -880,6 +880,14 @@ async def run_room_session(ctx: Any, config: LiveKitAgentWorkerConfig) -> None:
             if "speaking" in old_state_str:
                 latency_recorder.mark("stt_speech_end_hook_called")
                 latency_recorder.mark("user_speech_end")
+                
+                # Check if final transcript is received after speech end
+                final_count_at_end = getattr(agent_instance, "final_transcript_count", 0)
+                async def check_final_transcript_timeout(expected_count):
+                    await asyncio.sleep(2.5)
+                    if getattr(agent_instance, "final_transcript_count", 0) == expected_count:
+                        logger.error("ERROR_NO_FINAL_TRANSCRIPT_AFTER_USER_SPEECH")
+                asyncio.create_task(check_final_transcript_timeout(final_count_at_end))
 
     @session.on("agent_state_changed")
     def on_agent_state_changed(ev):
@@ -907,6 +915,9 @@ async def run_room_session(ctx: Any, config: LiveKitAgentWorkerConfig) -> None:
             agent_instance.user_transcript_received = True
 
         if event.is_final:
+            agent_instance.final_transcript_count = getattr(agent_instance, "final_transcript_count", 0) + 1
+            logger.info("USER_TRANSCRIPT_RECEIVED")
+            logger.info(f"FINAL_TRANSCRIPT_TEXT_LENGTH: {len(partial_text)}")
             latency_recorder.mark("stt_final_transcript")
             latency_recorder.mark("transcript_final")
         else:
@@ -926,6 +937,8 @@ async def run_room_session(ctx: Any, config: LiveKitAgentWorkerConfig) -> None:
             self.agent_speech_started_time = None
             self.interrupted_current_turn = False
             self.interrupted_at = None
+            self.final_transcript_count = 0
+            self.user_transcript_received = False
 
         async def llm_node(self, chat_ctx, tools, model_settings):
             latency_recorder.mark("llm_node_entered")
@@ -939,6 +952,9 @@ async def run_room_session(ctx: Any, config: LiveKitAgentWorkerConfig) -> None:
                 latency_recorder.mark("agent_runtime_process_user_turn_started")
                 agent_resp = await generate_agent_response(user_text, session_state, runtime)
                 self.current_turn_response = agent_resp
+                logger.info(f"LLM_RESPONSE_TEXT_LENGTH: {len(self.current_turn_response)}")
+                if not self.current_turn_response.strip():
+                    logger.error("ERROR_EMPTY_LLM_RESPONSE")
                 latency_recorder.mark("agent_response_text_created")
                 
                 # Fetch compliance warnings from runtime events
@@ -967,6 +983,55 @@ async def run_room_session(ctx: Any, config: LiveKitAgentWorkerConfig) -> None:
                 from livekit.agents.llm import ChatChunk, Choice, ChoiceDelta
                 yield ChatChunk(choices=[Choice(delta=ChoiceDelta(content=agent_resp))])
 
+        async def tts_node(self, text, model_settings):
+            tts_stream = self.tts.stream()
+            first_text = True
+            
+            async def push_text_loop():
+                nonlocal first_text
+                try:
+                    async for chunk in text:
+                        if chunk and first_text:
+                            first_text = False
+                        tts_stream.push_text(chunk)
+                    tts_stream.flush()
+                except asyncio.CancelledError:
+                    pass
+                except Exception as e:
+                    logger.error(f"Error in SimpleAgent tts_node push loop: {e}")
+                
+            push_task = asyncio.create_task(push_text_loop())
+            
+            first_audio = True
+            completed_successfully = False
+            try:
+                async for ev in tts_stream:
+                    if first_audio:
+                        first_audio = False
+                        logger.info("TTS_FIRST_AUDIO_SENT")
+                    yield ev.frame
+                completed_successfully = True
+                logger.info("TTS_STREAM_COMPLETED")
+            finally:
+                push_task.cancel()
+                if first_audio:
+                    logger.error("ERROR_TTS_NO_AUDIO")
+                    
+                should_interrupt = asyncio.current_task().cancelled() or getattr(self, "interrupted_current_turn", False)
+                if should_interrupt:
+                    logger.info("SimpleAgent tts_node: interrupting TTS stream due to cancel or barge-in")
+                    try:
+                        await tts_stream.interrupt()
+                    except Exception as e:
+                        logger.warning(f"Error interrupting tts_stream: {e}")
+                else:
+                    logger.info("SimpleAgent tts_node: closing TTS stream gracefully without interrupt")
+                    
+                try:
+                    await tts_stream.aclose()
+                except Exception as e:
+                    logger.warning(f"Error closing tts_stream: {e}")
+
     agent_instance = SimpleAgent()
     if hasattr(shared.stt, "bind"):
         session._stt = shared.stt.bind(session, agent_instance)
@@ -989,10 +1054,13 @@ async def run_room_session(ctx: Any, config: LiveKitAgentWorkerConfig) -> None:
     if hasattr(session, "_room_io") and session._room_io:
         audio_output = session._room_io.audio_output
         if hasattr(audio_output, "_audio_source"):
-            import tts_service
-            tts_service.active_audio_source = audio_output._audio_source
-            audio_output._bypass_main_loop = True
-            logger.info("Direct audio source registered in tts_service and main-loop bypass enabled.")
+            if os.getenv("DANA_ENABLE_DIRECT_FFI_TTS_PUSH", "false").lower() == "true" and os.getenv("DANA_ENABLE_LIVEKIT_AUDIO_MONKEYPATCH", "false").lower() == "true":
+                import tts_service
+                tts_service.active_audio_source = audio_output._audio_source
+                audio_output._bypass_main_loop = True
+                logger.info("Direct audio source registered in tts_service and main-loop bypass enabled.")
+            else:
+                logger.info("Direct FFI TTS push or audio monkeypatch is disabled. Operating in native LiveKit voice path mode.")
 
     # Speak Greeting if enabled
     if config.greeting_enabled and config.greeting_text:
