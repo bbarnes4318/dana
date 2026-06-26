@@ -502,7 +502,6 @@ class SharedComponents:
         graceful_startup_integrations(self.repository)
 
         # Log active voice path parameters on worker startup
-        import os
         monkeypatch = os.getenv("DANA_ENABLE_LIVEKIT_AUDIO_MONKEYPATCH", "false").lower() == "true"
         direct_push = os.getenv("DANA_ENABLE_DIRECT_FFI_TTS_PUSH", "false").lower() == "true"
         bypass_enabled = monkeypatch and direct_push
