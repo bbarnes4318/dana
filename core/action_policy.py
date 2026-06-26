@@ -58,6 +58,8 @@ class ActionPolicy:
     @staticmethod
     def should_transfer(state: CallState, profile: dict[str, Any]) -> bool:
         """Transfer when the lead is fully qualified and ready."""
+        if profile.get("callback_requested") or profile.get("do_not_call_requested"):
+            return False
         return (
             state.current_stage == CallStage.TRANSFER_READY
             or (state.current_stage == CallStage.END and profile.get("transfer_ready") is True)

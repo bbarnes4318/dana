@@ -157,3 +157,32 @@ async def test_runtime_transfer_failure_transitions_to_callback(runtime: AgentRu
     assert "get the licensed agent" in result.agent_response.lower()
     assert "later today or tomorrow" in result.agent_response.lower()
 
+
+@pytest.mark.asyncio
+async def test_prepare_turn_callback_loop(runtime: AgentRuntime, monkeypatch) -> None:
+    monkeypatch.setenv("LICENSED_AGENT_PHONE_NUMBER", "+15551234567")
+    monkeypatch.setenv("DANA_CONFIRM_TRANSFER_CALL", "no")
+
+    # Transition to TRANSFER_READY
+    runtime.state_machine.call_state.transition_to(CallStage.TRANSFER_READY)
+    runtime.state_machine.lead.open_to_review = True
+    runtime.state_machine.lead.age_range_confirmed = True
+    runtime.state_machine.lead.living_independently = True
+    runtime.state_machine.lead.financial_decision_maker = True
+    runtime.state_machine.lead.transfer_consent_confirmed = True
+
+    # Turn 1: process user requesting transfer. It should fail and transition to CALLBACK stage.
+    instructions, result = await runtime.prepare_turn("I am ready to speak with an agent.")
+    assert result is not None
+    assert runtime.state_machine.call_state.current_stage == CallStage.CALLBACK
+    assert result.stage == "callback"
+
+    # Turn 2: User responds "Okay, sounds good" or similar.
+    # The agent should process this, execute the callback handler (CallbackState) and transition to END.
+    instructions2, result2 = await runtime.prepare_turn("Okay, sounds good.")
+    
+    # If fixed, it goes through the handler (CallbackState), which transitions to CallStage.END
+    # and schedules the callback.
+    assert runtime.state_machine.call_state.current_stage == CallStage.END
+
+

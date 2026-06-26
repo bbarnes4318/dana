@@ -72,6 +72,7 @@ class LeadProfile(BaseModel):
             and self.transfer_consent_confirmed is True
             and self.do_not_call_requested is False
             and self.disqualified_reason is None
+            and self.callback_requested is not True
         )
 
     def completeness_score(self) -> float:

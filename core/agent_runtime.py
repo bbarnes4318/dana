@@ -577,6 +577,7 @@ class AgentRuntime:
         """
         lead = self.state_machine.lead
         call_state = self.state_machine.call_state
+        initial_stage = call_state.current_stage
 
         # 1. Update turn count
         call_state.increment_turn()
@@ -734,7 +735,7 @@ class AgentRuntime:
 
         # Short-circuit if transitioning to terminal stage
         terminal_stages = (CallStage.DNC, CallStage.DISQUALIFIED, CallStage.CALLBACK, CallStage.TRANSFER_READY, CallStage.END)
-        if call_state.current_stage in terminal_stages:
+        if call_state.current_stage in terminal_stages and call_state.current_stage != initial_stage:
             stage_val = call_state.current_stage
             if stage_val == CallStage.DNC:
                 agent_response = DNC_CLOSE
