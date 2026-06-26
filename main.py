@@ -92,30 +92,73 @@ try:
     import time
     
     original_forward_audio = room_io_output._ParticipantAudioOutput._forward_audio
+    original_wait_for_playout = room_io_output._ParticipantAudioOutput._wait_for_playout
     
     async def patched_forward_audio(self):
         if getattr(self, "_bypass_main_loop", False):
             # Bypass native push to self._audio_source and sleep instead to simulate playback pacing
             # This maintains all events and callbacks on the main loop without blocking/scheduling native writes.
-            async for frame in self._audio_buf:
-                if not self._playback_enabled.is_set():
-                    await self._playback_enabled.wait()
+            self._playing = True
+            try:
+                async for frame in self._audio_buf:
+                    if not self._playback_enabled.is_set():
+                        await self._playback_enabled.wait()
+                        
+                    if self._interrupted_event.is_set() or self._pushed_duration == 0:
+                        if self._interrupted_event.is_set() and self._flush_task:
+                            await self._flush_task
+                        continue
+                        
+                    if not self._first_frame_event.is_set():
+                        self._first_frame_event.set()
+                        self.on_playback_started(created_at=time.time())
                     
-                if self._interrupted_event.is_set() or self._pushed_duration == 0:
-                    if self._interrupted_event.is_set() and self._flush_task:
-                        await self._flush_task
-                    continue
-                    
-                if not self._first_frame_event.is_set():
-                    self._first_frame_event.set()
-                    self.on_playback_started(created_at=time.time())
-                
-                await asyncio.sleep(frame.duration)
+                    await asyncio.sleep(frame.duration)
+            finally:
+                self._playing = False
         else:
             await original_forward_audio(self)
+
+    async def patched_wait_for_playout(self):
+        if getattr(self, "_bypass_main_loop", False):
+            wait_for_interruption = asyncio.create_task(self._interrupted_event.wait())
+
+            async def _wait_buffered_audio() -> None:
+                while not self._audio_buf.empty() or getattr(self, "_playing", False):
+                    if not self._playback_enabled.is_set():
+                        await self._playback_enabled.wait()
+                    # Sleep instead of calling self._audio_source.wait_for_playout()
+                    await asyncio.sleep(0.02)
+
+            wait_for_playout = asyncio.create_task(_wait_buffered_audio())
+            await asyncio.wait(
+                [wait_for_playout, wait_for_interruption],
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+
+            interrupted = self._interrupted_event.is_set()
+            pushed_duration = self._pushed_duration
+
+            if interrupted:
+                queued_duration = 0
+                while not self._audio_buf.empty():
+                    queued_duration += self._audio_buf.recv_nowait().duration
+
+                pushed_duration = max(pushed_duration - queued_duration, 0)
+                wait_for_playout.cancel()
+            else:
+                wait_for_interruption.cancel()
+
+            self._pushed_duration = 0
+            self._interrupted_event.clear()
+            self._first_frame_event.clear()
+            self.on_playback_finished(playback_position=pushed_duration, interrupted=interrupted)
+        else:
+            await original_wait_for_playout(self)
             
     room_io_output._ParticipantAudioOutput._forward_audio = patched_forward_audio
-    logger.info("Successfully monkeypatched _ParticipantAudioOutput._forward_audio for event-loop bypass.")
+    room_io_output._ParticipantAudioOutput._wait_for_playout = patched_wait_for_playout
+    logger.info("Successfully monkeypatched _ParticipantAudioOutput._forward_audio and _wait_for_playout for event-loop bypass.")
 except Exception as e:
     logger.error(f"Failed to monkeypatch _ParticipantAudioOutput: {e}")
 
@@ -261,8 +304,13 @@ class SharedComponents:
         from config.runtime_env import is_production, get_runtime_env, allow_mock_tts
         from voice.voice_provider_registry import get_voice_profile
         
+        local_voice = self.config.tts_voice
+        is_kokoro_voice = any(local_voice.startswith(prefix) for prefix in ("af_", "am_", "bf_", "bm_", "hf_", "hm_", "jf_", "jm_"))
+        if not is_kokoro_voice:
+            local_voice = "af_bella"
+            
         tts_config = TTSConfig(
-            voice=self.config.tts_voice,
+            voice=local_voice,
             speed=self.config.tts_speed,
         )
         local_tts = LocallyHostedKokoro(tts_config)
@@ -865,6 +913,7 @@ class DanaAgent(Agent):
 async def run_amd_worker(track: rtc.Track, session: AgentSession, agent: any, room: rtc.Room):
     import array
     import math
+    import time
     logger.info("AMD classification worker started for call_id=%s", getattr(agent, "call_id", "unknown"))
     
     audio_stream = rtc.AudioStream(track, sample_rate=16000, num_channels=1)
@@ -878,10 +927,15 @@ async def run_amd_worker(track: rtc.Track, session: AgentSession, agent: any, ro
     speech_duration = 0.0
     silence_duration = 0.0
     is_speaking = False
+    start_time = time.time()
     
     try:
         async for event in audio_stream:
             if not room.isconnected() or getattr(agent, "is_voicemail", False):
+                break
+                
+            if time.time() - start_time > 10.0:
+                logger.info("AMD: Call exceeded 10.0 seconds without voicemail detection. Stopping AMD worker.")
                 break
                 
             frame = event.frame
@@ -1205,6 +1259,10 @@ async def entrypoint(ctx: JobContext):
     def start_amd_for_track(track):
         if os.getenv("DANA_CONTROLLED_LIVE_TEST", "false").lower() in ("true", "1", "yes"):
             logger.info("Bypassing AMD parallel worker for track %s (controlled live test enabled)", track.sid)
+            return
+        enable_amd = os.getenv("DANA_ENABLE_AMD_WORKER", "false").lower() in ("true", "1", "yes")
+        if not enable_amd:
+            logger.info("Bypassing AMD parallel worker for track %s (DANA_ENABLE_AMD_WORKER is false)", track.sid)
             return
         if track.kind == rtc.TrackKind.KIND_AUDIO:
             if not getattr(agent, "_amd_started", False):
@@ -1783,5 +1841,6 @@ if __name__ == "__main__":
             prewarm_fnc=prewarm,
             request_fnc=request_fnc,
             num_idle_processes=num_idle,
+            initialize_process_timeout=60,
         ),
     )

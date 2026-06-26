@@ -313,7 +313,7 @@ class HybridSTTStream(stt.SpeechStream):
         self._closed = False
         super().__init__(stt=stt_val, conn_options=conn_options)
 
-    async def push_frame(self, frame: rtc.AudioFrame) -> None:
+    def push_frame(self, frame: rtc.AudioFrame) -> None:
         if self._closed:
             return
 
@@ -328,14 +328,14 @@ class HybridSTTStream(stt.SpeechStream):
                 logger.error(f"Streaming preprocessor failed: {e}")
 
         try:
-            await self.active_stream.push_frame(frame)
+            self.active_stream.push_frame(frame)
         except Exception as e:
             logger.error(f"STT stream push frame failed on ({self.provider}): {e}")
             
             if self.provider != "local":
                 logger.warning(f"Falling back to Local STT in push_frame due to error: {e}")
                 try:
-                    await self.active_stream.aclose()
+                    asyncio.create_task(self.active_stream.aclose())
                 except Exception:
                     pass
                 self.router.log_decision(
@@ -348,7 +348,7 @@ class HybridSTTStream(stt.SpeechStream):
                 self.delegate_stt = self.router.local_stt
                 self.active_stream = self.delegate_stt.stream(*self._stream_args, **self._stream_kwargs)
                 try:
-                    await self.active_stream.push_frame(frame)
+                    self.active_stream.push_frame(frame)
                 except Exception as local_err:
                     logger.error(f"Fallback local STT push_frame also failed: {local_err}")
                     self._closed = True
@@ -363,7 +363,7 @@ class HybridSTTStream(stt.SpeechStream):
                 )
                 self._closed = True
                 try:
-                    await self.active_stream.aclose()
+                    asyncio.create_task(self.active_stream.aclose())
                 except Exception:
                     pass
                 raise e

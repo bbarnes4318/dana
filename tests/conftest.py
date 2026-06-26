@@ -156,22 +156,57 @@ class DummyLLM:
         pass
 
 class DummyLLMStream:
-    def __init__(self, *args, **kwargs):
-        pass
+    def __init__(self, llm=None, *, chat_ctx=None, tools=None, conn_options=None, **kwargs):
+        import asyncio
+        self._event_ch = asyncio.Queue()
+        self._event_ch.send_nowait = self._event_ch.put_nowait
+        self._run_task = None
+        self._chat_ctx = chat_ctx
+        self._tools = tools or []
+
+    @property
+    def chat_ctx(self):
+        return self._chat_ctx
+
+    @property
+    def tools(self):
+        return self._tools
 
     async def aclose(self) -> None:
-        pass
+        if self._run_task:
+            self._run_task.cancel()
 
     def __aiter__(self):
         if hasattr(self, "_run"):
-            self._iter = self._run().__aiter__()
-            return self
+            import inspect
+            if inspect.isasyncgenfunction(self._run):
+                self._iter = self._run().__aiter__()
+            else:
+                import asyncio
+                self._iter = None
+                self._run_task = asyncio.create_task(self._run())
         return self
 
     async def __anext__(self):
-        if hasattr(self, "_iter"):
+        if hasattr(self, "_iter") and self._iter is not None:
             return await self._iter.__anext__()
-        raise StopAsyncIteration
+        
+        import asyncio
+        if self._event_ch.empty() and (self._run_task is None or self._run_task.done()):
+            if self._run_task and self._run_task.exception():
+                raise self._run_task.exception()
+            raise StopAsyncIteration
+        
+        try:
+            while self._event_ch.empty():
+                if self._run_task and self._run_task.done():
+                    if self._run_task.exception():
+                        raise self._run_task.exception()
+                    raise StopAsyncIteration
+                await asyncio.sleep(0.01)
+            return self._event_ch.get_nowait()
+        except asyncio.CancelledError:
+            raise StopAsyncIteration
 
 class DummyAudioFrame:
     def __init__(self, data=b"", sample_rate=24000, num_channels=1, samples_per_channel=160):

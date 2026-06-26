@@ -87,9 +87,16 @@ class RoutedLLMChatStream(llm.LLMStream):
         campaign_id: Optional[str],
         kwargs: Dict[str, Any]
     ) -> None:
-        super().__init__()
+        from livekit.agents import APIConnectOptions
+        tools = kwargs.get("tools") or []
+        conn_options = kwargs.get("conn_options") or APIConnectOptions()
+        super().__init__(
+            routed_llm,
+            chat_ctx=chat_ctx,
+            tools=tools,
+            conn_options=conn_options,
+        )
         self.routed_llm = routed_llm
-        self.chat_ctx = chat_ctx
         self.temperature = temperature
         self.top_p = top_p
         self.max_tokens = max_tokens
@@ -104,18 +111,35 @@ class RoutedLLMChatStream(llm.LLMStream):
 
     async def _init_stream(self, provider: str) -> llm.LLMStream:
         """Instantiate the provider stream delegate."""
+        extra_args = {}
+        if self.temperature is not None:
+            extra_args["temperature"] = self.temperature
+        if self.top_p is not None:
+            extra_args["top_p"] = self.top_p
+        if self.max_tokens is not None:
+            extra_args["max_tokens"] = self.max_tokens
+        if self.frequency_penalty is not None:
+            extra_args["frequency_penalty"] = self.frequency_penalty
+        if self.presence_penalty is not None:
+            extra_args["presence_penalty"] = self.presence_penalty
+
+        passed_extra = self.kwargs.get("extra_kwargs") or {}
+        merged_extra = {**passed_extra, **extra_args}
+
+        chat_kwargs = {k: v for k, v in self.kwargs.items() if k not in ("extra_kwargs", "tools")}
+        if merged_extra:
+            chat_kwargs["extra_kwargs"] = merged_extra
+
         if provider == "local":
             self._concurrency_context = TrackLocalLLMTask()
             self._concurrency_context.__enter__()
             try:
+                local_kwargs = dict(chat_kwargs)
+                if "tools" in self.kwargs:
+                    local_kwargs["tools"] = self.kwargs["tools"]
                 return self.routed_llm.local_llm.chat(
                     chat_ctx=self.chat_ctx,
-                    temperature=self.temperature,
-                    top_p=self.top_p,
-                    max_tokens=self.max_tokens,
-                    frequency_penalty=self.frequency_penalty,
-                    presence_penalty=self.presence_penalty,
-                    **self.kwargs
+                    **local_kwargs
                 )
             except Exception as e:
                 # Cleanup concurrency tracker on creation failure
@@ -127,19 +151,12 @@ class RoutedLLMChatStream(llm.LLMStream):
             if not self.routed_llm.cloud_llm:
                 raise RuntimeError("Cloud LLM requested but not configured.")
             
-            # Clean kwargs - DO NOT pass LiveKit native tools to cloud LLM (Requirement 6)
-            cloud_kwargs = {k: v for k, v in self.kwargs.items() if k not in ("tools",)}
             return self.routed_llm.cloud_llm.chat(
                 chat_ctx=self.chat_ctx,
-                temperature=self.temperature,
-                top_p=self.top_p,
-                max_tokens=self.max_tokens,
-                frequency_penalty=self.frequency_penalty,
-                presence_penalty=self.presence_penalty,
-                **cloud_kwargs
+                **chat_kwargs
             )
 
-    async def _run(self, *args, **kwargs) -> AsyncIterable[llm.ChatChunk]:
+    async def _run(self) -> None:
         """Runs the stream iteration, catching failures to trigger retries/failover."""
         attempts = 0
         current_provider = self.provider
@@ -153,9 +170,9 @@ class RoutedLLMChatStream(llm.LLMStream):
                         raise RuntimeError("Cloud LLM provider has missing credentials.")
 
                     self.active_stream = await self._init_stream(current_provider)
-                    # Yield all chunks from the active stream
+                    # Send all chunks from the active stream to the event channel
                     async for chunk in self.active_stream:
-                        yield chunk
+                        self._event_ch.send_nowait(chunk)
                     # If completed successfully, break loop
                     break
 

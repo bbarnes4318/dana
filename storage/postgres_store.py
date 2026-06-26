@@ -300,6 +300,10 @@ class PostgresStore(BaseStore):
                 or k == "retry_after"
                 or k in ("effective_from", "effective_to", "start_time", "end_time", "rollup_timestamp")
             ):
+                if table == "call_attempts" and k in ("started_at", "answered_at", "ended_at"):
+                    continue
+                if table == "live_call_sessions" and k == "ended_at":
+                    continue
                 try:
                     mapped[k] = datetime.fromisoformat(v.replace("Z", "+00:00"))
                 except ValueError:
@@ -421,8 +425,22 @@ class PostgresStore(BaseStore):
         except asyncpg.UndefinedTableError:
             return None
 
+    def _get_order_column(self, collection: str) -> str:
+        columns = TABLE_COLUMNS.get(collection, set())
+        if "created_at" in columns:
+            return "created_at"
+        if "started_at" in columns:
+            return "started_at"
+        if "applied_at" in columns:
+            return "applied_at"
+        if "updated_at" in columns:
+            return "updated_at"
+        if "id" in columns:
+            return "id"
+        return sorted(list(columns))[0] if columns else "id"
+
     async def list_recent(self, collection: str, limit: int = 50) -> list[dict]:
-        """Return the most recent records, ordered by created_at DESC."""
+        """Return the most recent records, ordered by the appropriate timestamp DESC."""
         self._require_dsn()
         if collection not in ALLOWLIST_TABLES:
             raise ValueError(f"Table name '{collection}' is not allowed.")
@@ -430,7 +448,8 @@ class PostgresStore(BaseStore):
         await self._ensure_pool()
         assert self._pool is not None
 
-        query = f"SELECT * FROM {collection} ORDER BY created_at DESC LIMIT $1;"
+        order_col = self._get_order_column(collection)
+        query = f"SELECT * FROM {collection} ORDER BY {order_col} DESC LIMIT $1;"
         try:
             async with self._pool.acquire() as conn:
                 rows = await conn.fetch(query, limit)
@@ -471,7 +490,8 @@ class PostgresStore(BaseStore):
         if where_clauses:
             where_sql = f"WHERE {' AND '.join(where_clauses)}"
 
-        query = f"SELECT * FROM {collection} {where_sql} ORDER BY created_at DESC;"
+        order_col = self._get_order_column(collection)
+        query = f"SELECT * FROM {collection} {where_sql} ORDER BY {order_col} DESC;"
         try:
             async with self._pool.acquire() as conn:
                 rows = await conn.fetch(query, *params)

@@ -172,9 +172,11 @@ class WebConsoleHandler(BaseHTTPRequestHandler):
         parsed_url = urllib.parse.urlparse(self.path)
         if parsed_url.path.startswith("/api/"):
             try:
-                status_code, res_payload = asyncio.run(
-                    self.server.handle_api("GET", self.path, None, None)
+                future = asyncio.run_coroutine_threadsafe(
+                    self.server.handle_api("GET", self.path, None, None),
+                    self.server.loop
                 )
+                status_code, res_payload = future.result()
                 self.server.json_response(self, res_payload, status_code)
             except Exception as e:
                 self.server.error_response(self, str(e), 500)
@@ -201,9 +203,11 @@ class WebConsoleHandler(BaseHTTPRequestHandler):
             else:
                 body = {}
 
-            status_code, res_payload = asyncio.run(
-                self.server.handle_api("POST", self.path, body, files)
+            future = asyncio.run_coroutine_threadsafe(
+                self.server.handle_api("POST", self.path, body, files),
+                self.server.loop
             )
+            status_code, res_payload = future.result()
             self.server.json_response(self, res_payload, status_code)
         except Exception as e:
             self.server.error_response(self, str(e), 400)
@@ -225,11 +229,20 @@ class TrainingWebConsoleServer(ThreadingHTTPServer):
         self.repository = repository or Repository(data_dir=config.data_dir or "data")
         self.console = TrainingOperationsConsole(repository=self.repository)
 
+        import threading
+        self.loop = asyncio.new_event_loop()
+        self.loop_thread = threading.Thread(target=self._run_loop, daemon=True)
+        self.loop_thread.start()
+
         host = config.host
         if not config.allow_remote and host not in ("127.0.0.1", "localhost"):
             host = "127.0.0.1"
 
         super().__init__((host, config.port), self.build_handler())
+
+    def _run_loop(self) -> None:
+        asyncio.set_event_loop(self.loop)
+        self.loop.run_forever()
 
     def build_handler(self) -> type:
         return WebConsoleHandler
@@ -240,6 +253,8 @@ class TrainingWebConsoleServer(ThreadingHTTPServer):
         except KeyboardInterrupt:
             pass
         finally:
+            self.loop.call_soon_threadsafe(self.loop.stop)
+            self.loop_thread.join()
             self.server_close()
 
     def json_response(self, handler: WebConsoleHandler, payload: dict, status: int = 200) -> None:

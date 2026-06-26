@@ -341,7 +341,7 @@ def test_hybrid_stt_no_midstream_provider_swap() -> None:
     stream = router.stream()
     # Mock local stream to fail on push_frame
     class FailingStream:
-        async def push_frame(self, frame):
+        def push_frame(self, frame):
             raise RuntimeError("Local push failed")
         async def aclose(self, wait=True):
             pass
@@ -351,7 +351,7 @@ def test_hybrid_stt_no_midstream_provider_swap() -> None:
     # Push frame should fail, but should not hot-swap to deepgram stream or push to deepgram inside the call
     frame = rtc.AudioFrame(data=b"\x00" * 320, sample_rate=16000, num_channels=1, samples_per_channel=160)
     with pytest.raises(RuntimeError, match="Local push failed"):
-        asyncio.run(stream.push_frame(frame))
+        stream.push_frame(frame)
         
     assert stream.provider == "local"  # Did not swap provider mid-stream!
     assert _local_failures.get(stream.call_id, 0) == 1
@@ -374,14 +374,14 @@ def test_local_task_counter_transcription_jobs() -> None:
     stream = router.stream()
     # Mock push_frame to succeed
     class FakeStream:
-        async def push_frame(self, frame):
+        def push_frame(self, frame):
             pass
             
     stream.active_stream = FakeStream()
     
     # 1. Pushing frames should NOT increase active transcription count
     frame = rtc.AudioFrame(data=b"\x00" * 320, sample_rate=16000, num_channels=1, samples_per_channel=160)
-    asyncio.run(stream.push_frame(frame))
+    stream.push_frame(frame)
     assert get_active_local_stt_tasks() == 0
     
     # 2. Recognize_impl using local STT should wrap task counter
@@ -563,7 +563,7 @@ def test_local_stt_stream_rolling_and_early_emit() -> None:
     frame_data = b"\x00" * 960
     frame = rtc.AudioFrame(data=frame_data, sample_rate=16000, num_channels=1, samples_per_channel=480)
     
-    asyncio.run(stream.push_frame(frame))
+    stream.push_frame(frame)
     
     # Assert write cursor incremented
     assert stream._write_cursor == 480

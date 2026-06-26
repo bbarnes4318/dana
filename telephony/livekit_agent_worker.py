@@ -36,6 +36,82 @@ except ImportError:
 # Setup standard logging
 logger = logging.getLogger("telephony.agent_worker")
 
+# Monkeypatch _ParticipantAudioOutput to support event-loop bypass for direct FFI playback
+try:
+    import livekit.agents.voice.room_io._output as room_io_output
+    import time
+    
+    original_forward_audio = room_io_output._ParticipantAudioOutput._forward_audio
+    original_wait_for_playout = room_io_output._ParticipantAudioOutput._wait_for_playout
+    
+    async def patched_forward_audio(self):
+        if getattr(self, "_bypass_main_loop", False):
+            # Bypass native push to self._audio_source and sleep instead to simulate playback pacing
+            # This maintains all events and callbacks on the main loop without blocking/scheduling native writes.
+            self._playing = True
+            try:
+                async for frame in self._audio_buf:
+                    if not self._playback_enabled.is_set():
+                        await self._playback_enabled.wait()
+                        
+                    if self._interrupted_event.is_set() or self._pushed_duration == 0:
+                        if self._interrupted_event.is_set() and self._flush_task:
+                            await self._flush_task
+                        continue
+                        
+                    if not self._first_frame_event.is_set():
+                        self._first_frame_event.set()
+                        self.on_playback_started(created_at=time.time())
+                    
+                    await asyncio.sleep(frame.duration)
+            finally:
+                self._playing = False
+        else:
+            await original_forward_audio(self)
+
+    async def patched_wait_for_playout(self):
+        if getattr(self, "_bypass_main_loop", False):
+            wait_for_interruption = asyncio.create_task(self._interrupted_event.wait())
+
+            async def _wait_buffered_audio() -> None:
+                while not self._audio_buf.empty() or getattr(self, "_playing", False):
+                    if not self._playback_enabled.is_set():
+                        await self._playback_enabled.wait()
+                    # Sleep instead of calling self._audio_source.wait_for_playout()
+                    await asyncio.sleep(0.02)
+
+            wait_for_playout = asyncio.create_task(_wait_buffered_audio())
+            await asyncio.wait(
+                [wait_for_playout, wait_for_interruption],
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+
+            interrupted = self._interrupted_event.is_set()
+            pushed_duration = self._pushed_duration
+
+            if interrupted:
+                queued_duration = 0
+                while not self._audio_buf.empty():
+                    queued_duration += self._audio_buf.recv_nowait().duration
+
+                pushed_duration = max(pushed_duration - queued_duration, 0)
+                wait_for_playout.cancel()
+            else:
+                wait_for_interruption.cancel()
+
+            self._pushed_duration = 0
+            self._interrupted_event.clear()
+            self._first_frame_event.clear()
+            self.on_playback_finished(playback_position=pushed_duration, interrupted=interrupted)
+        else:
+            await original_wait_for_playout(self)
+            
+    room_io_output._ParticipantAudioOutput._forward_audio = patched_forward_audio
+    room_io_output._ParticipantAudioOutput._wait_for_playout = patched_wait_for_playout
+    logger.info("Successfully monkeypatched _ParticipantAudioOutput._forward_audio and _wait_for_playout for event-loop bypass.")
+except Exception as e:
+    logger.error(f"Failed to monkeypatch _ParticipantAudioOutput: {e}")
+
 class DependencyStatusDict(dict):
     """Dict wrapper that supports unpacking for backwards compatibility: ok, err = check_worker_dependencies()"""
     def __iter__(self):
@@ -528,6 +604,7 @@ async def export_completed_session_if_possible(session_state: dict, repository: 
 async def run_amd_worker(track: rtc.Track, session: any, agent: any, room: rtc.Room):
     import array
     import math
+    import time
     logger.info("AMD classification worker started for call_id=%s", getattr(agent, "call_id", "unknown"))
     
     audio_stream = rtc.AudioStream(track, sample_rate=16000, num_channels=1)
@@ -541,10 +618,15 @@ async def run_amd_worker(track: rtc.Track, session: any, agent: any, room: rtc.R
     speech_duration = 0.0
     silence_duration = 0.0
     is_speaking = False
+    start_time = time.time()
     
     try:
         async for event in audio_stream:
             if not room.is_connected() or getattr(agent, "is_voicemail", False):
+                break
+                
+            if time.time() - start_time > 10.0:
+                logger.info("AMD: Call exceeded 10.0 seconds without voicemail detection. Stopping AMD worker.")
                 break
                 
             frame = event.frame
@@ -621,6 +703,10 @@ async def run_room_session(ctx: Any, config: LiveKitAgentWorkerConfig) -> None:
     
     # Track listener for AMD
     def start_amd_for_track(track):
+        enable_amd = os.getenv("DANA_ENABLE_AMD_WORKER", "false").lower() in ("true", "1", "yes")
+        if not enable_amd:
+            logger.info("Bypassing AMD parallel worker for track %s (DANA_ENABLE_AMD_WORKER is false)", track.sid)
+            return
         if track.kind == rtc.TrackKind.KIND_AUDIO:
             if not getattr(agent_instance, "_amd_started", False):
                 agent_instance._amd_started = True

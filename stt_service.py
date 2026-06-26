@@ -375,11 +375,9 @@ class LocalSTTStream(stt.SpeechStream):
                     ))
             except Exception as e:
                 logger.error(f"Error in STT stream run loop: {e}", exc_info=True)
-    async def push_frame(self, frame: rtc.AudioFrame):
+    def push_frame(self, frame: rtc.AudioFrame):
         if self._closed:
             return
-            
-        await self._stt._ensure_initialized()
         
         recorder = getattr(self._agent, "_latency_recorder", None)
         if recorder and "stt_frame_received" not in recorder.events:
