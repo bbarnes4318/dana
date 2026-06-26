@@ -30,22 +30,7 @@ async def main_async() -> int:
     parser.add_argument("--dry-run", action="store_true", help="Validate configuration and run checklist without placing the call")
     parser.add_argument("--expect-second-turn", action="store_true", help="Validate that a conversation loop has happened")
     parser.add_argument("--interactive", action="store_true", help="Prompt operator to speak and verify agent response")
-    parser.add_argument("--inject-fake-metrics-for-test", action="store_true", help="For test/offline diagnostics: inject fake timeline metrics instead of querying the DB")
     args = parser.parse_args()
-
-    # Environment validation for inject-fake-metrics-for-test
-    if args.inject_fake_metrics_for_test:
-        runtime_env = os.getenv("DANA_RUNTIME_ENV", "development").strip().lower()
-        controlled_live = os.getenv("DANA_CONTROLLED_LIVE_TEST", "false").lower() in ("true", "1", "yes")
-        if runtime_env == "production":
-            logger.error("Error: --inject-fake-metrics-for-test is not allowed in production.")
-            return 1
-        if controlled_live:
-            logger.error("Error: --inject-fake-metrics-for-test is not allowed when DANA_CONTROLLED_LIVE_TEST is enabled.")
-            return 1
-        if runtime_env not in ("test", "testing", "development", "dev"):
-            logger.error(f"Error: --inject-fake-metrics-for-test is only allowed in test or development environments (got '{runtime_env}').")
-            return 1
 
     # 1. Setup logging
     data_dir_env = os.getenv("DANA_DATA_DIR")
@@ -121,37 +106,27 @@ async def main_async() -> int:
     
     logger.info("All readiness checks PASSED.")
 
-    repository = None
-    if not args.dry_run:
-        try:
-            repository = Repository()
-        except Exception as e:
-            logger.error(f"Repository initialization failed: {e}")
-            logger.error("Repository is required for live --expect-second-turn verification")
-            return 1
-
     # 5. Check DNC and suppression lists
     logger.info(f"Checking DNC/suppression list for destination number {to_number}...")
-    if args.dry_run or os.getenv("DANA_MOCK_SYSTEM_CHECKS") == "true":
-        logger.info("DNC and suppression checks bypassed/mocked.")
-    else:
-        try:
-            importer = CampaignLeadImporter(repository)
-            suppressed, dnc_reason = await importer.is_suppressed(to_number)
-            if suppressed:
-                logger.error(f"Error: Destination number {to_number} is suppressed: {dnc_reason}")
-                return 1
-
-            dnc_registry = DatabaseDNCRegistry(repository)
-            on_dnc = await dnc_registry.contains(to_number, campaign_id="smoke-test")
-            if on_dnc:
-                logger.error(f"Error: Destination number {to_number} is in the campaign DNC registry.")
-                return 1
-        except Exception as e:
-            logger.error(f"Error while performing DNC/suppression check: {e}")
+    repository = Repository()
+    
+    try:
+        importer = CampaignLeadImporter(repository)
+        suppressed, dnc_reason = await importer.is_suppressed(to_number)
+        if suppressed:
+            logger.error(f"Error: Destination number {to_number} is suppressed: {dnc_reason}")
             return 1
 
-        logger.info("DNC and suppression checks passed. Number is clean.")
+        dnc_registry = DatabaseDNCRegistry(repository)
+        on_dnc = await dnc_registry.contains(to_number, campaign_id="smoke-test")
+        if on_dnc:
+            logger.error(f"Error: Destination number {to_number} is in the campaign DNC registry.")
+            return 1
+    except Exception as e:
+        logger.error(f"Error while performing DNC/suppression check: {e}")
+        return 1
+
+    logger.info("DNC and suppression checks passed. Number is clean.")
 
     # 6. Execute Call or Dry Run
     env = get_runtime_env()
@@ -175,11 +150,8 @@ async def main_async() -> int:
     logger.info("========== EXECUTING CONTROLLED LIVE CALL ==========")
     adapter = LiveKitOutboundAdapter()
     
-    call_id = f"call-{uuid.uuid4().hex[:8]}"
-    lead_id = f"smoke-lead-{uuid.uuid4().hex[:8]}"
-    campaign_id = "smoke-test"
-    room_name = f"dana-smoke-test-{call_id}"
-    part_identity = f"smoke-test-participant-{call_id}"
+    room_name = f"dana-smoke-test-{uuid.uuid4().hex[:8]}"
+    part_identity = f"smoke-test-participant-{uuid.uuid4().hex[:8]}"
 
     dial_config = LiveKitDialConfig(
         live_mode=True,
@@ -194,16 +166,12 @@ async def main_async() -> int:
         wait_until_answered=True,
         krisp_enabled=True,
         metadata={
-            "call_id": call_id,
-            "lead_id": lead_id,
-            "campaign_id": campaign_id,
             "smoke_test": True,
             "initiated_by": "smoke_test_cli",
             "timestamp": timestamp
         }
     )
 
-    logger.info(f"Generated Canonical call_id: {call_id}")
     logger.info(f"Placing outbound call request to LiveKit Room: {room_name}")
     logger.info(f"Participant Identity: {part_identity}")
     
@@ -218,38 +186,19 @@ async def main_async() -> int:
             logger.info(f"  SIP Status Code: {result.sip_status_code}")
             logger.info(f"  SIP Status: {result.sip_status}")
             
-            logger.info(f"Using canonical call_id for metrics check: {call_id}")
+            call_id = room_name.split("-")[-1]
+            logger.info(f"Resolved call_id for metrics check: {call_id}")
             
             if args.interactive:
                 input("\n>>> INTERACTIVE MODE ACTIVE: Answer the call on your phone, say 'Yes, I can hear you.', wait for Dana to respond back, and then press Enter here to continue...")
                 
             if args.expect_second_turn:
-                logger.info(f"Polling database for timeline metrics verifying conversation loop for call_id={call_id}...")
+                logger.info("Polling database for timeline metrics verifying conversation loop...")
                 doctor_passed = False
                 broken_stage = "unknown"
                 for attempt in range(30):
                     await asyncio.sleep(2.0)
-                    if args.inject_fake_metrics_for_test:
-                        metrics = [
-                            {"metric_name": "room_joined", "metric_value_ms": 100},
-                            {"metric_name": "participant_joined", "metric_value_ms": 200},
-                            {"metric_name": "inbound_audio_frame_received", "metric_value_ms": 300},
-                            {"metric_name": "vad_start_of_speech", "metric_value_ms": 400},
-                            {"metric_name": "vad_end_of_speech", "metric_value_ms": 500},
-                            {"metric_name": "stt_stream_created", "metric_value_ms": 600},
-                            {"metric_name": "transcript_final", "metric_value_ms": 700},
-                            {"metric_name": "llm_node_entered", "metric_value_ms": 800},
-                            {"metric_name": "user_text_seen_by_llm_node", "metric_value_ms": 900},
-                            {"metric_name": "agent_response_text_created", "metric_value_ms": 1000},
-                            {"metric_name": "tts_first_text", "metric_value_ms": 1100},
-                            {"metric_name": "tts_first_audio", "metric_value_ms": 1200},
-                            {"metric_name": "second_turn_audio_published", "metric_value_ms": 1300},
-                        ]
-                    else:
-                        if repository is None:
-                            logger.error("Repository is required for live --expect-second-turn verification")
-                            return 1
-                        metrics = await repository._store.query("latency_metrics", {"call_id": call_id})
+                    metrics = await repository._store.query("latency_metrics", {"call_id": call_id})
                     if metrics:
                         from ops.conversation_loop_doctor import analyze_timeline
                         event_dict = {m["metric_name"]: m["metric_value_ms"] for m in metrics}
@@ -264,15 +213,7 @@ async def main_async() -> int:
                         logger.info("No latency metrics recorded yet (retrying...)")
                 
                 if not doctor_passed:
-                    if not args.inject_fake_metrics_for_test:
-                        if repository is None:
-                            logger.error("Repository is required for live --expect-second-turn verification")
-                            return 1
-                        final_metrics = await repository._store.query("latency_metrics", {"call_id": call_id})
-                        if not final_metrics:
-                            logger.error(f"No real latency_metrics found for call_id={call_id}; conversation loop was not verified")
-                            return 1
-                    logger.error(f"CONVERSATION_LOOP_READY=false - Broken stage: {broken_stage}")
+                    logger.error(f"CONVERSATION_LOOP_READY=false - Conversation loop check failed. Broken stage: {broken_stage}")
                     return 1
             return 0
         else:
@@ -284,8 +225,7 @@ async def main_async() -> int:
         logger.error(f"Failed to dial: unexpected error: {e}")
         return 1
     finally:
-        if repository is not None:
-            await repository.close()
+        await repository.close()
 
 def main():
     try:

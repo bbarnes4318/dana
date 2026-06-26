@@ -225,3 +225,42 @@ class TestPromptCaching:
         reloaded = loader.load_prompt("final_expense_agent")
 
         assert "Fresh content" in reloaded
+
+
+class TestProductionPrompts:
+    """Verify that the actual production prompt files meet all requirements."""
+
+    def test_production_system_prompt_requirements(self) -> None:
+        project_root = Path(__file__).resolve().parent.parent
+        loader = PromptLoader(project_root=project_root)
+        prompt = loader.build_system_prompt()
+
+        # 1. Required opening greeting
+        assert "Hey, this is Alex. I’m getting back with you about the final expense burial options. Are you still open to looking at those?" in prompt
+
+        # 2. Uncertain interest is still interest rule
+        assert "Uncertain interest is still interest." in prompt
+
+        # 3. Silence is not consent/transfer consent
+        assert "Silence is not consent." in prompt
+        assert "Do not transfer on silence." in prompt
+
+        # 4. Unclear interest vs unclear transfer permission
+        assert "Uncertain interest is fine." in prompt
+        assert "Uncertain transfer permission is not enough." in prompt
+
+        # 5. AI disclosure truthfulness rule
+        assert "I’m a virtual assistant helping with the initial screening." in prompt
+
+        # 6. feTransfer requirements present
+        assert "feTransfer" in prompt
+        assert "Use `feTransfer` only" in prompt
+
+        # 7. No instruction to lie about being human
+        assert "never claim to be human" not in prompt.lower()
+        assert "do not lie" in prompt.lower()
+
+        # 8. No proactive AI/bot/automation announcement instruction
+        assert "proactively announce" not in prompt.lower()
+        assert "do not volunteer" in prompt.lower()
+

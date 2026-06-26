@@ -13,7 +13,10 @@ logger = logging.getLogger(__name__)
 
 
 class FeTransferTool(BaseTool):
-    """Bridge qualified lead to a licensed final expense insurance agent using LiveKit warm bridge."""
+    """Bridge qualified lead to a licensed final expense insurance agent.
+    
+    feTransfer is currently a safe failure stub only. Real transfer/bridge is not implemented yet.
+    """
 
     @property
     def name(self) -> str:
@@ -23,7 +26,8 @@ class FeTransferTool(BaseTool):
     def description(self) -> str:
         return (
             "Transfer the qualified lead to a licensed insurance agent. "
-            "Uses LiveKit warm bridge as the production path. Gated by DANA_CONFIRM_TRANSFER_CALL env var."
+            "feTransfer is currently a safe failure stub only. Real transfer/bridge is not implemented yet. "
+            "Gated by DANA_CONFIRM_TRANSFER_CALL env var."
         )
 
     async def execute(self, params: dict[str, Any]) -> ToolResult:
@@ -38,7 +42,6 @@ class FeTransferTool(BaseTool):
             lead_profile (dict): Structured LeadProfile snapshot.
             lead_state (str, optional): Prospect's state.
             call_id (str): Unique call ID.
-            call_control_id (str, optional): Telnyx call control ID.
         """
         room_name = params.get("room_name") or params.get("call_id") or "unknown_room"
         prospect_identity = params.get("prospect_identity") or params.get("lead_name") or "Prospect"
@@ -58,7 +61,6 @@ class FeTransferTool(BaseTool):
 
         lead_state = params.get("lead_state") or lead_profile.get("lead_state")
         call_id = params.get("call_id") or lead_profile.get("call_id") or room_name
-        call_control_id = params.get("call_control_id")
 
         logger.info("FeTransferTool: Executing transfer for room %s, call_id %s, lead_state %s", room_name, call_id, lead_state)
 
@@ -71,8 +73,7 @@ class FeTransferTool(BaseTool):
                 transfer_reason=transfer_reason,
                 lead_profile=lead_profile,
                 lead_state=lead_state,
-                call_id=call_id,
-                call_control_id=call_control_id
+                call_id=call_id
             )
 
             # Ensure we translate the core FeTransferResult to a ToolResult

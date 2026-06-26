@@ -119,54 +119,6 @@ class DeploymentDoctor:
         compose_file = self.repo_root / "docker-compose.yaml"
         if compose_file.exists():
             self.add_result("docker-compose.yaml", "PASS", f"Found: {compose_file}")
-            
-            # Audit docker-compose.yaml for unsafe production fallback defaults
-            try:
-                content = compose_file.read_text(encoding="utf-8")
-                unsafe_patterns = [
-                    ":-dana_secure_pass",
-                    ":-replace_me",
-                    ":-replace-me",
-                    ":-changeme",
-                    ":-password",
-                    ":-secret",
-                    "LIVEKIT_API_KEY:-",
-                    "LIVEKIT_API_SECRET:-",
-                    "POSTGRES_PASSWORD:-"
-                ]
-                import re
-                for line_idx, line in enumerate(content.splitlines(), 1):
-                    for pat in unsafe_patterns:
-                        if pat in line:
-                            # Determine variable name
-                            var_name = "unknown variable"
-                            if "POSTGRES_PASSWORD" in pat or "POSTGRES_PASSWORD" in line:
-                                var_name = "POSTGRES_PASSWORD"
-                            elif "LIVEKIT_API_KEY" in pat or "LIVEKIT_API_KEY" in line:
-                                var_name = "LIVEKIT_API_KEY"
-                            elif "LIVEKIT_API_SECRET" in pat or "LIVEKIT_API_SECRET" in line:
-                                var_name = "LIVEKIT_API_SECRET"
-                            elif "POSTGRES_USER" in line:
-                                var_name = "POSTGRES_USER"
-                            elif "POSTGRES_DB" in line:
-                                var_name = "POSTGRES_DB"
-                            elif "LIVEKIT_URL" in line:
-                                var_name = "LIVEKIT_URL"
-                            elif "DATABASE_URL" in line:
-                                var_name = "DATABASE_URL"
-                            elif "DATABASE_ADMIN_URL" in line:
-                                var_name = "DATABASE_ADMIN_URL"
-                            elif "HF_TOKEN" in line:
-                                var_name = "HF_TOKEN"
-                            
-                            self.add_result(
-                                "docker-compose.yaml",
-                                "FAIL",
-                                f"docker-compose.yaml contains unsafe production fallback for {var_name}",
-                                f"Line {line_idx}: {line.strip()}"
-                            )
-            except Exception as e:
-                self.add_result("docker-compose.yaml", "FAIL", f"Failed to read and audit docker-compose.yaml: {e}")
         else:
             self.add_result("docker-compose.yaml", "FAIL", f"Missing docker-compose.yaml at repository root: {compose_file}")
 

@@ -185,34 +185,20 @@ class LiveKitOutboundAdapter:
         api_secret = config.api_secret or env["livekit_api_secret"]
         trunk_id = config.outbound_trunk_id or env["livekit_sip_outbound_trunk_id"]
 
-        # Detect supported fields on CreateSIPParticipantRequest
-        fields = {}
-        if hasattr(CreateSIPParticipantRequest, "DESCRIPTOR") and hasattr(CreateSIPParticipantRequest.DESCRIPTOR, "fields_by_name"):
-            fields = CreateSIPParticipantRequest.DESCRIPTOR.fields_by_name
-        elif hasattr(CreateSIPParticipantRequest, "model_fields"):
-            fields = CreateSIPParticipantRequest.model_fields
-        elif hasattr(CreateSIPParticipantRequest, "__fields__"):
-            fields = CreateSIPParticipantRequest.__fields__
-
-        kwargs = {
-            "sip_trunk_id": trunk_id,
-            "sip_call_to": config.phone_number,
-            "room_name": config.room_name,
-            "participant_identity": config.participant_identity,
-            "participant_name": config.participant_name,
-            "krisp_enabled": config.krisp_enabled,
-            "wait_until_answered": config.wait_until_answered,
-        }
-
-        if "participant_metadata" in fields:
-            kwargs["participant_metadata"] = json.dumps(config.metadata)
-
         lk_api = None
         try:
             lk_api = api.LiveKitAPI(url, api_key, api_secret)
             
             # Map request
-            request = CreateSIPParticipantRequest(**kwargs)
+            request = CreateSIPParticipantRequest(
+                sip_trunk_id=trunk_id,
+                sip_call_to=config.phone_number,
+                room_name=config.room_name,
+                participant_identity=config.participant_identity,
+                participant_name=config.participant_name,
+                krisp_enabled=config.krisp_enabled,
+                wait_until_answered=config.wait_until_answered,
+            )
             
             # Place SIP participant creation request
             sip_participant = await lk_api.sip.create_sip_participant(request)

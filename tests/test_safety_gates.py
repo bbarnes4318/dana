@@ -32,8 +32,7 @@ async def test_cold_transfer_safety_gate_blocks(monkeypatch) -> None:
     
     result = await provider.initiate_cold_transfer(
         room_name="test-room",
-        phone_number="+15559999999",
-        call_control_id="mock_call_control_id"
+        phone_number="+15559999999"
     )
     
     assert result.success is False
@@ -71,8 +70,7 @@ async def test_cold_transfer_unconfigured_credentials(monkeypatch) -> None:
     
     result = await provider.initiate_cold_transfer(
         room_name="test-room",
-        phone_number="+15559999999",
-        call_control_id="mock_call_control_id"
+        phone_number="+15559999999"
     )
     
     assert result.success is False
