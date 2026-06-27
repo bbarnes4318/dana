@@ -304,6 +304,10 @@ class PostgresStore(BaseStore):
                     continue
                 if table == "live_call_sessions" and k == "ended_at":
                     continue
+                if table == "campaign_leads" and k in ("next_attempt_at", "last_attempt_at"):
+                    continue
+                if table == "outbound_campaigns" and k in ("started_at", "paused_at", "stopped_at"):
+                    continue
                 try:
                     mapped[k] = datetime.fromisoformat(v.replace("Z", "+00:00"))
                 except ValueError:
