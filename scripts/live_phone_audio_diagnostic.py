@@ -63,6 +63,17 @@ async def main_async() -> int:
     # 2. Start worker subprocess with diagnostic greeting enabled
     logger.info("Starting diagnostic agent worker in background...")
     env = os.environ.copy()
+    env_path = root_dir / ".env"
+    if env_path.exists():
+        with open(env_path, "r") as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith("#") and "=" in line:
+                    k, v = line.split("=", 1)
+                    k = k.strip()
+                    v = v.strip().strip("'").strip('"')
+                    env[k] = v
+
     env["DANA_FORCE_DIAGNOSTIC_GREETING"] = "true"
     env["DANA_DIAGNOSTIC_GREETING_TEXT"] = "Hello, can you hear me?"
     env["DANA_CONTROLLED_LIVE_TEST"] = "true"
