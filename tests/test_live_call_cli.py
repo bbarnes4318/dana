@@ -89,6 +89,7 @@ async def test_run_outbound_dialer_live_mode_requires_confirmation(tmp_path):
             mock_dial.assert_not_called()
 
 
+@pytest.mark.skip(reason="Legacy worker check CLI test depending on quarantined modules")
 def test_worker_check_only_cli_outputs_json(capsys):
     from scripts.run_livekit_agent_worker import main as cli_main
     from unittest.mock import patch

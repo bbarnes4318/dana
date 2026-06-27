@@ -31,9 +31,9 @@ from livekit.plugins import openai as lk_openai
 from livekit.plugins import silero
 from speech.custom_vad import ElderlySileroVAD
 
-from voice_config import VoiceConfig
+from dana.config.voice_config import VoiceConfig
 from latency_metrics import LatencyRecorder
-from stt_service import create_stt
+# stt_service imported from legacy if needed
 
 from core.prompt_loader import PromptLoader
 from core.objection_classifier import ObjectionClassifier
@@ -87,7 +87,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Monkeypatch _ParticipantAudioOutput to support event-loop bypass for direct FFI playback
-if os.getenv("DANA_ENABLE_LIVEKIT_AUDIO_MONKEYPATCH", "false").strip().lower() == "true":
+if os.getenv("DANA_ENABLE_EXPERIMENTAL_AUDIO_MONKEYPATCH", "false").strip().lower() == "true":
     try:
         import livekit.agents.voice.room_io._output as room_io_output
         import time
@@ -253,263 +253,15 @@ class SharedComponents:
         self.repository = None
 
     async def initialize(self):
-        # Premium live mode startup safety validations
-        if self.config.voice_mode == "premium_live":
-            if not self.config.enable_streaming_response:
-                raise RuntimeError("premium_live voice mode requires DANA_ENABLE_STREAMING_RESPONSE=true")
-            if self.config.enable_audio_filters:
-                raise RuntimeError("premium_live voice mode requires DANA_ENABLE_AUDIO_FILTERS=false")
-            if self.config.allow_mock_tts:
-                raise RuntimeError("premium_live voice mode requires DANA_ALLOW_MOCK_TTS=false")
-            
-            # Check credentials & provider config
-            tts_provider = self.config.tts_provider.strip().lower()
-            tts_routing = self.config.tts_routing_mode.strip().lower()
-            if tts_provider == "elevenlabs":
-                el_key = os.getenv("ELEVENLABS_API_KEY", "").strip()
-                if not el_key or el_key.lower() in ("replace_me", "replace-me", ""):
-                    if tts_routing == "cloud":
-                        raise RuntimeError("premium_live with elevenlabs requires ELEVENLABS_API_KEY to be set")
-                    else:
-                        logger.warning("ELEVENLABS_API_KEY is missing. ElevenLabs provider not configured.")
-                el_voice = os.getenv("ELEVENLABS_VOICE_ID", "").strip()
-                if not el_voice or el_voice.lower() in ("replace_me", "replace-me", ""):
-                    if tts_routing == "cloud":
-                        raise RuntimeError("premium_live with elevenlabs requires ELEVENLABS_VOICE_ID to be set")
-                    else:
-                        logger.warning("ELEVENLABS_VOICE_ID is missing. ElevenLabs provider not configured.")
-            elif tts_provider == "openai":
-                oa_key = os.getenv("OPENAI_API_KEY", "").strip()
-                if not oa_key or oa_key.lower() in ("replace_me", "replace-me", ""):
-                    if tts_routing == "cloud":
-                        raise RuntimeError("premium_live with openai requires OPENAI_API_KEY to be set")
-                    else:
-                        logger.warning("OPENAI_API_KEY is missing. OpenAI TTS provider not configured.")
-                oa_voice = os.getenv("OPENAI_TTS_VOICE", "").strip()
-                if not oa_voice or oa_voice.lower() in ("replace_me", "replace-me", ""):
-                    if tts_routing == "cloud":
-                        raise RuntimeError("premium_live with openai requires OPENAI_TTS_VOICE to be set")
-                    else:
-                        logger.warning("OPENAI_TTS_VOICE is missing. OpenAI TTS provider not configured.")
-            else:
-                if tts_routing == "cloud":
-                    raise RuntimeError(f"premium_live requires a cloud provider (elevenlabs or openai), got '{self.config.tts_provider}'")
-                else:
-                    logger.warning(f"tts_provider is set to '{self.config.tts_provider}', which is not a known cloud provider.")
-
-            llm_routing = self.config.llm_routing_mode.strip().lower()
-            if llm_routing == "cloud":
-                oa_key = os.getenv("OPENAI_API_KEY", "").strip()
-                if not oa_key or oa_key.lower() in ("replace_me", "replace-me", ""):
-                    raise RuntimeError("DANA_LLM_ROUTING_MODE=cloud requires OPENAI_API_KEY to be set")
-            elif llm_routing == "hybrid":
-                oa_key = os.getenv("OPENAI_API_KEY", "").strip()
-                if not oa_key or oa_key.lower() in ("replace_me", "replace-me", ""):
-                    logger.warning("OPENAI_API_KEY is missing. Hybrid LLM will fall back to local LLM.")
-
-            stt_routing = self.config.stt_routing_mode.strip().lower()
-            if stt_routing == "cloud":
-                dg_key = os.getenv("DEEPGRAM_API_KEY", "").strip()
-                if not dg_key or dg_key.lower() in ("replace_me", "replace-me", ""):
-                    raise RuntimeError("premium_live with stt_routing_mode=cloud requires DEEPGRAM_API_KEY to be set")
-            elif stt_routing == "hybrid":
-                dg_key = os.getenv("DEEPGRAM_API_KEY", "").strip()
-                if not dg_key or dg_key.lower() in ("replace_me", "replace-me", ""):
-                    logger.warning("DEEPGRAM_API_KEY is missing. Hybrid STT will fall back to local STT.")
-
-        from routing.model_router import ModelRouter
-        self.router = ModelRouter(self.config)
-
-        # 1. Initialize STT
-        self.stt = create_stt(self.config)
-        if hasattr(self.stt, "initialize"):
-            await self.stt.initialize()
-            
-        # 2. Initialize local TTS & run healthcheck
-        from tts_service import LocallyHostedKokoro, TTSConfig
-        from voice.tts_healthcheck import run_tts_healthcheck
-        from config.runtime_env import is_production, get_runtime_env, allow_mock_tts
-        from voice.voice_provider_registry import get_voice_profile
+        from dana.providers.provider_registry import registry as provider_registry
+        from dana.providers.routing import RoutingEngine
         
-        local_voice = self.config.tts_voice
-        is_kokoro_voice = any(local_voice.startswith(prefix) for prefix in ("af_", "am_", "bf_", "bm_", "hf_", "hm_", "jf_", "jm_"))
-        if not is_kokoro_voice:
-            local_voice = "af_bella"
-            
-        tts_config = TTSConfig(
-            voice=local_voice,
-            speed=self.config.tts_speed,
-        )
-        local_tts = LocallyHostedKokoro(tts_config)
-        
-        local_tts_healthy = False
-        health_error = None
-        try:
-            await local_tts.initialize()
-            health_result = await run_tts_healthcheck(local_tts)
-            if health_result.is_healthy:
-                local_tts_healthy = True
-            else:
-                health_error = health_result.error_message
-        except Exception as e:
-            health_error = str(e)
-        
-        # Initialize cloud TTS lazily
-        cloud_tts = None
-        cloud_tts_required = self.config.tts_routing_mode == "cloud"
-        cloud_tts_allowed = self.config.tts_routing_mode != "local" or self.config.allow_cloud_tts_fallback
-        
-        # Determine cloud provider based on config
-        cloud_provider = self.config.tts_provider.strip().lower()
-        if cloud_provider == "local":
-            voice_lower = self.config.tts_voice.lower()
-            if "openai" in voice_lower:
-                cloud_provider = "openai"
-            else:
-                cloud_provider = "elevenlabs"
+        self.repository = Repository()
+        global _active_repository
+        _active_repository = self.repository
+        graceful_startup_integrations(self.repository)
 
-        has_cloud_tts_creds = False
-        if cloud_provider == "openai":
-            has_cloud_tts_creds = bool(os.getenv("OPENAI_API_KEY"))
-        elif cloud_provider == "elevenlabs":
-            has_cloud_tts_creds = bool(os.getenv("ELEVENLABS_API_KEY"))
-            
-        if cloud_tts_required and not has_cloud_tts_creds:
-            raise RuntimeError(f"Cloud TTS mode requested but credentials for provider '{cloud_provider}' are missing.")
-            
-        if cloud_tts_allowed and has_cloud_tts_creds:
-            try:
-                if cloud_provider == "openai":
-                    from livekit.plugins.openai import TTS as OpenAI_TTS
-                    openai_voice = os.getenv("OPENAI_TTS_VOICE", "alloy").strip()
-                    openai_model = os.getenv("OPENAI_TTS_MODEL", "gpt-4o-mini-tts").strip()
-                    logger.info(f"Initializing OpenAI TTS with voice={openai_voice}, model={openai_model}")
-                    cloud_tts = OpenAI_TTS(voice=openai_voice, model=openai_model)
-                else:
-                    from livekit.plugins import elevenlabs
-                    el_voice_id = os.getenv("ELEVENLABS_VOICE_ID", "hpp4J3VqNfWAUOO0d1Us").strip()
-                    el_model_id = os.getenv("ELEVENLABS_MODEL_ID", "eleven_turbo_v2_5").strip()
-                    logger.info(f"Initializing ElevenLabs TTS with voice_id={el_voice_id}, model_id={el_model_id}")
-                    cloud_tts = elevenlabs.TTS(
-                        voice_id=el_voice_id,
-                        model=el_model_id,
-                        api_key=os.getenv("ELEVENLABS_API_KEY")
-                    )
-            except Exception as e:
-                logger.error(f"Failed to initialize cloud TTS provider {cloud_provider}: {e}")
-                if cloud_tts_required:
-                    raise RuntimeError(f"Cloud {cloud_provider} TTS requested but failed to load: {e}")
-
-        # Post-healthcheck routing safety logic
-        if not local_tts_healthy:
-            if is_production():
-                if cloud_tts is not None:
-                    logger.warning(f"Local TTS failed healthcheck: {health_error}. Routing to cloud TTS fallback.")
-                    self.router.local_tts_available = False
-                else:
-                    logger.error(f"FATAL: Local TTS failed healthcheck: {health_error}. No cloud TTS configured/available.")
-                    raise RuntimeError(f"Local TTS healthcheck failed and cloud TTS is not available: {health_error}")
-            else:
-                logger.warning(f"Local TTS healthcheck failed in non-production mode: {health_error}. Proceeding with fallback mode.")
-                if cloud_tts is not None:
-                    self.router.local_tts_available = False
-
-        # Get voice profile info
-        profile = get_voice_profile(self.config.voice_profile)
-        profile_name = self.config.voice_profile
-        
-        # Determine active TTS mode for logs
-        if not local_tts_healthy:
-            active_tts_mode = "cloud (fallback)" if cloud_tts else "failed"
-        else:
-            active_tts_mode = self.config.tts_routing_mode
-            
-        # Production safety status for logs
-        env = get_runtime_env()
-        if env == "production":
-            if allow_mock_tts():
-                safety_status = "WARNING: Mock TTS allowed in production"
-            else:
-                safety_status = "production-safe (strict)"
-        else:
-            safety_status = f"development/test bypass ({env})"
-
-        # ACTIVE_TTS_PROVIDER resolution
-        active_tts_provider = "local"
-        if not local_tts_healthy:
-            if cloud_tts:
-                active_tts_provider = cloud_provider
-            else:
-                active_tts_provider = "failed"
-        else:
-            if self.config.tts_routing_mode == "cloud" and cloud_tts:
-                active_tts_provider = cloud_provider
-
-        from tts_service import MockKokoroModel, MockKokoro
-        mock_tts_active = isinstance(local_tts._model, (MockKokoroModel, MockKokoro))
-
-        logger.info(f"LOCAL_TTS_AVAILABLE={'true' if local_tts_healthy else 'false'}")
-        logger.info(f"CLOUD_TTS_AVAILABLE={'true' if cloud_tts is not None else 'false'}")
-        logger.info(f"ACTIVE_TTS_PROVIDER={active_tts_provider}")
-        logger.info(f"MOCK_TTS_ACTIVE={'true' if mock_tts_active else 'false'}")
-
-        logger.info(
-            f"\n"
-            f"============================================================\n"
-            f"DANA WORKER STARTUP - TTS STACK STATUS\n"
-            f"------------------------------------------------------------\n"
-            f"  Environment:             {env}\n"
-            f"  Safety Status:           {safety_status}\n"
-            f"  Active TTS Mode:         {active_tts_mode}\n"
-            f"  Voice Profile Name:      {profile_name}\n"
-            f"  Profile Provider:        {profile.provider if profile else 'unknown'}\n"
-            f"  Profile Voice Name:      {profile.voice_name if profile else 'unknown'}\n"
-            f"  Profile Quality:         {profile.quality_tier if profile else 'unknown'}\n"
-            f"  Profile Cost:            {profile.estimated_cost_tier if profile else 'unknown'}\n"
-            f"  Allowed in Production:   {profile.allowed_in_production if profile else 'unknown'}\n"
-            f"  Local TTS Status:        {'HEALTHY' if local_tts_healthy else 'FAILED'}\n"
-            f"============================================================"
-        )
-
-        # 3. Initialize local LLM
-        local_llm = lk_openai.LLM(
-            model=self.config.llm_model,
-            base_url=self.config.vllm_base_url,
-            api_key="not-needed",
-        )
-        
-        # Initialize cloud LLM lazily
-        cloud_llm = None
-        cloud_llm_required = self.config.llm_routing_mode == "cloud"
-        cloud_llm_allowed = self.config.llm_routing_mode != "local" or self.config.allow_cloud_llm_fallback
-        
-        has_cloud_llm_creds = bool(os.getenv("OPENAI_API_KEY"))
-        if cloud_llm_required and not has_cloud_llm_creds:
-            raise RuntimeError("Cloud LLM mode requested but OPENAI_API_KEY is missing.")
-            
-        if cloud_llm_allowed and has_cloud_llm_creds:
-            try:
-                cloud_llm = lk_openai.LLM(
-                    model="gpt-4o-mini",
-                    api_key=os.getenv("OPENAI_API_KEY")
-                )
-            except Exception as e:
-                logger.error(f"Failed to initialize cloud LLM provider: {e}")
-                if cloud_llm_required:
-                    raise RuntimeError(f"Cloud LLM requested but failed to load: {e}")
-
-        # Wrap with Routed LLM and TTS
-        from routing.routed_llm import RoutedLLM
-        from routing.routed_tts import RoutedTTS
-        
-        self.llm = RoutedLLM(local_llm, cloud_llm, self.router)
-        self.tts = RoutedTTS(local_tts, cloud_tts, self.router)
-        
-        # 4. Initialize VAD (Elderly-Demographic Optimized Silero VAD)
-        loop = asyncio.get_event_loop()
-        self.vad = await loop.run_in_executor(None, ElderlySileroVAD.load)
-
-        # 5. Initialize stateless AgentRuntime components
+        # 1. Resolve prompt loader and other runtime requirements
         project_root = Path(__file__).resolve().parent
         self.prompt_loader = PromptLoader(project_root=project_root)
         self.objection_classifier = ObjectionClassifier()
@@ -520,40 +272,49 @@ class SharedComponents:
         self.compliance_filter = ComplianceFilter()
         self.output_validator = OutputValidator()
         self.pii_redactor = PIIRedactor()
-        self.repository = Repository()
-        global _active_repository
-        _active_repository = self.repository
-        graceful_startup_integrations(self.repository)
 
-        # Log active runtime configuration parameters at startup
-        deepgram_configured = bool(os.getenv("DEEPGRAM_API_KEY"))
-        elevenlabs_configured = bool(os.getenv("ELEVENLABS_API_KEY"))
-        openai_configured = bool(os.getenv("OPENAI_API_KEY"))
-        livekit_interruption_enabled = True
-        manual_barge_in_enabled = self.config.enable_fast_interruption and os.getenv("DANA_ALLOW_AGENT_BARGE_IN", "false").lower() == "true"
-        emergency_flush_enabled = False
-        amd_worker_enabled = os.getenv("DANA_ENABLE_AMD_WORKER", "false").lower() == "true"
+        # 2. Evaluate and select active provider stack using the routing engine
+        self.routing_engine = RoutingEngine(self.config, provider_registry)
+        self.active_stack = await self.routing_engine.select_provider_stack()
 
-        logger.info(
-            f"\n"
-            f"============================================================\n"
-            f"DANA RUNTIME VOICE STACK CONFIGURATION\n"
-            f"------------------------------------------------------------\n"
-            f"  ACTIVE_VOICE_MODE:             {self.config.voice_mode}\n"
-            f"  ACTIVE_STT_PROVIDER:           {self.config.stt_provider}\n"
-            f"  ACTIVE_STT_ROUTING_MODE:       {self.config.stt_routing_mode}\n"
-            f"  ACTIVE_TTS_PROVIDER:           {self.config.tts_provider}\n"
-            f"  ACTIVE_TTS_ROUTING_MODE:       {self.config.tts_routing_mode}\n"
-            f"  ACTIVE_LLM_ROUTING_MODE:       {self.config.llm_routing_mode}\n"
-            f"  DEEPGRAM_CONFIGURED:           {str(deepgram_configured).lower()}\n"
-            f"  ELEVENLABS_CONFIGURED:         {str(elevenlabs_configured).lower()}\n"
-            f"  OPENAI_CONFIGURED:             {str(openai_configured).lower()}\n"
-            f"  LIVEKIT_INTERRUPTION_ENABLED:  {str(livekit_interruption_enabled).lower()}\n"
-            f"  MANUAL_BARGE_IN_ENABLED:       {str(manual_barge_in_enabled).lower()}\n"
-            f"  EMERGENCY_FLUSH_ENABLED:       {str(emergency_flush_enabled).lower()}\n"
-            f"  AMD_WORKER_ENABLED:            {str(amd_worker_enabled).lower()}\n"
-            f"============================================================"
-        )
+        # Extract and assign active LiveKit-compatible provider instances
+        self.llm = self.active_stack["llm"].create_client()
+        self.tts = self.active_stack["tts"].synthesize_stream()
+        self.stt = self.active_stack["stt"].transcribe_stream()
+        self.vad = self.active_stack["vad"].create_detector()
+        self.telephony = self.active_stack["telephony"]
+
+        if hasattr(self.stt, "initialize"):
+            try:
+                res = self.stt.initialize()
+                if asyncio.iscoroutine(res) or hasattr(res, "__await__"):
+                    await res
+            except TypeError:
+                pass
+        if hasattr(self.tts, "initialize"):
+            try:
+                res = self.tts.initialize()
+                if asyncio.iscoroutine(res) or hasattr(res, "__await__"):
+                    await res
+            except TypeError:
+                pass
+
+        # 3. Log the active provider stack exactly as required on startup
+        logger.info(f"ACTIVE_PROVIDER_MODE: {self.active_stack['mode'].upper()}")
+        logger.info(f"ACTIVE_LLM_PROVIDER: {self.active_stack['llm'].name.upper()}")
+        logger.info(f"ACTIVE_LLM_MODEL: {self.config.llm_model}")
+        logger.info(f"ACTIVE_TTS_PROVIDER: {self.active_stack['tts'].name.upper()}")
+        logger.info(f"ACTIVE_TTS_VOICE: {self.config.tts_voice}")
+        logger.info(f"ACTIVE_STT_PROVIDER: {self.active_stack['stt'].name.upper()}")
+        logger.info(f"ACTIVE_STT_MODEL: {self.config.stt_model}")
+        logger.info(f"ACTIVE_VAD_PROVIDER: {self.active_stack['vad'].name.upper()}")
+        logger.info(f"ACTIVE_TELEPHONY_PROVIDER: {self.active_stack['telephony'].name.upper()}")
+        logger.info(f"LLM_HEALTH_STATUS: {str(self.active_stack['health']['llm']).upper()}")
+        logger.info(f"TTS_HEALTH_STATUS: {str(self.active_stack['health']['tts']).upper()}")
+        logger.info(f"STT_HEALTH_STATUS: {str(self.active_stack['health']['stt']).upper()}")
+        logger.info(f"VAD_HEALTH_STATUS: {str(self.active_stack['health']['vad']).upper()}")
+        logger.info(f"TELEPHONY_HEALTH_STATUS: {str(self.active_stack['health']['telephony']).upper()}")
+        logger.info(f"ESTIMATED_COST_PER_CONNECTED_MINUTE: {self.active_stack['estimated_cost_per_minute']:.6f}")
 
         logger.info("All shared components initialized successfully")
 
@@ -1488,11 +1249,11 @@ async def entrypoint(ctx: JobContext):
     if hasattr(session, "_room_io") and session._room_io:
         audio_output = session._room_io.audio_output
         if hasattr(audio_output, "_audio_source"):
-            if os.getenv("DANA_ENABLE_DIRECT_FFI_TTS_PUSH", "false").lower() == "true" and os.getenv("DANA_ENABLE_LIVEKIT_AUDIO_MONKEYPATCH", "false").lower() == "true":
-                import tts_service
+            if os.getenv("DANA_ENABLE_EXPERIMENTAL_DIRECT_FFI_AUDIO", "false").lower() == "true" and os.getenv("DANA_ENABLE_EXPERIMENTAL_AUDIO_MONKEYPATCH", "false").lower() == "true":
+                import legacy.tts_service as tts_service
                 tts_service.active_audio_source = audio_output._audio_source
                 audio_output._bypass_main_loop = True
-                logger.info("Direct audio source registered in tts_service and main-loop bypass enabled.")
+                logger.info("Direct audio source registered in legacy.tts_service and main-loop bypass enabled.")
             else:
                 logger.info("Direct FFI TTS push or audio monkeypatch is disabled. Operating in native LiveKit voice path mode.")
             

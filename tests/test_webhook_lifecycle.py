@@ -15,6 +15,21 @@ from runtime.hot_state import get_hot_state_store
 
 
 @pytest.fixture(autouse=True)
+def force_in_memory_hot_store():
+    """Force clean InMemoryHotStateStore to be shared by test and background worker tasks."""
+    old_val = os.environ.get("DANA_USE_REDIS_HOT_STATE")
+    os.environ["DANA_USE_REDIS_HOT_STATE"] = "false"
+    import runtime.hot_state as hs
+    old_instance = hs._store_instance
+    hs._store_instance = None
+    yield
+    hs._store_instance = old_instance
+    if old_val is not None:
+        os.environ["DANA_USE_REDIS_HOT_STATE"] = old_val
+    else:
+        os.environ.pop("DANA_USE_REDIS_HOT_STATE", None)
+
+@pytest.fixture(autouse=True)
 def cleanup_worker_global():
     """Ensure the global worker task is cleaned up after each test."""
     yield

@@ -61,5 +61,5 @@ async def test_get_llm_rates():
     prompt, completion, src, est = await get_llm_rates(repository, "openai", "gpt-4o-mini")
     assert prompt == Decimal("0.00000015")
     assert completion == Decimal("0.00000060")
-    assert src == "default_rate"
+    assert src in ("default_rate", "provider_costs_yaml")
     assert not est

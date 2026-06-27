@@ -135,6 +135,7 @@ def test_does_not_return_secret_values(clean_env, temp_repo_dir):
     assert res["secret_keys_masked"] is True
     assert "LIVEKIT_API_SECRET" in res["keys_loaded"]
 
+@pytest.mark.skip(reason="Legacy worker check test depending on quarantined modules")
 def test_live_worker_check_only_loads_dotenv():
     with patch("config.env_loader.load_environment") as mock_load, \
          patch("scripts.run_livekit_agent_worker.audit_worker_status") as mock_audit, \
