@@ -64,6 +64,7 @@ class LiveBatchCallResult(BaseModel):
 class LiveBatchTestResult(BaseModel):
     """Overall outcome of the multi-lead campaign batch test."""
     success: bool
+    dry_run: bool = False
     campaign_id: Optional[str] = None
     requested_leads: int
     attempted_calls: int = 0
@@ -192,6 +193,7 @@ class ControlledBatchCampaignTester:
 
         result = LiveBatchTestResult(
             success=False,
+            dry_run=config.dry_run,
             requested_leads=len(config.phone_numbers)
         )
 
