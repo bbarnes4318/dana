@@ -155,6 +155,15 @@ class PostgresStore(BaseStore):
     async def _ensure_pool(self) -> None:
         """Create the asyncpg pool on first call and run migrations lazily."""
         self._require_dsn()
+        loop = asyncio.get_running_loop()
+        if self._pool is not None and getattr(self, "_pool_loop", None) is not loop:
+            logger.info("Current event loop is different from pool's event loop. Re-initializing pool...")
+            old_pool = self._pool
+            self._pool = None
+            self._migrations_checked = False
+            if old_pool is not None:
+                asyncio.create_task(old_pool.close())
+
         if self._pool is not None and self._migrations_checked:
             return
 
@@ -166,6 +175,7 @@ class PostgresStore(BaseStore):
                     min_size=1,
                     max_size=10,
                 )
+                self._pool_loop = loop
             
             if not self._migrations_checked:
                 logger.info("Ensuring database migrations are applied...")

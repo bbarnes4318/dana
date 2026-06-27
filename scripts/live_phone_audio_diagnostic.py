@@ -24,6 +24,7 @@ async def monitor_output(stream, collected_markers, raw_logs):
             break
         decoded = line.decode('utf-8', errors='ignore').strip()
         raw_logs.append(decoded)
+        logger.info(f"[WORKER] {decoded}")
         # Check for markers
         for marker in [
             "CALL_PARTICIPANT_JOINED",
@@ -42,9 +43,7 @@ async def monitor_output(stream, collected_markers, raw_logs):
             if marker in decoded:
                 collected_markers.add(marker)
                 logger.info(f"[MARKER DETECTED] {marker}")
-        # Print raw log if it contains errors or critical info
-        if "ERROR" in decoded or "FATAL" in decoded or "exception" in decoded.lower():
-            logger.error(f"[WORKER LOG] {decoded}")
+        pass
 
 async def main_async() -> int:
     parser = argparse.ArgumentParser(description="Dana Live Call Audio Diagnostic Tool")
