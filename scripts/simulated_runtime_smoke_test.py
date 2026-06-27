@@ -16,11 +16,11 @@ from core.livekit_runtime_adapter import LiveKitRuntimeAdapter
 from core.call_state import CallStage
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
-logger = logging.getLogger("live_smoke_test")
+logger = logging.getLogger("simulated_runtime_smoke_test")
 
 async def main():
     logger.info("==================================================")
-    logger.info("   DANA AI PLATFORM LIVE SMOKE TEST WORKFLOW      ")
+    logger.info("   DANA AI PLATFORM SIMULATED SMOKE TEST WORKFLOW ")
     logger.info("==================================================")
 
     # 1. Load configuration and runtime environment

@@ -324,9 +324,11 @@ async def entrypoint(ctx: JobContext):
 
     # Connect to room (audio only)
     await ctx.connect(auto_subscribe=AutoSubscribe.AUDIO_ONLY)
+    logger.info("CALL_ROOM_CONNECTED")
     
     # Wait for participant
     participant = await ctx.wait_for_participant()
+    logger.info("CALL_PARTICIPANT_JOINED")
     logger.info(f"Participant joined: {participant.identity}")
 
     # Delegate call session logic entirely to VoiceSession

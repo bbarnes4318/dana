@@ -49,7 +49,7 @@ class DanaAgent(Agent):
     Subclass of livekit.agents.Agent implementing our phone-optimized Dana personality
     and wrapping LLM & TTS streaming nodes with latency recorder hooks.
     """
-    def __init__(self, shared: Any, latency_recorder: Any):
+    def __init__(self, shared: Any, latency_recorder: Any, voice_session: Any = None):
         instructions = load_instructions(shared.config.agent_prompt_path)
         super().__init__(
             instructions=instructions,
@@ -58,6 +58,7 @@ class DanaAgent(Agent):
             tts=shared.tts,
             vad=shared.vad,
         )
+        self.voice_session = voice_session
         self.prompt_loader = getattr(shared, "prompt_loader", None)
         self._config = shared.config
         self._latency_recorder = latency_recorder
@@ -86,6 +87,11 @@ class DanaAgent(Agent):
         tools: list[llm.Tool],
         model_settings: any,
     ) -> AsyncIterable[llm.ChatChunk]:
+        logger.info("LLM_NODE_ENTERED")
+        if self.voice_session:
+            self.voice_session._llm_node_entered_for_turn = True
+            if getattr(self.voice_session, "_llm_watchdog_task", None):
+                self.voice_session._llm_watchdog_task.cancel()
         self._latency_recorder.mark("llm_node_entered")
         if self.warm_bridge_active:
             logger.info("warm_bridge_active_dana_suppressed: Suppressing Dana responses after warm bridge success.")
@@ -218,6 +224,17 @@ class DanaAgent(Agent):
             if result:
                 self.current_turn_response = result.agent_response or ""
                 logger.info(f"LLM_RESPONSE_TEXT_LENGTH: {len(self.current_turn_response)}")
+                if self.voice_session:
+                    self.voice_session._tts_first_audio_emitted_for_turn = False
+                    
+                    async def tts_audio_watchdog():
+                        await asyncio.sleep(3.0)
+                        if not getattr(self.voice_session, "_tts_first_audio_emitted_for_turn", False):
+                            logger.error("FATAL_TTS_NO_FIRST_AUDIO_AFTER_LLM")
+                            
+                    if getattr(self.voice_session, "_tts_watchdog_task", None):
+                        self.voice_session._tts_watchdog_task.cancel()
+                    self.voice_session._tts_watchdog_task = asyncio.create_task(tts_audio_watchdog())
                 if not self.current_turn_response.strip():
                     logger.error("ERROR_EMPTY_LLM_RESPONSE")
                 self._latency_recorder.mark("agent_response_text_created")
@@ -337,6 +354,17 @@ class DanaAgent(Agent):
         result = await self.adapter.process_user_turn(user_text, chat_fn, interrupted=interrupted)
         self.current_turn_response = result.agent_response or ""
         logger.info(f"LLM_RESPONSE_TEXT_LENGTH: {len(self.current_turn_response)}")
+        if self.voice_session:
+            self.voice_session._tts_first_audio_emitted_for_turn = False
+            
+            async def tts_audio_watchdog():
+                await asyncio.sleep(3.0)
+                if not getattr(self.voice_session, "_tts_first_audio_emitted_for_turn", False):
+                    logger.error("FATAL_TTS_NO_FIRST_AUDIO_AFTER_LLM")
+                    
+            if getattr(self.voice_session, "_tts_watchdog_task", None):
+                self.voice_session._tts_watchdog_task.cancel()
+            self.voice_session._tts_watchdog_task = asyncio.create_task(tts_audio_watchdog())
         if not self.current_turn_response.strip():
             logger.error("ERROR_EMPTY_LLM_RESPONSE")
         
@@ -420,6 +448,7 @@ class DanaAgent(Agent):
         text: AsyncIterable[str],
         model_settings: any,
     ) -> AsyncIterable[rtc.AudioFrame]:
+        logger.info("TTS_NODE_ENTERED")
         tts_stream = self.tts.stream()
         first_text = True
         
@@ -429,6 +458,7 @@ class DanaAgent(Agent):
                 async for chunk in text:
                     if chunk and first_text:
                         first_text = False
+                        logger.info("TTS_FIRST_TEXT_RECEIVED")
                         self._latency_recorder.mark("tts_first_text")
                         if "greeting_tts_started" in self._latency_recorder.events:
                             self._latency_recorder.mark("second_turn_tts_first_text")
@@ -448,6 +478,23 @@ class DanaAgent(Agent):
                 if first_audio:
                     first_audio = False
                     logger.info("TTS_FIRST_AUDIO_SENT")
+                    if self.voice_session:
+                        self.voice_session._tts_first_audio_emitted_for_turn = True
+                        if getattr(self.voice_session, "_tts_watchdog_task", None):
+                            self.voice_session._tts_watchdog_task.cancel()
+                        
+                        # Watchdog 5: If TTS first audio is emitted but agent_speaking does not start within 3 seconds
+                        self.voice_session._agent_speaking_started_for_turn = False
+                        
+                        async def agent_speaking_watchdog():
+                            await asyncio.sleep(3.0)
+                            if not getattr(self.voice_session, "_agent_speaking_started_for_turn", False):
+                                logger.error("FATAL_TTS_AUDIO_NOT_PUBLISHED_TO_ROOM")
+                                
+                        if getattr(self.voice_session, "_agent_speaking_watchdog_task", None):
+                            self.voice_session._agent_speaking_watchdog_task.cancel()
+                        self.voice_session._agent_speaking_watchdog_task = asyncio.create_task(agent_speaking_watchdog())
+
                     self._latency_recorder.mark("tts_first_audio")
                     self._latency_recorder.mark("first_audio_published")
                     if "greeting_tts_started" in self._latency_recorder.events:
@@ -718,6 +765,23 @@ class VoiceSession:
             preemptive_generation={"enabled": self.shared.config.preemptive_generation},
         )
 
+        # Initialize Watchdog state variables
+        self._audio_track_subscribed = False
+        self._llm_node_entered_for_turn = False
+        self._tts_first_audio_emitted_for_turn = False
+        self._agent_speaking_started_for_turn = False
+        self._transcript_watchdog_task = None
+        self._llm_watchdog_task = None
+        self._tts_watchdog_task = None
+        self._agent_speaking_watchdog_task = None
+
+        # Watchdog 1: If no audio track is subscribed within 5 seconds after participant join
+        async def track_watchdog():
+            await asyncio.sleep(5.0)
+            if not getattr(self, "_audio_track_subscribed", False):
+                logger.error("FATAL_NO_AUDIO_TRACK_SUBSCRIBED")
+        asyncio.create_task(track_watchdog())
+
         # Initialize the AgentSession
         session = AgentSession(
             stt=self.shared.stt,
@@ -727,7 +791,7 @@ class VoiceSession:
             turn_handling=turn_handling,
         )
         
-        agent = DanaAgent(self.shared, latency_recorder)
+        agent = DanaAgent(self.shared, latency_recorder, self)
         agent.room = self.ctx.room
         agent.adapter = self.turn_manager.adapter
         
@@ -748,6 +812,7 @@ class VoiceSession:
             old_state_str = str(ev.old_state).lower()
             if "speaking" in state_str:
                 logger.info("User speaking started")
+                logger.info("USER_SPEAKING_STARTED")
                 latency_recorder.mark("stt_speech_start_hook_called")
                 if getattr(agent, "interrupted_current_turn", False) and latency_recorder.events.get("user_speech_end"):
                     latency_recorder.mark("user_speech_resumed")
@@ -781,6 +846,7 @@ class VoiceSession:
             elif "listening" in state_str or "idle" in state_str:
                 if "speaking" in old_state_str:
                     logger.info("User speaking stopped")
+                    logger.info("USER_SPEAKING_STOPPED")
                     latency_recorder.mark("stt_speech_end_hook_called")
                     latency_recorder.mark("user_speech_end")
                     dur = latency_recorder.duration("user_speech_start", "user_speech_end")
@@ -792,6 +858,18 @@ class VoiceSession:
                                 latency_recorder.mark("false_interruption_detected")
                                 logger.info("False interruption detected (duration since interrupt < 800ms)")
                     
+                    # Watchdog 2: If user speaking starts but no final transcript arrives within 3 seconds
+                    expected_transcript_count = getattr(agent, "final_transcript_count", 0) + 1
+                    
+                    async def transcript_watchdog(expected_count):
+                        await asyncio.sleep(3.0)
+                        if getattr(agent, "final_transcript_count", 0) < expected_count:
+                            logger.error("FATAL_NO_FINAL_TRANSCRIPT_AFTER_SPEECH")
+                            
+                    if getattr(self, "_transcript_watchdog_task", None):
+                        self._transcript_watchdog_task.cancel()
+                    self._transcript_watchdog_task = asyncio.create_task(transcript_watchdog(expected_transcript_count))
+
                     final_count_at_end = getattr(agent, "final_transcript_count", 0)
                     async def check_final_transcript_timeout(expected_count):
                         await asyncio.sleep(2.5)
@@ -804,9 +882,22 @@ class VoiceSession:
             state_str = str(ev.new_state).lower()
             old_state_str = str(ev.old_state).lower()
             if "speaking" in state_str:
+                logger.info("AGENT_SPEAKING_STARTED")
+                self._agent_speaking_started_for_turn = True
+                if getattr(self, "_agent_speaking_watchdog_task", None):
+                    self._agent_speaking_watchdog_task.cancel()
+                
+                # Diagnostic Greeting hooks
+                if getattr(self, "_is_diagnostic_greeting_active", False):
+                    logger.info("TTS_FIRST_AUDIO_SENT")
+                    self._tts_first_audio_emitted_for_turn = True
+                    if getattr(self, "_tts_watchdog_task", None):
+                        self._tts_watchdog_task.cancel()
+
                 latency_recorder.mark("agent_speech_started")
                 agent.agent_speech_started_time = time.perf_counter()
             elif "speaking" in old_state_str:
+                logger.info("AGENT_SPEAKING_STOPPED")
                 latency_recorder.mark("agent_speech_stopped")
                 latency_recorder.mark("agent_audio_stopped")
                 if getattr(agent, "interrupted_current_turn", False):
@@ -827,6 +918,9 @@ class VoiceSession:
                 agent.current_turn_response = ""
                 agent.agent_speech_started_time = None
 
+                if self.ctx.room.isconnected:
+                    logger.info("CALL_STILL_CONNECTED_AFTER_RESPONSE")
+
                 if getattr(agent, "should_disconnect", False):
                     logger.info("Agent stopped speaking and should_disconnect is True. Disconnecting...")
                     if getattr(agent, "fallback_disconnect_task", None):
@@ -841,14 +935,37 @@ class VoiceSession:
                 partial_text = event.text
             elif hasattr(event, "alternatives") and event.alternatives:
                 partial_text = event.alternatives[0].text
+            
+            if not event.is_final:
+                logger.info("USER_TRANSCRIPT_PARTIAL")
+                logger.info(f"USER_TRANSCRIPT_PARTIAL: {partial_text}")
+                
             if partial_text.strip():
                 agent.user_transcript_received = True
 
             if event.is_final:
+                logger.info("USER_TRANSCRIPT_FINAL")
+                logger.info(f"USER_TRANSCRIPT_FINAL: {partial_text}")
                 agent.final_transcript_count = getattr(agent, "final_transcript_count", 0) + 1
                 logger.info("USER_TRANSCRIPT_RECEIVED")
                 logger.info(f"FINAL_TRANSCRIPT_TEXT_LENGTH: {len(partial_text)}")
                 latency_recorder.mark("transcript_final")
+                
+                # Cancel transcript watchdog
+                if getattr(self, "_transcript_watchdog_task", None):
+                    self._transcript_watchdog_task.cancel()
+                    
+                # Watchdog 3: If final transcript arrives but llm_node is not entered within 3 seconds
+                self._llm_node_entered_for_turn = False
+                
+                async def llm_node_watchdog():
+                    await asyncio.sleep(3.0)
+                    if not getattr(self, "_llm_node_entered_for_turn", False):
+                        logger.error("FATAL_LLM_NODE_NOT_ENTERED_AFTER_TRANSCRIPT")
+                        
+                if getattr(self, "_llm_watchdog_task", None):
+                    self._llm_watchdog_task.cancel()
+                self._llm_watchdog_task = asyncio.create_task(llm_node_watchdog())
             else:
                 enable_semantic = os.getenv("DANA_ENABLE_SEMANTIC_TURN_DETECTION", "false").strip().lower() in ("true", "1", "yes")
                 if enable_semantic and self.shared.config.endpoint_mode == "adaptive":
@@ -883,14 +1000,22 @@ class VoiceSession:
                     logger.info("Starting AMD parallel worker for track: %s", track.sid)
                     asyncio.create_task(run_amd_worker(track, session, agent, self.ctx.room))
 
+        def handle_audio_track_subscription(track):
+            if track.kind == rtc.TrackKind.KIND_AUDIO:
+                if not getattr(self, "_audio_track_subscribed", False):
+                    self._audio_track_subscribed = True
+                    logger.info("TRACK_SUBSCRIBED_AUDIO")
+
         @self.ctx.room.on("track_subscribed")
         def on_track_subscribed(track: rtc.Track, publication: rtc.TrackPublication, participant: rtc.RemoteParticipant):
             logger.info(f"[TRACK_SUBSCRIBED_LOG] participant={participant.identity} kind={track.kind} source={publication.source} sid={track.sid}")
+            handle_audio_track_subscription(track)
             start_amd_for_track(track)
 
         for publication in participant.track_publications.values():
             logger.info(f"[EXISTING_TRACK_LOG] participant={participant.identity} source={publication.source} track_present={publication.track is not None}")
             if publication.track:
+                handle_audio_track_subscription(publication.track)
                 start_amd_for_track(publication.track)
 
         # Register call in context registry
@@ -927,6 +1052,7 @@ class VoiceSession:
             apply_interruption_profile(call_state.current_stage)
 
         # Start AgentSession with RoomOptions
+        logger.info("AGENT_SESSION_STARTING")
         await session.start(
             room=self.ctx.room,
             agent=agent,
@@ -937,6 +1063,30 @@ class VoiceSession:
                 text_input=False,
             ),
         )
+        logger.info("AGENT_SESSION_STARTED")
+        logger.info("ROOM_AUDIO_OUTPUT_ENABLED")
+        logger.info("ROOM_AUDIO_INPUT_ENABLED")
+
+        # Forced Diagnostic Greeting Mode
+        if os.getenv("DANA_FORCE_DIAGNOSTIC_GREETING", "false").strip().lower() in ("true", "1", "yes"):
+            logger.info("DIAG_SESSION_START_SUCCEEDED")
+            greeting_text = os.getenv("DANA_DIAGNOSTIC_GREETING_TEXT", "Hello, can you hear me?")
+            logger.info("DIAG_GREETING_SAY_CALLED")
+            
+            self._is_diagnostic_greeting_active = True
+            
+            async def run_diagnostic_greeting():
+                try:
+                    handle = session.say(greeting_text)
+                    await handle.wait_for_playout()
+                    logger.info("TTS_STREAM_COMPLETED")
+                    logger.info("DIAG_GREETING_SAY_COMPLETED")
+                except Exception as ex:
+                    logger.error(f"Error during diagnostic greeting: {ex}")
+                finally:
+                    self._is_diagnostic_greeting_active = False
+            
+            asyncio.create_task(run_diagnostic_greeting())
 
         session.repository = self.shared.repository
 
