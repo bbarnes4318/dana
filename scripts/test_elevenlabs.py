@@ -7,8 +7,15 @@ async def test():
     load_dotenv()
     api_key = os.getenv("ELEVENLABS_API_KEY")
     voice_id = os.getenv("ACTIVE_TTS_VOICE", "hpp4J3VqNfWAUOO0d1Us")
-    # Use the model from the provider config: eleven_turbo_v2_5
-    url = f"wss://api.elevenlabs.io/v1/text-to-speech/{voice_id}/multi-stream-input?model_id=eleven_turbo_v2_5"
+    # Build exact default url
+    url = (
+        f"wss://api.elevenlabs.io/v1/text-to-speech/{voice_id}/multi-stream-input?"
+        f"model_id=eleven_turbo_v2_5"
+        f"&output_format=mp3_22050_32"
+        f"&enable_ssml_parsing=false"
+        f"&enable_logging=true"
+        f"&inactivity_timeout=20"
+    )
     
     print(f"Connecting to WebSocket: {url}")
     headers = {
