@@ -729,7 +729,6 @@ class VoiceSession:
         
         agent = DanaAgent(self.shared, latency_recorder)
         agent.room = self.ctx.room
-        agent.session = session
         agent.adapter = self.turn_manager.adapter
         
         if hasattr(self.shared.stt, "bind"):
