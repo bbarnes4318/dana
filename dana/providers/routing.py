@@ -35,6 +35,13 @@ class RoutingEngine:
         vad_healthy = await vad.health_check()
         telephony_healthy = await telephony.health_check()
 
+        # Enforce provider health
+        is_production = self.config.runtime_env.strip().lower() == "production"
+        if (is_production or mode == "locked") and not telephony_healthy:
+            raise RuntimeError(f"Telephony provider '{telephony.name}' is unhealthy or credentials missing.")
+        if (is_production or mode == "locked") and not vad_healthy:
+            raise RuntimeError(f"VAD provider '{vad.name}' is unhealthy or credentials missing.")
+
         # 2. Resolve LLM, TTS, STT depending on mode
         if mode == "locked":
             llm = self.registry.get_llm(self.config.llm_provider)

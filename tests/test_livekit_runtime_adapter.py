@@ -9,8 +9,8 @@ from unittest.mock import AsyncMock, MagicMock
 from core.livekit_runtime_adapter import LiveKitRuntimeAdapter
 from core.call_state import CallStage
 from core.agent_runtime import RuntimeResult
-from livekit.agents import llm
-from main import DanaAgent, SharedComponents, VoiceConfig
+from main import SharedComponents, VoiceConfig
+from dana.runtime.voice_session import DanaAgent
 
 
 @pytest.fixture

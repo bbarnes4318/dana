@@ -121,29 +121,10 @@ class VoiceConfig:
         self.provider_mode = self.provider_mode.strip().lower()
         self.voice_mode = self.voice_mode.strip().lower()
         
-        # Override values for premium_live
-        if self.voice_mode == "premium_live":
-            self.tts_routing_mode = os.getenv("DANA_TTS_ROUTING_MODE", "cloud")
-            self.allow_cloud_tts_fallback = env_bool("DANA_ALLOW_CLOUD_TTS_FALLBACK", True)
-            self.tts_provider = os.getenv("DANA_TTS_PROVIDER", "elevenlabs")
-            self.enable_streaming_response = env_bool("DANA_ENABLE_STREAMING_RESPONSE", True)
-            self.stt_routing_mode = os.getenv("DANA_STT_ROUTING_MODE", "cloud")
-            self.stt_provider = os.getenv("DANA_STT_PROVIDER", "deepgram")
-            self.provider_mode = "balanced"
-            
-        elif self.voice_mode == "local_cost":
-            self.tts_routing_mode = os.getenv("DANA_TTS_ROUTING_MODE", "local")
-            self.allow_cloud_tts_fallback = env_bool("DANA_ALLOW_CLOUD_TTS_FALLBACK", False)
-            self.tts_provider = os.getenv("DANA_TTS_PROVIDER", "local")
-            self.stt_routing_mode = os.getenv("DANA_STT_ROUTING_MODE", "local")
-            self.stt_provider = os.getenv("DANA_STT_PROVIDER", "local")
-            self.provider_mode = "cheapest_safe"
-            
-        # Backwards compatibility: map DANA_VOICE_MODE to DANA_PROVIDER_MODE if DANA_PROVIDER_MODE is at default
-        elif self.provider_mode == "balanced" and self.voice_mode != "balanced":
-            if self.voice_mode == "premium_live":
-                self.provider_mode = "balanced"
-            elif self.voice_mode == "local_cost":
-                self.provider_mode = "cheapest_safe"
-            else:
-                self.provider_mode = self.voice_mode
+        # Keep old aliases only as warnings, not behavior-changing logic
+        if os.getenv("DANA_VOICE_MODE") is not None:
+            import logging
+            logging.getLogger(__name__).warning(
+                "WARNING: DANA_VOICE_MODE is deprecated and will not change routing behavior. "
+                "Use DANA_PROVIDER_MODE instead."
+            )

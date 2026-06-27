@@ -209,10 +209,22 @@ services:
       - LIVEKIT_URL=${LIVEKIT_URL:-wss://replace-me.livekit.cloud}
       - LIVEKIT_API_KEY=${LIVEKIT_API_KEY:-replace_me}
       - LIVEKIT_API_SECRET=${LIVEKIT_API_SECRET:-replace_me}
+      - LIVEKIT_SIP_OUTBOUND_TRUNK_ID=${LIVEKIT_SIP_OUTBOUND_TRUNK_ID:-}
+      # ---- API Keys ----
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - DEEPGRAM_API_KEY=${DEEPGRAM_API_KEY:-}
+      - ELEVENLABS_API_KEY=${ELEVENLABS_API_KEY:-}
+      # ---- Central Provider Routing ----
+      - DANA_PROVIDER_MODE=${DANA_PROVIDER_MODE:-balanced}
+      - DANA_LLM_PROVIDER=${DANA_LLM_PROVIDER:-local_vllm}
+      - DANA_TTS_PROVIDER=${DANA_TTS_PROVIDER:-local_kokoro}
+      - DANA_STT_PROVIDER=${DANA_STT_PROVIDER:-local_faster_whisper}
+      - DANA_VAD_PROVIDER=${DANA_VAD_PROVIDER:-silero}
+      - DANA_TELEPHONY_PROVIDER=${DANA_TELEPHONY_PROVIDER:-livekit_sip}
       # ---- Agent Identity ----
       - DANA_AGENT_NAME=${DANA_AGENT_NAME:-Alex}
       - DANA_COMPANY_NAME=${DANA_COMPANY_NAME:-American Beneficiary}
-      - DANA_AGENT_PROMPT_PATH=${DANA_AGENT_PROMPT_PATH:-prompts/final_expense_alex.md}
+      - DANA_AGENT_PROMPT_PATH=${DANA_AGENT_PROMPT_PATH:-prompts/final_expense.production.md}
       # ---- Opening Behavior ----
       - DANA_OPENING_MODE=${DANA_OPENING_MODE:-wait_for_user}
       - DANA_OPENING_LINE=${DANA_OPENING_LINE:-}
@@ -222,7 +234,6 @@ services:
       - DANA_TEMPERATURE=${DANA_TEMPERATURE:-0.45}
       - DANA_TOP_P=${DANA_TOP_P:-0.9}
       # ---- STT ----
-      - DANA_STT_PROVIDER=${DANA_STT_PROVIDER:-local}
       - DANA_STT_MODEL=${DANA_STT_MODEL:-large-v3-turbo}
       - DANA_STT_COMPUTE_TYPE=${DANA_STT_COMPUTE_TYPE:-float16}
       - DANA_VAD_THRESHOLD=${DANA_VAD_THRESHOLD:-0.5}
@@ -231,8 +242,6 @@ services:
       - DANA_TTS_VOICE=${DANA_TTS_VOICE:-af_bella}
       - DANA_TTS_SPEED=${DANA_TTS_SPEED:-1.03}
       # ---- Turn-Taking ----
-      - DANA_TURN_MIN_DELAY=${DANA_TURN_MIN_DELAY:-0.15}
-      - DANA_TURN_MAX_DELAY=${DANA_TURN_MAX_DELAY:-0.55}
       - DANA_PREEMPTIVE_GENERATION=${DANA_PREEMPTIVE_GENERATION:-true}
       # ---- Logging ----
       - LOG_LEVEL=${LOG_LEVEL:-INFO}

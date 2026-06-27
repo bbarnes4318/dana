@@ -30,8 +30,8 @@ class SileroVADProvider(VADProvider):
 
     def create_detector(self) -> Any:
         if not self._detector:
-            self._detector = ElderlySileroVAD(
-                min_silence_ms=self._min_silence_ms,
-                threshold=self._threshold
+            self._detector = ElderlySileroVAD.load(
+                min_silence_duration=self._min_silence_ms / 1000.0,
+                activation_threshold=self._threshold
             )
         return self._detector
