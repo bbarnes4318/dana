@@ -66,6 +66,7 @@ async def main_async() -> int:
     env["DANA_FORCE_DIAGNOSTIC_GREETING"] = "true"
     env["DANA_DIAGNOSTIC_GREETING_TEXT"] = "Hello, can you hear me?"
     env["DANA_CONTROLLED_LIVE_TEST"] = "true"
+    env["PYTHONUNBUFFERED"] = "1"
     
     proc = await asyncio.create_subprocess_exec(
         sys.executable, "main.py", "dev",
