@@ -7,23 +7,20 @@ async def test():
     load_dotenv()
     api_key = os.getenv("ELEVENLABS_API_KEY")
     voice_id = os.getenv("ACTIVE_TTS_VOICE", "hpp4J3VqNfWAUOO0d1Us")
-    url = f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}"
+    url = f"wss://api.elevenlabs.io/v1/text-to-speech/{voice_id}/multi-stream-input?model_id=eleven_monolingual_v1"
     
-    print(f"Making direct HTTP POST to: {url}")
+    print(f"Connecting to WebSocket: {url}")
     headers = {
         "xi-api-key": api_key,
-        "Content-Type": "application/json"
     }
-    payload = {"text": "Hello, can you hear me?"}
-    
     async with aiohttp.ClientSession() as session:
         try:
-            async with session.post(url, headers=headers, json=payload) as response:
-                print(f"HTTP Status: {response.status}")
-                body = await response.text()
-                print(f"Response Body: {body}")
+            async with session.ws_connect(url, headers=headers) as ws:
+                print("SUCCESS: Connected to ElevenLabs WebSocket!")
+        except aiohttp.client_exceptions.WSServerHandshakeError as e:
+            print(f"Handshake Error: {e.status} - {e.message}")
         except Exception as e:
-            print(f"Connection/HTTP Error: {e}")
+            print(f"Connection Error: {e}")
 
 if __name__ == "__main__":
     asyncio.run(test())
