@@ -932,13 +932,174 @@ class VoiceSession:
                         agent.fallback_disconnect_task = None
                     asyncio.create_task(self.ctx.room.disconnect())
 
+        self._direct_response_in_progress = False
+
+        async def respond_to_final_transcript(transcript_text: str):
+            if getattr(self, "_direct_response_in_progress", False):
+                logger.info("Direct response in progress, skipping duplicate final transcript event")
+                return
+            self._direct_response_in_progress = True
+            
+            logger.info("DIRECT_RESPONSE_STARTED")
+            try:
+                # Implement chat_fn using the active LLM client on agent.llm
+                async def chat_fn(instructions: str) -> str:
+                    new_ctx = llm.ChatContext()
+                    
+                    # Prepend static system prompt prefix
+                    loader = agent.prompt_loader or (agent.adapter and agent.adapter.prompt_loader)
+                    static_prompt = loader.build_system_prompt() if loader else ""
+                    combined_prompt = f"{static_prompt}\n\n{instructions}"
+                    
+                    new_ctx.add_message(
+                        role="system",
+                        content=combined_prompt
+                    )
+                    
+                    # Copy conversation history from session.history (user and assistant messages only)
+                    history_msgs = []
+                    if hasattr(session, "history") and session.history:
+                        history_msgs = getattr(session.history, "messages", [])
+                        if callable(history_msgs):
+                            history_msgs = history_msgs()
+                            
+                    def get_msg_text(m) -> str:
+                        if not m:
+                            return ""
+                        try:
+                            tc = getattr(m, "text_content", None)
+                            if isinstance(tc, str):
+                                return tc
+                            c = getattr(m, "content", None)
+                            if isinstance(c, str):
+                                return c
+                        except Exception:
+                            pass
+                        return ""
+
+                    for msg in history_msgs:
+                        if msg.role in ("user", "assistant"):
+                            msg_content = get_msg_text(msg)
+                            new_ctx.add_message(
+                                role=msg.role,
+                                content=msg_content
+                            )
+                    
+                    # If last message is not user with transcript_text, append it
+                    last_msg = history_msgs[-1] if history_msgs else None
+                    last_msg_text = get_msg_text(last_msg)
+                    if not last_msg or last_msg.role != "user" or transcript_text not in last_msg_text:
+                        new_ctx.add_message(
+                            role="user",
+                            content=transcript_text
+                        )
+                        
+                    # Estimate prompt tokens
+                    from metrics.model_cost_metrics import estimate_llm_tokens
+                    prompt_str = instructions + "".join(get_msg_text(m) for m in new_ctx.messages if get_msg_text(m))
+                    agent.prompt_tokens += estimate_llm_tokens(prompt_str)
+
+                    # Run LLM chat directly
+                    stream = agent.llm.chat(
+                        chat_ctx=new_ctx,
+                        temperature=0.2,
+                        top_p=agent._config.top_p if hasattr(agent, "_config") else 0.7,
+                        max_tokens=agent._config.max_tokens if hasattr(agent, "_config") else 1024,
+                        frequency_penalty=0.15,
+                    )
+                    
+                    response_text = ""
+                    async for chunk in stream:
+                        content = chunk.delta.content if chunk.delta else ""
+                        if content:
+                            response_text += content
+
+                    # Estimate completion tokens
+                    agent.completion_tokens += estimate_llm_tokens(response_text)
+                    return response_text
+
+                # Call process_user_turn
+                result = await agent.adapter.process_user_turn(transcript_text, chat_fn, interrupted=False)
+                agent.current_turn_response = result.agent_response or ""
+                logger.info(f"DIRECT_RESPONSE_TEXT_LENGTH: {len(agent.current_turn_response)}")
+                
+                # Update stage in registry
+                from speech.context_registry import update_call_stage
+                update_call_stage(agent.adapter.call_id, result.stage)
+
+                # Call session.say using the same proven playback path as diagnostic greeting
+                if agent.current_turn_response.strip():
+                    handle = session.say(agent.current_turn_response)
+                    await handle.wait_for_playout()
+                    
+                logger.info("DIRECT_RESPONSE_SAY_COMPLETED")
+                
+                # Append assistant's response to session.history so history remains in sync
+                if hasattr(session, "history") and session.history:
+                    session.history.add_message(
+                        role="assistant",
+                        content=agent.current_turn_response
+                    )
+                
+                # Handle disconnect timing based on outcome
+                if result.should_end_call:
+                    is_warm_bridge = False
+                    for ev in agent.adapter.runtime.events:
+                        from core.runtime_events import ToolTriggeredEvent
+                        if isinstance(ev, ToolTriggeredEvent) and ev.tool_name in ("feTransfer", "transfer_to_agent") and ev.success:
+                            if "warm" in ev.result_message.lower() or os.getenv("DANA_TRANSFER_MODE", "").lower() == "warm_bridge":
+                                is_warm_bridge = True
+                                break
+                    if is_warm_bridge:
+                        logger.info("Warm bridge transfer succeeded. Dana will mute and leave later.")
+                        agent.should_disconnect = False
+                        agent.warm_bridge_active = True
+                        
+                        async def warm_bridge_leave():
+                            await asyncio.sleep(15.0)
+                            logger.info("warm_bridge_active_dana_suppressed: Dana leaving agent session only.")
+                            try:
+                                await session.aclose()
+                            except Exception as e:
+                                logger.error(f"Error closing agent session during warm bridge: {e}")
+                        asyncio.create_task(warm_bridge_leave())
+                    else:
+                        agent.should_disconnect = True
+                        if getattr(agent, "fallback_disconnect_task", None):
+                            agent.fallback_disconnect_task.cancel()
+                        
+                        async def disconnect_after_delay(delay: float = 8.0):
+                            try:
+                                await asyncio.sleep(delay)
+                                if self.ctx.room and self.ctx.room.isconnected():
+                                    logger.info("Fallback: Disconnecting room after delay...")
+                                    await self.ctx.room.disconnect()
+                            except asyncio.CancelledError:
+                                logger.info("Fallback disconnect task cancelled.")
+                        agent.fallback_disconnect_task = asyncio.create_task(disconnect_after_delay())
+            except Exception as ex:
+                logger.error(f"Error in direct response loop: {ex}", exc_info=True)
+            finally:
+                self._direct_response_in_progress = False
+
         @session.on("user_input_transcribed")
         def on_user_input_transcribed(event):
             partial_text = ""
-            if hasattr(event, "text") and event.text:
-                partial_text = event.text
-            elif hasattr(event, "alternatives") and event.alternatives:
-                partial_text = event.alternatives[0].text
+            if hasattr(event, "transcript") and event.transcript:
+                if isinstance(event.transcript, str):
+                    partial_text = event.transcript
+                elif hasattr(event.transcript, "text") and event.transcript.text:
+                    partial_text = event.transcript.text
+            if not partial_text:
+                if hasattr(event, "text") and event.text:
+                    partial_text = event.text
+                elif hasattr(event, "alternatives") and event.alternatives:
+                    if isinstance(event.alternatives[0], str):
+                        partial_text = event.alternatives[0]
+                    elif hasattr(event.alternatives[0], "text") and event.alternatives[0].text:
+                        partial_text = event.alternatives[0].text
+                    elif hasattr(event.alternatives[0], "transcript") and event.alternatives[0].transcript:
+                        partial_text = event.alternatives[0].transcript
             
             if not event.is_final:
                 logger.info("USER_TRANSCRIPT_PARTIAL")
@@ -970,6 +1131,11 @@ class VoiceSession:
                 if getattr(self, "_llm_watchdog_task", None):
                     self._llm_watchdog_task.cancel()
                 self._llm_watchdog_task = asyncio.create_task(llm_node_watchdog())
+                
+                # Direct response path
+                is_direct_enabled = os.getenv("DANA_DIRECT_RESPONSE_ON_FINAL_TRANSCRIPT", "true").strip().lower() in ("true", "1", "yes")
+                if is_direct_enabled and partial_text.strip():
+                    asyncio.create_task(respond_to_final_transcript(partial_text))
             else:
                 enable_semantic = os.getenv("DANA_ENABLE_SEMANTIC_TURN_DETECTION", "false").strip().lower() in ("true", "1", "yes")
                 if enable_semantic and self.shared.config.endpoint_mode == "adaptive":
@@ -979,11 +1145,6 @@ class VoiceSession:
                     
                     detector = SemanticTurnDetector()
                     stage = get_current_call_stage() or "OPENING"
-                    partial_text = ""
-                    if hasattr(event, "text") and event.text:
-                        partial_text = event.text
-                    elif hasattr(event, "alternatives") and event.alternatives:
-                        partial_text = event.alternatives[0].text
                     
                     if partial_text:
                         res = detector.process_transcript(partial_text, stage=stage)
