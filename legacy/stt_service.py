@@ -281,6 +281,9 @@ class LocalSTTStream(stt.SpeechStream):
                 if current_cursor == 0:
                     continue
                     
+                if not self._is_speaking and not self._speech_finalized:
+                    continue
+                    
                 if self._early_emitted:
                     if self._speech_finalized:
                         self._speech_finalized = False
