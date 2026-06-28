@@ -409,6 +409,17 @@ class ElderlySileroVADStream(silero.VADStream):
                 if len(samples) > 0:
                     rms = np.sqrt(np.mean(samples.astype(np.float64) ** 2))
                     logger.info(f"VAD INBOUND AUDIO: rms={rms:.2f} samples={len(samples)}")
+                    
+                    # Print raw data characteristics
+                    samples_int16 = np.frombuffer(input_frame.data, dtype=np.int16)
+                    samples_float32 = np.frombuffer(input_frame.data, dtype=np.float32)
+                    logger.info(f"VAD DEBUG: raw_bytes_len={len(input_frame.data)} "
+                                f"int16_min={samples_int16.min() if len(samples_int16) else 0} "
+                                f"int16_max={samples_int16.max() if len(samples_int16) else 0} "
+                                f"float32_min={samples_float32.min() if len(samples_float32) else 0} "
+                                f"float32_max={samples_float32.max() if len(samples_float32) else 0} "
+                                f"int16_head={list(samples_int16[:10])}")
+                                
                     if rms > 0.0 and "inbound_audio_rms_nonzero" not in recorder.events:
                         recorder.mark("inbound_audio_rms_nonzero")
                 
