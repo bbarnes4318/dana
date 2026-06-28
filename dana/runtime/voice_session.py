@@ -1079,6 +1079,19 @@ class VoiceSession:
         logger.info("ROOM_AUDIO_OUTPUT_ENABLED")
         logger.info("ROOM_AUDIO_INPUT_ENABLED")
 
+        # Construct and start DirectResponseController immediately after session.start()
+        if is_direct_enabled:
+            from dana.runtime.direct_response_controller import DirectResponseController
+            controller = DirectResponseController(
+                session=session,
+                agent=agent,
+                adapter=agent.adapter,
+                latency_recorder=latency_recorder,
+                room=self.ctx.room,
+                config=self.shared.config,
+            )
+            await controller.start()
+
         # Forced Diagnostic Greeting Mode
         if os.getenv("DANA_FORCE_DIAGNOSTIC_GREETING", "false").strip().lower() in ("true", "1", "yes"):
             logger.info("DIAG_SESSION_START_SUCCEEDED")
@@ -1145,17 +1158,6 @@ class VoiceSession:
         else:
             logger.info(f"Opening mode: {self.shared.config.opening_mode} (opening line empty) — agent is silent")
 
-        # Construct and start DirectResponseController after session.start()
-        if is_direct_enabled:
-            controller = DirectResponseController(
-                session=session,
-                agent=agent,
-                adapter=agent.adapter,
-                latency_recorder=latency_recorder,
-                room=self.ctx.room,
-                config=self.shared.config,
-            )
-            await controller.start()
 
         try:
             # Loop until room disconnected

@@ -571,19 +571,32 @@ class DirectResponseController:
         )
         new_ctx.add_message(role="system", content=combined_prompt)
 
-        # Copy recent conversation history from session.history (mirror)
+        # Copy recent conversation history from repository
         history_msgs = []
-        if hasattr(self._session, "history") and self._session.history:
-            raw_msgs = getattr(self._session.history, "messages", [])
-            if callable(raw_msgs):
-                raw_msgs = raw_msgs()
-            history_msgs = list(raw_msgs)
-
-        for msg in history_msgs:
-            if msg.role in ("user", "assistant"):
-                msg_text = _get_msg_text(msg)
-                if msg_text:
-                    new_ctx.add_message(role=msg.role, content=msg_text)
+        try:
+            turns = await self._adapter.repository.query_call_turns({"call_id": self._adapter.call_id})
+            turns = sorted(turns, key=lambda t: t.get("turn_number", 0))
+            for turn in turns:
+                speaker = turn.get("speaker", "")
+                text = (turn.get("text") or "").strip()
+                if not text:
+                    continue
+                if speaker == "user":
+                    new_ctx.add_message(role="user", content=text)
+                elif speaker in ("agent", "assistant"):
+                    new_ctx.add_message(role="assistant", content=text)
+        except Exception as exc:
+            self._log.error("Failed to query call turns from repository: %s", exc)
+            # Fallback to session.history if repository query fails
+            if hasattr(self._session, "history") and self._session.history:
+                raw_msgs = getattr(self._session.history, "messages", [])
+                if callable(raw_msgs):
+                    raw_msgs = raw_msgs()
+                for msg in raw_msgs:
+                    if msg.role in ("user", "assistant"):
+                        msg_text = _get_msg_text(msg)
+                        if msg_text:
+                            new_ctx.add_message(role=msg.role, content=msg_text)
 
         # Estimate prompt tokens
         try:
@@ -610,9 +623,13 @@ class DirectResponseController:
             )
 
             response_text = ""
+            first_token_logged = False
             async for chunk in stream:
                 content = chunk.delta.content if chunk.delta else ""
                 if content:
+                    if not first_token_logged:
+                        self._log.info("DIRECT_LLM_FIRST_TOKEN")
+                        first_token_logged = True
                     response_text += content
 
             # Estimate completion tokens

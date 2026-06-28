@@ -387,3 +387,123 @@ class TestControllerLifecycle:
         await controller.stop()
         # Calling stop again should not error
         await controller.stop()
+
+
+@pytest.mark.asyncio
+async def test_controller_llm_parameters_and_system_prompt():
+    """Verify that process_user_turn calls chat_fn, passing the combined system prompt, max_tokens, and config parameters."""
+    config = FakeConfig(
+        temperature=0.35,
+        top_p=0.88,
+        direct_response_max_tokens_default=70,
+        direct_response_max_tokens_objection=90,
+        direct_response_max_tokens_stop=40,
+    )
+    session = FakeSession()
+    agent = FakeAgent()
+
+    # Mock LLM stream response
+    from unittest.mock import AsyncMock
+    mock_chunk = MagicMock()
+    mock_chunk.delta = MagicMock()
+    mock_chunk.delta.content = "Sure, let me help you."
+
+    def fake_chat(*args, **kwargs):
+        # Capture parameters passed to agent.llm.chat
+        fake_chat.captured_kwargs = kwargs
+        fake_chat.captured_chat_ctx = kwargs.get("chat_ctx")
+
+        # Return an async generator yielding the mock chunk
+        async def gen():
+            yield mock_chunk
+        return gen()
+
+    agent.llm.chat = fake_chat
+
+    class TestChatContext:
+        def __init__(self):
+            self.messages = []
+
+        def add_message(self, role: str, content: str):
+            msg = MagicMock()
+            msg.role = role
+            msg.content = content
+            msg.text_content = content
+            self.messages.append(msg)
+
+    # We want FakeAdapter to actually call the chat_fn passed to it!
+    class CallingFakeAdapter:
+        def __init__(self):
+            self.state_machine = FakeStateMachine()
+            self.call_id = "test-call-id"
+            self.prompt_loader = MagicMock()
+            self.prompt_loader.build_system_prompt.return_value = "System: You are Dana."
+            self.runtime = MagicMock()
+            self.runtime.events = []
+
+            # Setup repository mock so query_call_turns returns a fake list of turns
+            self.repository = MagicMock()
+            self.repository.query_call_turns = AsyncMock(return_value=[
+                {"speaker": "user", "text": "Hello", "turn_number": 1},
+                {"speaker": "agent", "text": "Hi there!", "turn_number": 2},
+            ])
+
+        async def process_user_turn(self, user_text, chat_fn, interrupted=False):
+            # Actually call the chat_fn with a dummy instructions text
+            response = await chat_fn("Answer the user politely.")
+            return FakeRuntimeResult(agent_response=response)
+
+    adapter = CallingFakeAdapter()
+    latency = FakeLatencyRecorder()
+    room = FakeRoom()
+
+    with patch("livekit.agents.llm.ChatContext", TestChatContext):
+        controller = DirectResponseController(
+            session=session, agent=agent, adapter=adapter,
+            latency_recorder=latency, room=room, config=config,
+        )
+
+        # Start controller
+        await controller.start()
+
+        # Test 1: Normal progression (max_tokens = 70)
+        fake_chat.captured_kwargs = None
+        fake_chat.captured_chat_ctx = None
+        await controller._process_turn("hello normal turn")
+
+        assert fake_chat.captured_kwargs is not None
+        assert fake_chat.captured_kwargs["temperature"] == 0.35
+        assert fake_chat.captured_kwargs["top_p"] == 0.88
+        assert fake_chat.captured_kwargs["max_tokens"] == 70
+
+        # Check that system prompt contains instruction_suffix
+        system_msg = next(m for m in fake_chat.captured_chat_ctx.messages if m.role == "system")
+        assert "System: You are Dana." in system_msg.content
+        assert "Respond in one short sentence. Ask one clear question." in system_msg.content
+
+        # Check that history turns from repository are copied in order
+        user_msgs = [m for m in fake_chat.captured_chat_ctx.messages if m.role == "user"]
+        assistant_msgs = [m for m in fake_chat.captured_chat_ctx.messages if m.role == "assistant"]
+        assert len(user_msgs) == 1
+        assert user_msgs[0].content == "Hello"
+        assert len(assistant_msgs) == 1
+        assert assistant_msgs[0].content == "Hi there!"
+
+        # Test 2: Confusion / objection (max_tokens = 90)
+        fake_chat.captured_kwargs = None
+        fake_chat.captured_chat_ctx = None
+        await controller._process_turn("who is this")
+        assert fake_chat.captured_kwargs["max_tokens"] == 90
+        system_msg = next(m for m in fake_chat.captured_chat_ctx.messages if m.role == "system")
+        assert "Respond in one or two short sentences. Answer the question directly. Do NOT restart the full pitch." in system_msg.content
+
+        # Test 3: Stop / wrong number (max_tokens = 40)
+        fake_chat.captured_kwargs = None
+        fake_chat.captured_chat_ctx = None
+        await controller._process_turn("do not call me again")
+        assert fake_chat.captured_kwargs["max_tokens"] == 40
+        system_msg = next(m for m in fake_chat.captured_chat_ctx.messages if m.role == "system")
+        assert "Respond in ONE polite sentence only. Do NOT ask any question. Acknowledge the request and confirm removal." in system_msg.content
+
+        await controller.stop()
+
