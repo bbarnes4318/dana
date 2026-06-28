@@ -81,23 +81,36 @@ class LiveCallTester:
                 error="LIVE_MODE_REQUIRED"
             )
 
+        # Resolve campaign ID if not explicitly provided
+        campaign_id = config.campaign_id
+        if not campaign_id:
+            campaigns = await self.repository.store.query("outbound_campaigns", {})
+            if campaigns:
+                active_camps = [c for c in campaigns if c.get("status") == "running"]
+                if active_camps:
+                    campaign_id = active_camps[0]["id"]
+                else:
+                    campaign_id = campaigns[0]["id"]
+            else:
+                campaign_id = "manual_test_campaign"
+
         # 3. Check DNC lists if campaign or lead exist
-        if config.campaign_id:
+        if campaign_id:
             # Check DNC registry
             from compliance.dnc_registry import DatabaseDNCRegistry
             dnc_registry = DatabaseDNCRegistry(self.repository)
-            on_dnc = await dnc_registry.contains(config.phone_number, campaign_id=config.campaign_id)
+            on_dnc = await dnc_registry.contains(config.phone_number, campaign_id=campaign_id)
             if on_dnc:
                 return LiveCallTestResult(
                     success=False,
-                    message=f"Phone number {config.phone_number} is on DNC list for campaign {config.campaign_id}.",
+                    message=f"Phone number {config.phone_number} is on DNC list for campaign {campaign_id}.",
                     error="BLOCKED_BY_DNC"
                 )
 
         # 4. Check readiness
         readiness = await self.checker.run(
             provider_config_id=config.provider_config_id,
-            campaign_id=config.campaign_id
+            campaign_id=campaign_id
         )
         if not readiness.ready:
             return LiveCallTestResult(
@@ -123,13 +136,13 @@ class LiveCallTester:
             "operator": config.operator,
             "initiated_at": now.isoformat()
         }
-        if config.campaign_id:
-            meta_dict["campaign_id"] = config.campaign_id
+        if campaign_id:
+            meta_dict["campaign_id"] = campaign_id
 
         # 6. Save CallAttempt before dialing
         attempt = {
             "id": attempt_id,
-            "campaign_id": config.campaign_id or "manual_test_campaign",
+            "campaign_id": campaign_id,
             "lead_id": "manual-test",
             "provider_config_id": config.provider_config_id,
             "status": "dialing",
