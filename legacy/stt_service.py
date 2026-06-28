@@ -405,7 +405,17 @@ class LocalSTTStream(stt.SpeechStream):
                         self._rolling_buffer[:keep_samples - write_len] = self._rolling_buffer[shift : self._write_cursor]
                         self._write_cursor = keep_samples - write_len
             
-            np.divide(samples[:write_len], 32768.0, out=self._rolling_buffer[self._write_cursor : self._write_cursor + write_len])
+            gain = float(os.getenv("DANA_INPUT_GAIN", "1.0"))
+            if gain != 1.0:
+                np.divide(samples[:write_len], 32768.0 / gain, out=self._rolling_buffer[self._write_cursor : self._write_cursor + write_len])
+                np.clip(
+                    self._rolling_buffer[self._write_cursor : self._write_cursor + write_len],
+                    -1.0,
+                    1.0,
+                    out=self._rolling_buffer[self._write_cursor : self._write_cursor + write_len]
+                )
+            else:
+                np.divide(samples[:write_len], 32768.0, out=self._rolling_buffer[self._write_cursor : self._write_cursor + write_len])
             self._write_cursor += write_len
             
             if self._is_speaking:
