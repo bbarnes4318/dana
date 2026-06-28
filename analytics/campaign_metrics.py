@@ -21,7 +21,7 @@ async def get_campaign_analytics(
     # Query calls, costs, and caller ID records
     calls = await repo.store.query("calls", {})
     costs = await repo.store.query("call_costs", {})
-    caller_ids = await repo.store.query("caller_id_numbers", {})
+    caller_ids = await repo.store.query("dids", {})
     
     cid_map = {cid.get("phone_number"): cid for cid in caller_ids if cid.get("phone_number")}
     

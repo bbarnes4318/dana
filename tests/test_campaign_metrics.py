@@ -19,7 +19,7 @@ def repo(tmp_path):
 async def test_get_campaign_analytics(repo: Repository):
     # Setup mock caller IDs
     # Save directly to store to avoid validation / connection rules in save_caller_id
-    await repo.store.save("caller_id_numbers", {
+    await repo.store.save("dids", {
         "id": "cid-1",
         "phone_number": "+12345",
         "provider": "telnyx",
@@ -27,7 +27,7 @@ async def test_get_campaign_analytics(repo: Repository):
         "status": "active",
         "source": "manual"
     })
-    await repo.store.save("caller_id_numbers", {
+    await repo.store.save("dids", {
         "id": "cid-2",
         "phone_number": "+54321",
         "provider": "telnyx",
