@@ -5,6 +5,9 @@ from __future__ import annotations
 
 import argparse
 import sys
+from dotenv import load_dotenv
+load_dotenv()
+
 from ops.web_console import TrainingWebConsoleServer, TrainingWebConsoleConfig
 
 
