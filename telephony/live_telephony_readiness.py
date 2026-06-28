@@ -221,7 +221,12 @@ class LiveTelephonyReadinessChecker:
 
         return res
 
-    async def run(self, provider_config_id: str | None = None, campaign_id: str | None = None) -> LiveTelephonyReadinessResult:
+    async def run(
+        self,
+        provider_config_id: str | None = None,
+        campaign_id: str | None = None,
+        is_test_call: bool = False
+    ) -> LiveTelephonyReadinessResult:
         """Run all readiness checks and compile the final report."""
         failures = []
         warnings = []
@@ -266,11 +271,15 @@ class LiveTelephonyReadinessChecker:
         if campaign_id:
             camp_status = await self.check_campaign(campaign_id)
             campaign_status = camp_status["ok"]
-            failures.extend(camp_status["failures"])
-            if camp_status["status"] == "not_found":
-                next_steps.append(f"Create a valid campaign with ID '{campaign_id}'")
-            elif camp_status["status"] in ("draft", "ready", "paused", "stopped"):
-                next_steps.append(f"Activate the campaign to running state via UI/CLI")
+            if is_test_call:
+                if not camp_status["ok"]:
+                    warnings.extend(camp_status["failures"])
+            else:
+                failures.extend(camp_status["failures"])
+                if camp_status["status"] == "not_found":
+                    next_steps.append(f"Create a valid campaign with ID '{campaign_id}'")
+                elif camp_status["status"] in ("draft", "ready", "paused", "stopped"):
+                    next_steps.append(f"Activate the campaign to running state via UI/CLI")
 
         # 6. Check Agent Worker
         worker_enabled = env["worker_enabled"]

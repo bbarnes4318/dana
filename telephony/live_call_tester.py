@@ -111,7 +111,8 @@ class LiveCallTester:
         # 4. Check readiness
         readiness = await self.checker.run(
             provider_config_id=config.provider_config_id,
-            campaign_id=campaign_id
+            campaign_id=campaign_id,
+            is_test_call=True
         )
         if not readiness.ready:
             return LiveCallTestResult(
