@@ -297,10 +297,15 @@ class LocalSTTStream(stt.SpeechStream):
                     continue
                     
                 # Run transcription in executor
+                seg_audio = self._inference_buffer[:current_cursor]
+                logger.info(f"STT TRANSCRIPTION DEBUG: current_cursor={current_cursor} "
+                            f"min={seg_audio.min():.6f} max={seg_audio.max():.6f} "
+                            f"rms={np.sqrt(np.mean(seg_audio ** 2)):.6f}")
+                
                 loop = asyncio.get_event_loop()
                 from speech.local_stt_load import TrackLocalSTTTask
                 with TrackLocalSTTTask():
-                    results = await loop.run_in_executor(None, self._run_whisper, self._inference_buffer)
+                    results = await loop.run_in_executor(None, self._run_whisper, seg_audio)
                 
                 full_text = " ".join(seg["text"].strip() for seg in results).strip()
                 
