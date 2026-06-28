@@ -444,11 +444,12 @@ class ElderlySileroVADStream(silero.VADStream):
                 frames_to_process.append(input_frame)
                 
             for frame in frames_to_process:
-                data_len = len(frame.data)
+                frame_bytes = bytes(frame.data)
+                data_len = len(frame_bytes)
                 if self._raw_input_len + data_len > len(self._raw_input_buffer):
                     new_size = len(self._raw_input_buffer) * 2 + data_len
                     self._raw_input_buffer.extend(bytearray(new_size - len(self._raw_input_buffer)))
-                self._raw_input_buffer[self._raw_input_len : self._raw_input_len + data_len] = frame.data
+                self._raw_input_buffer[self._raw_input_len : self._raw_input_len + data_len] = frame_bytes
                 self._raw_input_len += data_len
                 
             # 2. Chunk ingested raw PCM bytes into precise 30ms chunks (960 bytes / 480 samples)
