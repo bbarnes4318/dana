@@ -252,7 +252,7 @@ class LiveCallTester:
             session_id = str(uuid.uuid4())
             await self.repository.save_live_call_session(
                 id=session_id,
-                campaign_id=config.campaign_id or "manual_test_campaign",
+                campaign_id=campaign_id,
                 lead_id="manual-test",
                 attempt_id=attempt_id,
                 call_id=attempt_id, # Link call_id to attempt_id
@@ -266,7 +266,7 @@ class LiveCallTester:
 
             # Log campaign control event for test call
             await self.repository.save_campaign_control_event(
-                campaign_id=config.campaign_id or "manual_test_campaign",
+                campaign_id=campaign_id,
                 event_type="test_call",
                 operator=config.operator,
                 reason=f"Manual test call placed to redacted number {phone_redacted}",
