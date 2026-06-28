@@ -395,10 +395,15 @@ class LocalSTTStream(stt.SpeechStream):
                 # Keep only the last 300ms (4800 samples) of audio history as prefix padding
                 keep_samples = 4800
                 if self._write_cursor + write_len > keep_samples:
-                    # Shift buffer to make room
-                    shift = (self._write_cursor + write_len) - keep_samples
-                    self._rolling_buffer[:keep_samples - write_len] = self._rolling_buffer[shift : self._write_cursor]
-                    self._write_cursor = keep_samples - write_len
+                    if write_len >= keep_samples:
+                        self._write_cursor = 0
+                        samples = samples[-keep_samples:]
+                        write_len = keep_samples
+                    else:
+                        # Shift buffer to make room
+                        shift = (self._write_cursor + write_len) - keep_samples
+                        self._rolling_buffer[:keep_samples - write_len] = self._rolling_buffer[shift : self._write_cursor]
+                        self._write_cursor = keep_samples - write_len
             
             np.divide(samples[:write_len], 32768.0, out=self._rolling_buffer[self._write_cursor : self._write_cursor + write_len])
             self._write_cursor += write_len
