@@ -697,6 +697,7 @@ class VoiceSession:
 
     async def run(self, participant: rtc.RemoteParticipant) -> None:
         """Runs the calling session loop, hooks up events, tracks AMD, and scores outcomes."""
+        consumer_task = None
         # Resolve call identity and metadata from room metadata and participant metadata
         call_id = None
         lead_id = None
@@ -785,9 +786,10 @@ class VoiceSession:
         asyncio.create_task(track_watchdog())
 
         # Initialize the AgentSession
+        is_direct_enabled = os.getenv("DANA_DIRECT_RESPONSE_ON_FINAL_TRANSCRIPT", "true").strip().lower() in ("true", "1", "yes")
         session = AgentSession(
             stt=self.shared.stt,
-            llm=self.shared.llm,
+            llm=None if is_direct_enabled else self.shared.llm,
             tts=self.shared.tts,
             vad=self.shared.vad,
             turn_handling=turn_handling,
@@ -932,16 +934,46 @@ class VoiceSession:
                         agent.fallback_disconnect_task = None
                     asyncio.create_task(self.ctx.room.disconnect())
 
-        self._direct_response_in_progress = False
+        self._direct_response_queue = asyncio.Queue()
+
+        async def direct_response_consumer():
+            logger.info("Direct response consumer task started")
+            try:
+                while True:
+                    transcript_text = await self._direct_response_queue.get()
+                    try:
+                        await respond_to_final_transcript(transcript_text)
+                    except Exception as ex:
+                        logger.error(f"Error in direct_response_consumer: {ex}", exc_info=True)
+                    finally:
+                        self._direct_response_queue.task_done()
+            except asyncio.CancelledError:
+                logger.info("Direct response consumer task cancelled")
+
+        if is_direct_enabled:
+            consumer_task = asyncio.create_task(direct_response_consumer())
 
         async def respond_to_final_transcript(transcript_text: str):
-            if getattr(self, "_direct_response_in_progress", False):
-                logger.info("Direct response in progress, skipping duplicate final transcript event")
-                return
-            self._direct_response_in_progress = True
-            
             logger.info("DIRECT_RESPONSE_STARTED")
             try:
+                # Add user transcript to session.history before calling the LLM
+                if hasattr(session, "history") and session.history:
+                    history_msgs = getattr(session.history, "messages", [])
+                    if callable(history_msgs):
+                        history_msgs = history_msgs()
+                    last_msg = history_msgs[-1] if history_msgs else None
+                    last_msg_text = ""
+                    if last_msg:
+                        if hasattr(last_msg, "text_content") and isinstance(last_msg.text_content, str):
+                            last_msg_text = last_msg.text_content
+                        elif hasattr(last_msg, "content") and isinstance(last_msg.content, str):
+                            last_msg_text = last_msg.content
+                    if not last_msg or last_msg.role != "user" or transcript_text != last_msg_text:
+                        session.history.add_message(
+                            role="user",
+                            content=transcript_text
+                        )
+
                 # Implement chat_fn using the active LLM client on agent.llm
                 async def chat_fn(instructions: str) -> str:
                     new_ctx = llm.ChatContext()
@@ -949,7 +981,9 @@ class VoiceSession:
                     # Prepend static system prompt prefix
                     loader = agent.prompt_loader or (agent.adapter and agent.adapter.prompt_loader)
                     static_prompt = loader.build_system_prompt() if loader else ""
-                    combined_prompt = f"{static_prompt}\n\n{instructions}"
+                    # Force short, one-sentence response without monologues
+                    short_constraint = "\n\nIMPORTANT: You MUST respond in EXACTLY one short sentence. Do NOT use filler monologues, introductory phrases, or say anything else."
+                    combined_prompt = f"{static_prompt}\n\n{instructions}{short_constraint}"
                     
                     new_ctx.add_message(
                         role="system",
@@ -984,27 +1018,18 @@ class VoiceSession:
                                 role=msg.role,
                                 content=msg_content
                             )
-                    
-                    # If last message is not user with transcript_text, append it
-                    last_msg = history_msgs[-1] if history_msgs else None
-                    last_msg_text = get_msg_text(last_msg)
-                    if not last_msg or last_msg.role != "user" or transcript_text not in last_msg_text:
-                        new_ctx.add_message(
-                            role="user",
-                            content=transcript_text
-                        )
                         
                     # Estimate prompt tokens
                     from metrics.model_cost_metrics import estimate_llm_tokens
                     prompt_str = instructions + "".join(get_msg_text(m) for m in new_ctx.messages if get_msg_text(m))
                     agent.prompt_tokens += estimate_llm_tokens(prompt_str)
 
-                    # Run LLM chat directly
+                    # Run LLM chat directly - limiting max_tokens to 45
                     stream = agent.llm.chat(
                         chat_ctx=new_ctx,
                         temperature=0.2,
                         top_p=agent._config.top_p if hasattr(agent, "_config") else 0.7,
-                        max_tokens=agent._config.max_tokens if hasattr(agent, "_config") else 1024,
+                        max_tokens=45,
                         frequency_penalty=0.15,
                     )
                     
@@ -1034,7 +1059,7 @@ class VoiceSession:
                     
                 logger.info("DIRECT_RESPONSE_SAY_COMPLETED")
                 
-                # Append assistant's response to session.history so history remains in sync
+                # Add assistant response to session.history after playout
                 if hasattr(session, "history") and session.history:
                     session.history.add_message(
                         role="assistant",
@@ -1079,8 +1104,6 @@ class VoiceSession:
                         agent.fallback_disconnect_task = asyncio.create_task(disconnect_after_delay())
             except Exception as ex:
                 logger.error(f"Error in direct response loop: {ex}", exc_info=True)
-            finally:
-                self._direct_response_in_progress = False
 
         @session.on("user_input_transcribed")
         def on_user_input_transcribed(event):
@@ -1120,22 +1143,23 @@ class VoiceSession:
                 if getattr(self, "_transcript_watchdog_task", None):
                     self._transcript_watchdog_task.cancel()
                     
-                # Watchdog 3: If final transcript arrives but llm_node is not entered within 3 seconds
-                self._llm_node_entered_for_turn = False
-                
-                async def llm_node_watchdog():
-                    await asyncio.sleep(3.0)
-                    if not getattr(self, "_llm_node_entered_for_turn", False):
-                        logger.error("FATAL_LLM_NODE_NOT_ENTERED_AFTER_TRANSCRIPT")
-                        
-                if getattr(self, "_llm_watchdog_task", None):
-                    self._llm_watchdog_task.cancel()
-                self._llm_watchdog_task = asyncio.create_task(llm_node_watchdog())
+                # Watchdog 3: Stop starting watchdog when direct response mode is active
+                is_direct_enabled = os.getenv("DANA_DIRECT_RESPONSE_ON_FINAL_TRANSCRIPT", "true").strip().lower() in ("true", "1", "yes")
+                if not is_direct_enabled:
+                    self._llm_node_entered_for_turn = False
+                    
+                    async def llm_node_watchdog():
+                        await asyncio.sleep(3.0)
+                        if not getattr(self, "_llm_node_entered_for_turn", False):
+                            logger.error("FATAL_LLM_NODE_NOT_ENTERED_AFTER_TRANSCRIPT")
+                            
+                    if getattr(self, "_llm_watchdog_task", None):
+                        self._llm_watchdog_task.cancel()
+                    self._llm_watchdog_task = asyncio.create_task(llm_node_watchdog())
                 
                 # Direct response path
-                is_direct_enabled = os.getenv("DANA_DIRECT_RESPONSE_ON_FINAL_TRANSCRIPT", "true").strip().lower() in ("true", "1", "yes")
                 if is_direct_enabled and partial_text.strip():
-                    asyncio.create_task(respond_to_final_transcript(partial_text))
+                    self._direct_response_queue.put_nowait(partial_text)
             else:
                 enable_semantic = os.getenv("DANA_ENABLE_SEMANTIC_TURN_DETECTION", "false").strip().lower() in ("true", "1", "yes")
                 if enable_semantic and self.shared.config.endpoint_mode == "adaptive":
@@ -1300,6 +1324,12 @@ class VoiceSession:
             while self.ctx.room.isconnected():
                 await asyncio.sleep(1.0)
         finally:
+            if consumer_task:
+                consumer_task.cancel()
+                try:
+                    await consumer_task
+                except asyncio.CancelledError:
+                    pass
             latency_recorder.log_summary()
             from speech.context_registry import unregister_call
             unregister_call(call_id)
