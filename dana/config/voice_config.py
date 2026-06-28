@@ -117,9 +117,34 @@ class VoiceConfig:
     llm_routing_mode: str = field(default_factory=lambda: env_str("DANA_LLM_ROUTING_MODE", "local"))
     interruption_profile: str = field(default_factory=lambda: env_str("DANA_INTERRUPTION_PROFILE", "CONSERVATIVE_DEFAULT"))
 
+    # ---- Direct Response Controller ----
+    direct_response_enabled: bool = field(default_factory=lambda: env_bool("DANA_DIRECT_RESPONSE_ON_FINAL_TRANSCRIPT", True))
+    direct_response_queue_maxsize: int = field(default_factory=lambda: env_int("DANA_DIRECT_RESPONSE_QUEUE_MAXSIZE", 3))
+    direct_response_dedupe_window_ms: int = field(default_factory=lambda: env_int("DANA_DIRECT_RESPONSE_DEDUPE_WINDOW_MS", 1200))
+    direct_response_min_chars: int = field(default_factory=lambda: env_int("DANA_DIRECT_RESPONSE_MIN_CHARS", 2))
+    direct_response_max_tokens_default: int = field(default_factory=lambda: env_int("DANA_DIRECT_RESPONSE_MAX_TOKENS", 70))
+    direct_response_max_tokens_objection: int = field(default_factory=lambda: env_int("DANA_DIRECT_RESPONSE_MAX_TOKENS_OBJECTION", 90))
+    direct_response_max_tokens_stop: int = field(default_factory=lambda: env_int("DANA_DIRECT_RESPONSE_MAX_TOKENS_STOP", 40))
+    direct_response_hard_max_tokens: int = field(default_factory=lambda: env_int("DANA_DIRECT_RESPONSE_HARD_MAX_TOKENS", 100))
+    direct_response_echo_similarity_threshold: float = field(default_factory=lambda: env_float("DANA_DIRECT_RESPONSE_ECHO_SIMILARITY_THRESHOLD", 0.78))
+    direct_response_max_turn_ms: int = field(default_factory=lambda: env_int("DANA_DIRECT_RESPONSE_MAX_TURN_MS", 3500))
+
     def __post_init__(self) -> None:
         self.provider_mode = self.provider_mode.strip().lower()
         self.voice_mode = self.voice_mode.strip().lower()
+
+        if self.voice_mode == "premium_live":
+            self.tts_routing_mode = env_str("DANA_TTS_ROUTING_MODE", "cloud")
+            self.allow_cloud_tts_fallback = env_bool("DANA_ALLOW_CLOUD_TTS_FALLBACK", True)
+            self.tts_provider = env_str("DANA_TTS_PROVIDER", "elevenlabs")
+            self.enable_streaming_response = env_bool("DANA_ENABLE_STREAMING_RESPONSE", True)
+            self.stt_routing_mode = env_str("DANA_STT_ROUTING_MODE", "cloud")
+            self.stt_provider = env_str("DANA_STT_PROVIDER", "deepgram")
+
+        # Clamp direct response config values
+        self.direct_response_queue_maxsize = max(1, min(10, self.direct_response_queue_maxsize))
+        self.direct_response_dedupe_window_ms = max(250, min(5000, self.direct_response_dedupe_window_ms))
+        self.direct_response_hard_max_tokens = max(40, min(140, self.direct_response_hard_max_tokens))
         
         # Keep old aliases only as warnings, not behavior-changing logic
         if os.getenv("DANA_VOICE_MODE") is not None:

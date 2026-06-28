@@ -34,6 +34,7 @@ for k in _telephony_keys:
     os.environ.pop(k, None)
 os.environ["DANA_WRITE_BEHIND_ENABLED"] = "false"
 os.environ["DANA_ALLOW_MOCK_TTS"] = "true"
+os.environ["DANA_RUNTIME_ENV"] = "test"
 
 
 import subprocess

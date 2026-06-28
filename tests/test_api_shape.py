@@ -7,7 +7,8 @@ import pytest
 
 from livekit import api
 from livekit.agents import Agent, function_tool, RunContext
-from main import DanaAgent, SharedComponents
+from main import SharedComponents
+from dana.runtime.voice_session import DanaAgent
 from latency_metrics import LatencyRecorder
 
 

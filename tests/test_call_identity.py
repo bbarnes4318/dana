@@ -120,6 +120,7 @@ async def test_call_identity_correlation_between_dialer_and_entrypoint(tmp_path)
     shared.compliance_filter = MagicMock()
     shared.output_validator = MagicMock()
     shared.pii_redactor = MagicMock()
+    shared.reinitialize_for_job = AsyncMock()
     
     ctx.proc.userdata["shared_components"] = shared
     
@@ -129,15 +130,16 @@ async def test_call_identity_correlation_between_dialer_and_entrypoint(tmp_path)
     
     active_agents = []
     
-    class CapturedDanaAgent(main.DanaAgent):
+    from dana.runtime.voice_session import DanaAgent as RealDanaAgent
+    class CapturedDanaAgent(RealDanaAgent):
         def __init__(self, *args, **kwargs):
             super().__init__(*args, **kwargs)
             active_agents.append(self)
             
-    # Patch AgentSession and DanaAgent in main
-    with patch("main.AgentSession", return_value=mock_session), \
-         patch("main.DanaAgent", new=CapturedDanaAgent), \
-         patch("main.LatencyRecorder") as mock_latency_recorder_cls:
+    # Patch AgentSession, DanaAgent, and LatencyRecorder in voice_session
+    with patch("dana.runtime.voice_session.AgentSession", return_value=mock_session), \
+         patch("dana.runtime.voice_session.DanaAgent", new=CapturedDanaAgent), \
+         patch("dana.runtime.call_context.LatencyRecorder") as mock_latency_recorder_cls:
          
         # Run entrypoint until AgentSession starts and raises stop_agent_execution
         with pytest.raises(RuntimeError, match="stop_agent_execution"):

@@ -9,7 +9,8 @@ from pathlib import Path
 root_dir = Path(__file__).resolve().parent.parent
 
 from voice_config import VoiceConfig
-from main import SharedComponents, DanaAgent
+from main import SharedComponents
+from dana.runtime.voice_session import DanaAgent
 from latency_metrics import LatencyRecorder
 
 logger = logging.getLogger("test_verify_voice_smoke")
@@ -47,7 +48,7 @@ async def test_simulated_voice_smoke(monkeypatch):
     from unittest.mock import patch, MagicMock
     mock_vad_class = MagicMock()
     mock_vad_class.load = MagicMock(return_value=MagicMock())
-    with patch("main.ElderlySileroVAD", mock_vad_class):
+    with patch("dana.providers.vad.silero.ElderlySileroVAD", mock_vad_class):
         await shared.initialize()
     logger.info("Shared components initialized successfully!")
     

@@ -9,7 +9,8 @@ from datetime import datetime, timezone
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from voice_config import VoiceConfig
-from main import SharedComponents, DanaAgent
+from main import SharedComponents
+from dana.runtime.voice_session import DanaAgent
 from latency_metrics import LatencyRecorder
 from core.livekit_runtime_adapter import LiveKitRuntimeAdapter
 from core.agent_runtime import AgentRuntime

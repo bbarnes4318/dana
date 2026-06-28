@@ -45,14 +45,15 @@ async def test_endpoint_tuner_semantic_integration_updates_delays():
     shared_mock.vad = MagicMock()
     shared_mock.repository = MagicMock()
     shared_mock.repository.get_lead_by_phone = AsyncMock(return_value=None)
+    shared_mock.reinitialize_for_job = AsyncMock()
     
     ctx.proc.userdata["shared_components"] = shared_mock
     
     # We mock AgentSession using our custom MockSession
     session_mock = MockSession()
     
-    # Patch AgentSession inside main
-    with patch("main.AgentSession", return_value=session_mock), \
+    # Patch AgentSession inside voice_session
+    with patch("dana.runtime.voice_session.AgentSession", return_value=session_mock), \
          patch.dict(os.environ, {"DANA_ENABLE_SEMANTIC_TURN_DETECTION": "true"}):
          
         session_mock.start.side_effect = RuntimeError("session_start_interrupted")

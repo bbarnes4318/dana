@@ -27,5 +27,5 @@ def test_local_cost_mode_default():
         config = VoiceConfig()
         assert config.voice_mode == "local_cost"
         # In local_cost mode, they default to local unless explicitly configured
-        assert config.tts_provider == "local"
-        assert config.tts_routing_mode == "local"
+        assert config.tts_provider == "local_kokoro"
+        assert config.tts_routing_mode == "hybrid"

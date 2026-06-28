@@ -59,6 +59,8 @@ async def test_sql_injection_table_guard():
     store = PostgresStore(dsn="postgresql://localhost/test")
     # Mock pool to avoid database connections
     store._pool = mock.AsyncMock()
+    import asyncio
+    store._pool_loop = asyncio.get_running_loop()
     store._migrations_checked = True
     
     with pytest.raises(ValueError, match="Table name 'invalid_table' is not allowed"):
@@ -78,6 +80,8 @@ async def test_sql_injection_column_guard():
     """PostgresStore rejects invalid column names on save to prevent injection."""
     store = PostgresStore(dsn="postgresql://localhost/test")
     store._pool = mock.AsyncMock()
+    import asyncio
+    store._pool_loop = asyncio.get_running_loop()
     store._migrations_checked = True
     
     with pytest.raises(ValueError, match="Unknown fields"):
@@ -88,6 +92,8 @@ async def test_sql_injection_query_guard():
     """PostgresStore rejects invalid query filters to prevent injection."""
     store = PostgresStore(dsn="postgresql://localhost/test")
     store._pool = mock.AsyncMock()
+    import asyncio
+    store._pool_loop = asyncio.get_running_loop()
     store._migrations_checked = True
     
     with pytest.raises(ValueError, match="Filtering by 'invalid_col' on 'call_turns' is not allowed"):
@@ -104,6 +110,8 @@ async def test_postgres_store_maps_existing_models_correctly():
     mock_ctx.__aenter__.return_value = mock_conn
     mock_pool.acquire.return_value = mock_ctx
     store._pool = mock_pool
+    import asyncio
+    store._pool_loop = asyncio.get_running_loop()
     store._migrations_checked = True
     
     repo = Repository(store=store)

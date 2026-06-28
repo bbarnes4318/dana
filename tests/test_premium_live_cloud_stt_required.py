@@ -10,6 +10,7 @@ async def test_readiness_cloud_stt_requires_key(monkeypatch):
     """Verify check_stt() fails if premium_live and DANA_STT_ROUTING_MODE=cloud but DEEPGRAM_API_KEY is missing/placeholder."""
     monkeypatch.setenv("DANA_VOICE_MODE", "premium_live")
     monkeypatch.setenv("DANA_STT_ROUTING_MODE", "cloud")
+    monkeypatch.setenv("DANA_RUNTIME_ENV", "development")
     
     # Test with empty DEEPGRAM_API_KEY
     monkeypatch.setenv("DEEPGRAM_API_KEY", "")
@@ -35,6 +36,7 @@ async def test_shared_components_cloud_stt_requires_key(monkeypatch):
     monkeypatch.setenv("DANA_VOICE_MODE", "premium_live")
     monkeypatch.delenv("DANA_STT_PROVIDER", raising=False)
     monkeypatch.setenv("DANA_STT_ROUTING_MODE", "cloud")
+    monkeypatch.setenv("DANA_RUNTIME_ENV", "development")
     monkeypatch.setenv("ELEVENLABS_API_KEY", "mock-key")
     monkeypatch.setenv("ELEVENLABS_VOICE_ID", "mock-voice")
     monkeypatch.setenv("DANA_ALLOW_MOCK_TTS", "false")

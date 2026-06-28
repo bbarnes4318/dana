@@ -25,8 +25,9 @@ def main():
         from livekit import api
         print("Import succeeded.")
         
-        print("Importing DanaAgent, SharedComponents from main...")
-        from main import DanaAgent, SharedComponents
+        print("Importing DanaAgent from voice_session, SharedComponents from main...")
+        from main import SharedComponents
+        from dana.runtime.voice_session import DanaAgent
         print("Import succeeded.")
         
         print("=====================================================================")

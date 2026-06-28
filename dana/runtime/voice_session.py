@@ -21,6 +21,7 @@ from livekit.agents import (
 from dana.config.voice_config import VoiceConfig
 from dana.runtime.call_context import CallContext
 from dana.runtime.turn_manager import TurnManager
+from dana.runtime.direct_response_controller import DirectResponseController
 
 logger = logging.getLogger(__name__)
 
@@ -848,6 +849,10 @@ class VoiceSession:
                     agent.fallback_disconnect_task.cancel()
                     agent.fallback_disconnect_task = None
                 agent.should_disconnect = False
+
+                # Notify DirectResponseController for barge-in tracking
+                if controller:
+                    controller.handle_user_state_changed(ev)
                     
             elif "listening" in state_str or "idle" in state_str:
                 if "speaking" in old_state_str:
@@ -934,231 +939,17 @@ class VoiceSession:
                         agent.fallback_disconnect_task = None
                     asyncio.create_task(self.ctx.room.disconnect())
 
-        self._direct_response_queue = asyncio.Queue()
+            # Notify DirectResponseController for echo suppression timing
+            if controller:
+                controller.handle_agent_state_changed(ev)
 
-        async def direct_response_consumer():
-            logger.info("Direct response consumer task started")
-            try:
-                while True:
-                    transcript_text = await self._direct_response_queue.get()
-                    try:
-                        await respond_to_final_transcript(transcript_text)
-                    except Exception as ex:
-                        logger.error(f"Error in direct_response_consumer: {ex}", exc_info=True)
-                    finally:
-                        self._direct_response_queue.task_done()
-            except asyncio.CancelledError:
-                logger.info("Direct response consumer task cancelled")
-
-        if is_direct_enabled:
-            consumer_task = asyncio.create_task(direct_response_consumer())
-
-        async def respond_to_final_transcript(transcript_text: str):
-            logger.info("DIRECT_RESPONSE_STARTED")
-            try:
-                # Add user transcript to session.history before calling the LLM
-                if hasattr(session, "history") and session.history:
-                    history_msgs = getattr(session.history, "messages", [])
-                    if callable(history_msgs):
-                        history_msgs = history_msgs()
-                    last_msg = history_msgs[-1] if history_msgs else None
-                    last_msg_text = ""
-                    if last_msg:
-                        if hasattr(last_msg, "text_content") and isinstance(last_msg.text_content, str):
-                            last_msg_text = last_msg.text_content
-                        elif hasattr(last_msg, "content") and isinstance(last_msg.content, str):
-                            last_msg_text = last_msg.content
-                    if not last_msg or last_msg.role != "user" or transcript_text != last_msg_text:
-                        session.history.add_message(
-                            role="user",
-                            content=transcript_text
-                        )
-
-                # Implement chat_fn using the active LLM client on agent.llm
-                async def chat_fn(instructions: str) -> str:
-                    new_ctx = llm.ChatContext()
-                    
-                    # Determine dynamic constraint based on current stage and classification
-                    stage = agent.adapter.state_machine.call_state.current_stage if agent.adapter else None
-                    
-                    is_objection = False
-                    if agent.adapter and hasattr(agent.adapter, "runtime") and agent.adapter.runtime:
-                        for ev in agent.adapter.runtime.events:
-                            if getattr(ev, "event_type", "") == "objection_detected":
-                                is_objection = True
-                                break
-                                
-                    is_confusion = False
-                    text_lower = transcript_text.lower().strip()
-                    confusion_keywords = ["what", "who is this", "repeat", "huh", "pardon", "dont understand", "don't understand", "explain"]
-                    if any(k in text_lower for k in confusion_keywords):
-                        is_confusion = True
-
-                    from core.call_state import CallStage
-                    
-                    if is_confusion:
-                        constraint = "IMPORTANT: You MUST respond in EXACTLY one or two short sentences. Keep it brief and clear."
-                    elif is_objection:
-                        constraint = "IMPORTANT: You MUST respond in a MAXIMUM of two short sentences. Address the objection directly and concisely."
-                    elif stage in (CallStage.OPENING, CallStage.INTEREST_CHECK):
-                        constraint = "IMPORTANT: You MUST respond in EXACTLY one short sentence. Keep it extremely brief."
-                    elif stage in (CallStage.DNC, CallStage.DISQUALIFIED):
-                        constraint = "IMPORTANT: You MUST respond in EXACTLY one sentence to politely end the conversation."
-                    elif stage == CallStage.TRANSFER_CONSENT:
-                        constraint = "IMPORTANT: You MUST respond in EXACTLY one sentence asking for or confirming consent to transfer."
-                    else:
-                        constraint = "IMPORTANT: Keep your response short, brief, and natural."
-
-                    # Prepend static system prompt prefix
-                    loader = agent.prompt_loader or (agent.adapter and agent.adapter.prompt_loader)
-                    static_prompt = loader.build_system_prompt() if loader else ""
-                    combined_prompt = f"{static_prompt}\n\n{instructions}\n\n{constraint}"
-                    
-                    new_ctx.add_message(
-                        role="system",
-                        content=combined_prompt
-                    )
-                    
-                    # Copy conversation history from session.history (user and assistant messages only)
-                    history_msgs = []
-                    if hasattr(session, "history") and session.history:
-                        history_msgs = getattr(session.history, "messages", [])
-                        if callable(history_msgs):
-                            history_msgs = history_msgs()
-                            
-                    def get_msg_text(m) -> str:
-                        if not m:
-                            return ""
-                        try:
-                            tc = getattr(m, "text_content", None)
-                            if isinstance(tc, str):
-                                return tc
-                            c = getattr(m, "content", None)
-                            if isinstance(c, str):
-                                return c
-                        except Exception:
-                            pass
-                        return ""
-
-                    for msg in history_msgs:
-                        if msg.role in ("user", "assistant"):
-                            msg_content = get_msg_text(msg)
-                            new_ctx.add_message(
-                                role=msg.role,
-                                content=msg_content
-                            )
-                        
-                    # Estimate prompt tokens
-                    from metrics.model_cost_metrics import estimate_llm_tokens
-                    prompt_str = instructions + "".join(get_msg_text(m) for m in new_ctx.messages if get_msg_text(m))
-                    agent.prompt_tokens += estimate_llm_tokens(prompt_str)
-
-                    # Dynamic max_tokens configuration from environment
-                    try:
-                        max_tokens_val = int(os.getenv("DANA_DIRECT_RESPONSE_MAX_TOKENS", "70").strip())
-                    except ValueError:
-                        max_tokens_val = 70
-                    max_tokens_val = min(max_tokens_val, 90)
-
-                    # Run LLM chat directly
-                    stream = agent.llm.chat(
-                        chat_ctx=new_ctx,
-                        temperature=0.2,
-                        top_p=agent._config.top_p if hasattr(agent, "_config") else 0.7,
-                        max_tokens=max_tokens_val,
-                        frequency_penalty=0.15,
-                    )
-                    
-                    response_text = ""
-                    async for chunk in stream:
-                        content = chunk.delta.content if chunk.delta else ""
-                        if content:
-                            response_text += content
-
-                    # Estimate completion tokens
-                    agent.completion_tokens += estimate_llm_tokens(response_text)
-                    return response_text
-
-                # Call process_user_turn
-                result = await agent.adapter.process_user_turn(transcript_text, chat_fn, interrupted=False)
-                agent.current_turn_response = result.agent_response or ""
-                logger.info(f"DIRECT_RESPONSE_TEXT_LENGTH: {len(agent.current_turn_response)}")
-                
-                # Update stage in registry
-                from speech.context_registry import update_call_stage
-                update_call_stage(agent.adapter.call_id, result.stage)
-
-                # Call session.say using the same proven playback path as diagnostic greeting
-                if agent.current_turn_response.strip():
-                    handle = session.say(agent.current_turn_response)
-                    await handle.wait_for_playout()
-                    
-                logger.info("DIRECT_RESPONSE_SAY_COMPLETED")
-                
-                # Add assistant response to session.history after playout
-                if hasattr(session, "history") and session.history:
-                    session.history.add_message(
-                        role="assistant",
-                        content=agent.current_turn_response
-                    )
-                
-                # Handle disconnect timing based on outcome
-                if result.should_end_call:
-                    is_warm_bridge = False
-                    for ev in agent.adapter.runtime.events:
-                        from core.runtime_events import ToolTriggeredEvent
-                        if isinstance(ev, ToolTriggeredEvent) and ev.tool_name in ("feTransfer", "transfer_to_agent") and ev.success:
-                            if "warm" in ev.result_message.lower() or os.getenv("DANA_TRANSFER_MODE", "").lower() == "warm_bridge":
-                                is_warm_bridge = True
-                                break
-                    if is_warm_bridge:
-                        logger.info("Warm bridge transfer succeeded. Dana will mute and leave later.")
-                        agent.should_disconnect = False
-                        agent.warm_bridge_active = True
-                        
-                        async def warm_bridge_leave():
-                            await asyncio.sleep(15.0)
-                            logger.info("warm_bridge_active_dana_suppressed: Dana leaving agent session only.")
-                            try:
-                                await session.aclose()
-                            except Exception as e:
-                                logger.error(f"Error closing agent session during warm bridge: {e}")
-                        asyncio.create_task(warm_bridge_leave())
-                    else:
-                        agent.should_disconnect = True
-                        if getattr(agent, "fallback_disconnect_task", None):
-                            agent.fallback_disconnect_task.cancel()
-                        
-                        async def disconnect_after_delay(delay: float = 8.0):
-                            try:
-                                await asyncio.sleep(delay)
-                                if self.ctx.room and self.ctx.room.isconnected():
-                                    logger.info("Fallback: Disconnecting room after delay...")
-                                    await self.ctx.room.disconnect()
-                            except asyncio.CancelledError:
-                                logger.info("Fallback disconnect task cancelled.")
-                        agent.fallback_disconnect_task = asyncio.create_task(disconnect_after_delay())
-            except Exception as ex:
-                logger.error(f"Error in direct response loop: {ex}", exc_info=True)
+        # DirectResponseController: constructed after session.start() below
+        controller = None
 
         @session.on("user_input_transcribed")
         def on_user_input_transcribed(event):
-            partial_text = ""
-            if hasattr(event, "transcript") and event.transcript:
-                if isinstance(event.transcript, str):
-                    partial_text = event.transcript
-                elif hasattr(event.transcript, "text") and event.transcript.text:
-                    partial_text = event.transcript.text
-            if not partial_text:
-                if hasattr(event, "text") and event.text:
-                    partial_text = event.text
-                elif hasattr(event, "alternatives") and event.alternatives:
-                    if isinstance(event.alternatives[0], str):
-                        partial_text = event.alternatives[0]
-                    elif hasattr(event.alternatives[0], "text") and event.alternatives[0].text:
-                        partial_text = event.alternatives[0].text
-                    elif hasattr(event.alternatives[0], "transcript") and event.alternatives[0].transcript:
-                        partial_text = event.alternatives[0].transcript
+            from dana.runtime.direct_response_controller import extract_transcript_text
+            partial_text = extract_transcript_text(event)
             
             if not event.is_final:
                 logger.info("USER_TRANSCRIPT_PARTIAL")
@@ -1168,20 +959,16 @@ class VoiceSession:
                 agent.user_transcript_received = True
 
             if event.is_final:
-                logger.info("USER_TRANSCRIPT_FINAL")
-                logger.info(f"USER_TRANSCRIPT_FINAL: {partial_text}")
                 agent.final_transcript_count = getattr(agent, "final_transcript_count", 0) + 1
                 logger.info("USER_TRANSCRIPT_RECEIVED")
-                logger.info(f"FINAL_TRANSCRIPT_TEXT_LENGTH: {len(partial_text)}")
                 latency_recorder.mark("transcript_final")
                 
                 # Cancel transcript watchdog
                 if getattr(self, "_transcript_watchdog_task", None):
                     self._transcript_watchdog_task.cancel()
                     
-                # Watchdog 3: Stop starting watchdog when direct response mode is active
-                is_direct_enabled = os.getenv("DANA_DIRECT_RESPONSE_ON_FINAL_TRANSCRIPT", "true").strip().lower() in ("true", "1", "yes")
-                if not is_direct_enabled:
+                # Watchdog 3: Only start LLM watchdog when direct response mode is NOT active
+                if not self.shared.config.direct_response_enabled:
                     self._llm_node_entered_for_turn = False
                     
                     async def llm_node_watchdog():
@@ -1193,9 +980,9 @@ class VoiceSession:
                         self._llm_watchdog_task.cancel()
                     self._llm_watchdog_task = asyncio.create_task(llm_node_watchdog())
                 
-                # Direct response path
-                if is_direct_enabled and partial_text.strip():
-                    self._direct_response_queue.put_nowait(partial_text)
+                # Direct response path: delegate to controller
+                if controller and self.shared.config.direct_response_enabled:
+                    controller.handle_transcription_event(event)
             else:
                 enable_semantic = os.getenv("DANA_ENABLE_SEMANTIC_TURN_DETECTION", "false").strip().lower() in ("true", "1", "yes")
                 if enable_semantic and self.shared.config.endpoint_mode == "adaptive":
@@ -1343,29 +1130,43 @@ class VoiceSession:
         # Speak greeting depending on opening_mode
         is_diag_greeting = os.getenv("DANA_FORCE_DIAGNOSTIC_GREETING", "false").strip().lower() in ("true", "1", "yes")
         if self.shared.config.opening_mode == "immediate" and self.shared.config.opening_line and not is_diag_greeting:
+            logger.info("PRODUCTION_GREETING_STARTED")
             latency_recorder.mark("greeting_started")
             latency_recorder.mark("greeting_tts_started")
             logger.info(f"Speaking opening line: {self.shared.config.opening_line}")
             await session.say(self.shared.config.opening_line)
             latency_recorder.mark("greeting_audio_published")
+            logger.info("PRODUCTION_GREETING_COMPLETED")
             from core.call_state import CallStage
             agent.adapter.state_machine.call_state.transition_to(CallStage.INTEREST_CHECK)
+            logger.info("PRODUCTION_GREETING_STAGE_TRANSITION_INTEREST_CHECK")
         elif self.shared.config.opening_mode == "wait_for_user":
             logger.info("Opening mode: wait_for_user — agent will not speak first")
         else:
             logger.info(f"Opening mode: {self.shared.config.opening_mode} (opening line empty) — agent is silent")
+
+        # Construct and start DirectResponseController after session.start()
+        if is_direct_enabled:
+            controller = DirectResponseController(
+                session=session,
+                agent=agent,
+                adapter=agent.adapter,
+                latency_recorder=latency_recorder,
+                room=self.ctx.room,
+                config=self.shared.config,
+            )
+            await controller.start()
 
         try:
             # Loop until room disconnected
             while self.ctx.room.isconnected():
                 await asyncio.sleep(1.0)
         finally:
-            if consumer_task:
-                consumer_task.cancel()
+            if controller:
                 try:
-                    await consumer_task
-                except asyncio.CancelledError:
-                    pass
+                    await controller.stop()
+                except Exception as ex:
+                    logger.error(f"Error stopping DirectResponseController: {ex}")
             latency_recorder.log_summary()
             from speech.context_registry import unregister_call
             unregister_call(call_id)

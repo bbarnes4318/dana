@@ -6,7 +6,7 @@ import pytest
 from datetime import datetime, timezone
 
 from storage.repository import Repository
-from main import suggest_lessons_from_call
+from dana.runtime.voice_session import suggest_lessons_from_call
 from training.approved_lessons import get_approved_lessons
 from qa.call_record import CallRecord, CallTurn
 from qa.scoring import QAScorecard

@@ -98,7 +98,7 @@ async def test_short_speech_duration_does_not_interrupt():
 @pytest.mark.asyncio
 async def test_amd_does_not_disconnect_after_real_user_transcript():
     """Verify that AMD worker does not disconnect if a real user transcript has been received or turns occurred."""
-    from main import run_amd_worker
+    from dana.runtime.voice_session import run_amd_worker
     
     mock_track = MagicMock()
     mock_room = MagicMock()
