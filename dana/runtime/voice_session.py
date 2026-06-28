@@ -1120,7 +1120,8 @@ class VoiceSession:
         )
 
         # Speak greeting depending on opening_mode
-        if self.shared.config.opening_mode == "immediate" and self.shared.config.opening_line:
+        is_diag_greeting = os.getenv("DANA_FORCE_DIAGNOSTIC_GREETING", "false").strip().lower() in ("true", "1", "yes")
+        if self.shared.config.opening_mode == "immediate" and self.shared.config.opening_line and not is_diag_greeting:
             latency_recorder.mark("greeting_started")
             latency_recorder.mark("greeting_tts_started")
             logger.info(f"Speaking opening line: {self.shared.config.opening_line}")
