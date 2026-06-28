@@ -995,6 +995,7 @@ async def run_room_session(ctx: Any, config: LiveKitAgentWorkerConfig) -> None:
                             first_text = False
                         tts_stream.push_text(chunk)
                     tts_stream.flush()
+                    tts_stream.end_input()
                 except asyncio.CancelledError:
                     pass
                 except Exception as e:

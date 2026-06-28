@@ -465,6 +465,7 @@ class DanaAgent(Agent):
                             self._latency_recorder.mark("second_turn_tts_first_text")
                     tts_stream.push_text(chunk)
                 tts_stream.flush()
+                tts_stream.end_input()
             except asyncio.CancelledError:
                 pass
             except Exception as e:
