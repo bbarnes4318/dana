@@ -24,6 +24,10 @@ async def test():
         print(f"Stream finished. Total frames: {count}")
     except Exception as e:
         print(f"ERROR: {e}")
+        if hasattr(e, "__cause__") and e.__cause__:
+            print(f"Underlying cause: {e.__cause__}")
+            if hasattr(e.__cause__, "status") and hasattr(e.__cause__, "message"):
+                print(f"Handshake error status: {e.__cause__.status} - {e.__cause__.message}")
 
 if __name__ == "__main__":
     asyncio.run(test())
