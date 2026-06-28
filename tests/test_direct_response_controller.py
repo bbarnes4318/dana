@@ -472,9 +472,9 @@ async def test_controller_llm_parameters_and_system_prompt():
         await controller._process_turn("hello normal turn")
 
         assert fake_chat.captured_kwargs is not None
-        assert fake_chat.captured_kwargs["temperature"] == 0.35
-        assert fake_chat.captured_kwargs["top_p"] == 0.88
-        assert fake_chat.captured_kwargs["max_tokens"] == 70
+        assert fake_chat.captured_kwargs["extra_kwargs"]["temperature"] == 0.35
+        assert fake_chat.captured_kwargs["extra_kwargs"]["top_p"] == 0.88
+        assert fake_chat.captured_kwargs["extra_kwargs"]["max_tokens"] == 70
 
         # Check that system prompt contains instruction_suffix
         system_msg = next(m for m in fake_chat.captured_chat_ctx.messages if m.role == "system")
@@ -493,7 +493,7 @@ async def test_controller_llm_parameters_and_system_prompt():
         fake_chat.captured_kwargs = None
         fake_chat.captured_chat_ctx = None
         await controller._process_turn("who is this")
-        assert fake_chat.captured_kwargs["max_tokens"] == 90
+        assert fake_chat.captured_kwargs["extra_kwargs"]["max_tokens"] == 90
         system_msg = next(m for m in fake_chat.captured_chat_ctx.messages if m.role == "system")
         assert "Respond in one or two short sentences. Answer the question directly. Do NOT restart the full pitch." in system_msg.content
 
@@ -501,7 +501,7 @@ async def test_controller_llm_parameters_and_system_prompt():
         fake_chat.captured_kwargs = None
         fake_chat.captured_chat_ctx = None
         await controller._process_turn("do not call me again")
-        assert fake_chat.captured_kwargs["max_tokens"] == 40
+        assert fake_chat.captured_kwargs["extra_kwargs"]["max_tokens"] == 40
         system_msg = next(m for m in fake_chat.captured_chat_ctx.messages if m.role == "system")
         assert "Respond in ONE polite sentence only. Do NOT ask any question. Acknowledge the request and confirm removal." in system_msg.content
 

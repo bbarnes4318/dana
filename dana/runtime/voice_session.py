@@ -184,12 +184,15 @@ class DanaAgent(Agent):
                 self.prompt_tokens += estimate_llm_tokens(prompt_str)
 
                 # Run LLM chat directly - hardcoding temperature to 0.2
+                extra_args = {
+                    "temperature": 0.2,
+                    "top_p": self._config.top_p,
+                    "max_tokens": self._config.max_tokens,
+                    "frequency_penalty": 0.15,
+                }
                 stream = self.llm.chat(
                     chat_ctx=new_ctx,
-                    temperature=0.2,
-                    top_p=self._config.top_p,
-                    max_tokens=self._config.max_tokens,
-                    frequency_penalty=0.15,
+                    extra_kwargs=extra_args,
                 )
                 
                 first_token = True
@@ -334,12 +337,15 @@ class DanaAgent(Agent):
             self.prompt_tokens += estimate_llm_tokens(prompt_str)
 
             # Run LLM chat directly - hardcoding temperature to 0.2
+            extra_args = {
+                "temperature": 0.2,
+                "top_p": self._config.top_p,
+                "max_tokens": self._config.max_tokens,
+                "frequency_penalty": 0.15,
+            }
             stream = self.llm.chat(
                 chat_ctx=new_ctx,
-                temperature=0.2,
-                top_p=self._config.top_p,
-                max_tokens=self._config.max_tokens,
-                frequency_penalty=0.15,
+                extra_kwargs=extra_args,
             )
             
             response_text = ""

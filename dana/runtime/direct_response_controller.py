@@ -138,11 +138,12 @@ class DirectResponsePolicy:
         Returns:
             A TurnPolicy with max_tokens, instruction_suffix, and should_end.
         """
-        text_lower = transcript.lower().strip()
+        from core.intent.short_response_intent import classify_intent
+        intent = classify_intent(transcript)
         hard_max = self._config.direct_response_hard_max_tokens
 
         # --- DNC / stop / remove me ---
-        if any(kw in text_lower for kw in _DNC_KEYWORDS) or any(kw in text_lower for kw in _STOP_KEYWORDS):
+        if intent == "dnc":
             return TurnPolicy(
                 max_tokens=min(self._config.direct_response_max_tokens_stop, hard_max),
                 instruction_suffix=(
@@ -153,7 +154,7 @@ class DirectResponsePolicy:
             )
 
         # --- wrong number ---
-        if any(kw in text_lower for kw in _WRONG_NUMBER_KEYWORDS):
+        if intent == "wrong_number":
             return TurnPolicy(
                 max_tokens=min(self._config.direct_response_max_tokens_stop, hard_max),
                 instruction_suffix=(
@@ -164,7 +165,7 @@ class DirectResponsePolicy:
             )
 
         # --- confusion / who is this ---
-        if any(kw in text_lower for kw in _CONFUSION_KEYWORDS):
+        if intent == "confusion":
             return TurnPolicy(
                 max_tokens=min(self._config.direct_response_max_tokens_objection, hard_max),
                 instruction_suffix=(
@@ -175,8 +176,8 @@ class DirectResponsePolicy:
                 should_end_after_response=False,
             )
 
-        # --- objection ---
-        if any(kw in text_lower for kw in _OBJECTION_KEYWORDS):
+        # --- objection / refusal ---
+        if intent in ("refusal", "off_topic"):
             return TurnPolicy(
                 max_tokens=min(self._config.direct_response_max_tokens_objection, hard_max),
                 instruction_suffix=(
@@ -475,7 +476,16 @@ class DirectResponseController:
         stage = None
         if self._adapter and hasattr(self._adapter, "state_machine"):
             stage = self._adapter.state_machine.call_state.current_stage
+        
+        from core.intent.short_response_intent import classify_intent
+        intent = classify_intent(transcript_text)
+        self._log.info("DIRECT_INTENT_DETECTED: '%s'", intent)
+
+        stage_val = stage.value if hasattr(stage, "value") else str(stage)
+        self._log.info("DIRECT_STAGE_BEFORE: '%s'", stage_val)
+
         policy = self._policy.get_turn_policy(stage, transcript_text)
+        self._log.info("DIRECT_POLICY_SELECTED: max_tokens=%d", policy.max_tokens)
 
         # Build chat_fn
         async def chat_fn(instructions: str) -> str:
@@ -498,10 +508,50 @@ class DirectResponseController:
         # Clean response
         response_text = clean_response(response_text)
 
-        # Fallback if empty
-        if not response_text.strip():
-            response_text = get_fallback_response(stage, transcript_text)
-            self._log.info("DIRECT_RESPONSE_EMPTY_FALLBACK_USED")
+        # Direct Response Validation
+        from dana.runtime.direct_response_validator import DirectResponseValidator
+        validator = DirectResponseValidator(self._config)
+
+        validation_res = validator.validate(response_text, result.stage, transcript_text)
+        if not validation_res.is_valid:
+            self._log.info("DIRECT_RESPONSE_VALIDATION_FAILED: %s", validation_res.reason)
+            
+            # 1. Stricter Prompt Instruction
+            stricter_instructions = (
+                "Respond in a maximum of two short sentences. "
+                "Do NOT repeat the greeting or American Beneficiary introduction. "
+                "Acknowledge the caller's input and ask exactly one next campaign question. "
+                "Do NOT say 'Well, fair enough' or 'I understand'."
+            )
+            self._log.info("DIRECT_RESPONSE_REGENERATED")
+            
+            # Rebuild chat_fn with stricter policy instruction suffix
+            stricter_policy = TurnPolicy(
+                max_tokens=policy.max_tokens,
+                instruction_suffix=stricter_instructions,
+                should_end_after_response=policy.should_end_after_response,
+            )
+            async def stricter_chat_fn(instructions: str) -> str:
+                return await self._run_llm(instructions, transcript_text, stricter_policy)
+
+            # Re-call adapter.process_user_turn
+            result = await self._adapter.process_user_turn(
+                transcript_text, stricter_chat_fn, interrupted=was_interrupted,
+            )
+            response_text = clean_response(result.agent_response or "")
+            self._agent.current_turn_response = response_text
+            
+            # Second validation check
+            second_validation_res = validator.validate(response_text, result.stage, transcript_text)
+            if not second_validation_res.is_valid:
+                self._log.info("DIRECT_RESPONSE_VALIDATION_FAILED: %s", second_validation_res.reason)
+                # 2. Stage-aware deterministic fallback
+                response_text = validator.get_deterministic_fallback(result.stage, transcript_text)
+                self._log.info("DIRECT_RESPONSE_DETERMINISTIC_FALLBACK_USED")
+            else:
+                self._log.info("DIRECT_RESPONSE_VALIDATION_PASSED")
+        else:
+            self._log.info("DIRECT_RESPONSE_VALIDATION_PASSED")
 
         self._log.info("DIRECT_RESPONSE_TEXT_LENGTH: %d", len(response_text))
 
@@ -517,6 +567,12 @@ class DirectResponseController:
                 raise
             except Exception as ex:
                 self._log.error("ERROR_DIRECT_SAY: %s", ex, exc_info=True)
+
+        next_stage_val = result.stage
+        self._log.info("DIRECT_STAGE_AFTER: '%s'", next_stage_val)
+
+        total_ms = int((time.monotonic() - turn_start) * 1000)
+        self._log.info("DIRECT_TURN_TOTAL_MS: %d", total_ms)
 
         # Track echo suppression
         self._last_assistant_text = response_text
@@ -614,12 +670,15 @@ class DirectResponseController:
         top_p = getattr(self._config, "top_p", 0.9)
 
         try:
+            extra_args = {
+                "temperature": temperature,
+                "top_p": top_p,
+                "max_tokens": max_tokens,
+                "frequency_penalty": 0.15,
+            }
             stream = self._agent.llm.chat(
                 chat_ctx=new_ctx,
-                temperature=temperature,
-                top_p=top_p,
-                max_tokens=max_tokens,
-                frequency_penalty=0.15,
+                extra_kwargs=extra_args,
             )
 
             response_text = ""

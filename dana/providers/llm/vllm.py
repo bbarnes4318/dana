@@ -6,9 +6,9 @@ from livekit.plugins import openai as lk_openai
 from dana.providers.base import LLMProvider
 
 class VLLMProvider(LLMProvider):
-    def __init__(self, base_url: str = "http://vllm-server:8000/v1", model: str = "meta-llama/Llama-3.1-8B-Instruct") -> None:
-        self._base_url = base_url
-        self._model = model
+    def __init__(self, base_url: str | None = None, model: str | None = None) -> None:
+        self._base_url = base_url or os.getenv("VLLM_BASE_URL", "http://127.0.0.1:8000/v1")
+        self._model = model or os.getenv("VLLM_MODEL", "meta-llama/Llama-3.1-8B-Instruct")
         self._client = None
 
     @property
