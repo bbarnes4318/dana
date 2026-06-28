@@ -268,11 +268,16 @@ class SharedComponents:
         self.active_stack = await self.routing_engine.select_provider_stack()
 
         # Extract and assign active LiveKit-compatible provider instances
+        await self.reinitialize_for_job()
+        self.telephony = self.active_stack["telephony"]
+
+    async def reinitialize_for_job(self):
+        """Re-create client wrapper instances for the current event loop/job context."""
+        logger.info("Re-initializing client wrappers for the current job context...")
         self.llm = self.active_stack["llm"].create_client()
         self.tts = self.active_stack["tts"].synthesize_stream()
         self.stt = self.active_stack["stt"].transcribe_stream()
         self.vad = self.active_stack["vad"].create_detector()
-        self.telephony = self.active_stack["telephony"]
 
         if hasattr(self.stt, "initialize"):
             try:
@@ -321,6 +326,8 @@ async def entrypoint(ctx: JobContext):
         shared = SharedComponents(config)
         await shared.initialize()
         ctx.proc.userdata["shared_components"] = shared
+    else:
+        await shared.reinitialize_for_job()
 
     # Connect to room (audio only)
     await ctx.connect(auto_subscribe=AutoSubscribe.AUDIO_ONLY)
