@@ -97,7 +97,7 @@ class DirectResponseValidator:
             return "I understand, I'll make sure this number is not contacted again."
         if intent == "wrong_number" or stage_lower == "wrong number":
             return "I understand, I'll make sure this number is not contacted again."
-        if intent == "refusal" or stage_lower in ("disqualified", "end"):
+        if intent in ("refusal", "hostile_refusal") or stage_lower in ("disqualified", "end"):
             return "Understood. I won’t keep you. Take care."
         if stage_lower == "callback":
             return "No problem. Would later today or tomorrow be better?"

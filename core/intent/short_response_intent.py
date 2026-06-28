@@ -29,6 +29,18 @@ _WRONG_NUMBER_PATTERNS = [
     re.compile(r"\bno\s+this\s+is\s+not\b", re.IGNORECASE),
 ]
 
+# Hostile refusal patterns
+_HOSTILE_REFUSAL_PATTERNS = [
+    re.compile(r"\bgo\s+fuck\s+yourself\b", re.IGNORECASE),
+    re.compile(r"\bfuck\s+off\b", re.IGNORECASE),
+    re.compile(r"\bfuck\s+you\b", re.IGNORECASE),
+    re.compile(r"\bpiss\s+off\b", re.IGNORECASE),
+    re.compile(r"\bshut\s+up\b", re.IGNORECASE),
+    re.compile(r"\bgo\s+to\s+hell\b", re.IGNORECASE),
+    re.compile(r"\bquit\s+calling\b", re.IGNORECASE),
+    re.compile(r"\bstop\s+fucking\s+calling\b", re.IGNORECASE),
+]
+
 # Confusion patterns
 _CONFUSION_PATTERNS = [
     re.compile(r"\bwho\s+is\s+this\b", re.IGNORECASE),
@@ -155,6 +167,11 @@ def classify_intent(text: str) -> str:
     for pat in _WRONG_NUMBER_PATTERNS:
         if pat.search(cleaned):
             return "wrong_number"
+
+    # 2.5 Hostile Refusal
+    for pat in _HOSTILE_REFUSAL_PATTERNS:
+        if pat.search(cleaned):
+            return "hostile_refusal"
 
     # 3. Confusion
     for pat in _CONFUSION_PATTERNS:

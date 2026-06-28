@@ -164,6 +164,17 @@ class DirectResponsePolicy:
                 should_end_after_response=True,
             )
 
+        # --- hostile refusal ---
+        if intent == "hostile_refusal":
+            return TurnPolicy(
+                max_tokens=min(40, hard_max),
+                instruction_suffix=(
+                    "Respond in ONE short polite sentence only. Do NOT ask any question. "
+                    "Understood. I won’t keep you. Take care."
+                ),
+                should_end_after_response=True,
+            )
+
         # --- confusion / who is this ---
         if intent == "confusion":
             return TurnPolicy(
@@ -298,8 +309,10 @@ class DirectResponseController:
         # Barge-in state
         self._interrupted: bool = False
 
-        # Running flag
+        # Running / ending flags
         self._running: bool = False
+        self._ending_call: bool = False
+        self._ended_call: bool = False
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -307,6 +320,9 @@ class DirectResponseController:
 
     async def start(self) -> None:
         """Start the queue consumer loop."""
+        if self._running or (self._consumer_task and not self._consumer_task.done()):
+            self._log.info("DIRECT_CONTROLLER_ALREADY_STARTED")
+            return
         self._running = True
         self._consumer_task = asyncio.create_task(self._consumer_loop())
         self._log.info("DirectResponseController started")
@@ -333,6 +349,10 @@ class DirectResponseController:
         Extracts text, applies filters, and enqueues accepted transcripts.
         Must be safe to call from a sync LiveKit event callback.
         """
+        if self._ending_call or self._ended_call:
+            self._log.info("DIRECT_POST_END_TURN_IGNORED")
+            return
+
         text = extract_transcript_text(event)
         self._log.info("USER_TRANSCRIPT_FINAL")
         self._log.info("FINAL_TRANSCRIPT_TEXT_LENGTH: %d", len(text))
@@ -347,15 +367,18 @@ class DirectResponseController:
 
         text = text.strip()
 
-        # 2. Dedupe
+        # 2. Dedupe (exact and near-duplicates)
         now = time.monotonic()
         dedupe_window_s = self._config.direct_response_dedupe_window_ms / 1000.0
-        if (
-            text == self._last_transcript
-            and (now - self._last_transcript_time) < dedupe_window_s
-        ):
-            self._log.info("DIRECT_TRANSCRIPT_DEDUPED")
-            return
+        if (now - self._last_transcript_time) < dedupe_window_s:
+            if text == self._last_transcript:
+                self._log.info("DIRECT_TRANSCRIPT_DEDUPED")
+                return
+            similarity = compute_similarity(text, self._last_transcript)
+            threshold = getattr(self._config, "direct_response_echo_similarity_threshold", 0.85)
+            if similarity >= threshold:
+                self._log.info("DIRECT_DUPLICATE_FINAL_TRANSCRIPT_SUPPRESSED")
+                return
 
         # 3. Min length (with short-intent allowlist)
         text_lower = text.lower().strip()
@@ -389,6 +412,17 @@ class DirectResponseController:
         self._last_transcript_time = now
         self._log.info("DIRECT_TRANSCRIPT_ACCEPTED: '%s'", text[:120])
 
+        # Check for final intent before enqueuing
+        from core.intent.short_response_intent import classify_intent
+        intent = classify_intent(text)
+        is_final = (intent in ("dnc", "wrong_number", "hostile_refusal"))
+        if is_final:
+            self._ending_call = True
+            self._log.info("DIRECT_FINAL_INTENT_DETECTED")
+            cleared = self._clear_queue()
+            if cleared > 0:
+                self._log.info("DIRECT_QUEUE_CLEARED_FOR_FINAL_INTENT")
+
         # Enqueue with overflow handling
         self._enqueue(text)
 
@@ -421,6 +455,18 @@ class DirectResponseController:
     # ------------------------------------------------------------------
     # Queue management
     # ------------------------------------------------------------------
+
+    def _clear_queue(self) -> int:
+        """Clear all pending transcripts in the queue and return count of cleared items."""
+        count = 0
+        while not self._queue.empty():
+            try:
+                self._queue.get_nowait()
+                self._queue.task_done()
+                count += 1
+            except asyncio.QueueEmpty:
+                break
+        return count
 
     def _enqueue(self, text: str) -> None:
         """Enqueue a transcript, dropping oldest if queue is full."""
@@ -462,6 +508,10 @@ class DirectResponseController:
 
     async def _process_turn(self, transcript_text: str) -> None:
         """Process a single direct response turn end-to-end."""
+        if self._ended_call:
+            self._log.info("DIRECT_POST_END_TURN_IGNORED")
+            return
+
         turn_start = time.monotonic()
         self._log.info("DIRECT_RESPONSE_STARTED")
 
@@ -480,6 +530,15 @@ class DirectResponseController:
         from core.intent.short_response_intent import classify_intent
         intent = classify_intent(transcript_text)
         self._log.info("DIRECT_INTENT_DETECTED: '%s'", intent)
+
+        # Check for pre-generation final intents
+        is_final_intent = (intent in ("dnc", "wrong_number", "hostile_refusal"))
+        if is_final_intent:
+            self._ending_call = True
+            self._log.info("DIRECT_FINAL_INTENT_DETECTED")
+            cleared = self._clear_queue()
+            if cleared > 0:
+                self._log.info("DIRECT_QUEUE_CLEARED_FOR_FINAL_INTENT")
 
         stage_val = stage.value if hasattr(stage, "value") else str(stage)
         self._log.info("DIRECT_STAGE_BEFORE: '%s'", stage_val)
@@ -592,7 +651,14 @@ class DirectResponseController:
             )
 
         # Handle call ending
-        if result.should_end_call or policy.should_end_after_response:
+        if result.should_end_call or policy.should_end_after_response or self._ending_call:
+            if not self._ending_call:
+                self._ending_call = True
+                self._log.info("DIRECT_FINAL_INTENT_DETECTED")
+                cleared = self._clear_queue()
+                if cleared > 0:
+                    self._log.info("DIRECT_QUEUE_CLEARED_FOR_FINAL_INTENT")
+            self._ended_call = True
             await self._handle_call_end(result)
 
     # ------------------------------------------------------------------
@@ -749,9 +815,28 @@ class DirectResponseController:
             if getattr(self._agent, "fallback_disconnect_task", None):
                 self._agent.fallback_disconnect_task.cancel()
 
-            async def disconnect_after_delay(delay: float = 8.0):
+            # Determine fast disconnect delay (0.5s - 1.0s) for DNC/wrong number/hostile/refusal
+            from core.intent.short_response_intent import classify_intent
+            last_intent = classify_intent(self._last_transcript)
+            is_fast_disconnect = (
+                last_intent in ("dnc", "wrong_number", "hostile_refusal", "refusal")
+                or (result and getattr(result, "stage", None) in ("end", "disqualified"))
+            )
+            default_delay = 0.8 if is_fast_disconnect else 8.0
+            
+            # Allow environment override
+            env_delay = os.getenv("DANA_FINAL_DISCONNECT_DELAY")
+            if env_delay is not None:
                 try:
-                    await asyncio.sleep(delay)
+                    delay = float(env_delay)
+                except ValueError:
+                    delay = default_delay
+            else:
+                delay = default_delay
+
+            async def disconnect_after_delay(d: float):
+                try:
+                    await asyncio.sleep(d)
                     if self._room and hasattr(self._room, "isconnected"):
                         connected = self._room.isconnected
                         if callable(connected):
@@ -763,7 +848,7 @@ class DirectResponseController:
                     self._log.info("Fallback disconnect cancelled")
 
             self._agent.fallback_disconnect_task = asyncio.create_task(
-                disconnect_after_delay()
+                disconnect_after_delay(delay)
             )
 
     # ------------------------------------------------------------------
