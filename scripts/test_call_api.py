@@ -1,9 +1,24 @@
-import asyncio
-from storage.repository import Repository
+import urllib.request
+import json
 
-async def test():
-    repo = Repository()
-    campaigns = await repo.store.query("outbound_campaigns", {})
-    print("CAMPAIGNS:", campaigns)
+url = "http://localhost:8787/api/telephony/live/test-call"
+payload = {
+    "phone_number": "+15513326220",
+    "operator": "Jimmy",
+    "confirmation": "LIVE CALL"
+}
 
-asyncio.run(test())
+req = urllib.request.Request(
+    url,
+    data=json.dumps(payload).encode(),
+    headers={"Content-Type": "application/json"}
+)
+
+try:
+    with urllib.request.urlopen(req) as resp:
+        print("Response:", resp.read().decode())
+except urllib.error.HTTPError as e:
+    print("HTTP Error:", e.code)
+    print("Response payload:", e.read().decode())
+except Exception as e:
+    print("Error:", e)
