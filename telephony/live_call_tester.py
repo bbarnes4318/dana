@@ -93,6 +93,7 @@ class LiveCallTester:
                     campaign_id = campaigns[0]["id"]
             else:
                 campaign_id = "manual_test_campaign"
+        print(f"DEBUG RESOLVED CAMPAIGN ID: {campaign_id}", flush=True)
 
         # 3. Check DNC lists if campaign or lead exist
         if campaign_id:
