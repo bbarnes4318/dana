@@ -44,7 +44,7 @@ async def execute_emergency_flush(session, agent) -> None:
             logger.error(f"Error calling clear_buffer/flush on audio_output: {e}")
             
     # Also explicitly clear queue on the active audio source
-    import tts_service
+    import legacy.tts_service as tts_service
     if tts_service.active_audio_source:
         try:
             tts_service.active_audio_source.clear_queue()
@@ -583,7 +583,7 @@ class ElderlySileroVADStream(silero.VADStream):
                                         from speech.context_registry import get_current_call_id
                                         call_id = get_current_call_id() or "default"
                                     
-                                    from stt_service import LocallyHostedSTT
+                                    from legacy.stt_service import LocallyHostedSTT
                                     stt_stream = LocallyHostedSTT._active_streams.get(call_id)
                                 
                                 if stt_stream:
@@ -634,7 +634,7 @@ class ElderlySileroVADStream(silero.VADStream):
                                     from speech.context_registry import get_current_call_id
                                     call_id = get_current_call_id() or "default"
                                 
-                                from stt_service import LocallyHostedSTT
+                                from legacy.stt_service import LocallyHostedSTT
                                 stt_stream = LocallyHostedSTT._active_streams.get(call_id)
                                 
                             if stt_stream:

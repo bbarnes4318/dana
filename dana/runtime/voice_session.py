@@ -798,7 +798,9 @@ class VoiceSession:
         
         if hasattr(self.shared.stt, "bind"):
             session._stt = self.shared.stt.bind(session, agent)
+            agent._stt = session._stt
         session._vad = self.shared.vad.bind(session, agent)
+        agent._vad = session._vad
 
         # Set lead details directly on agent.adapter.lead
         if agent.adapter and agent.adapter.lead:
