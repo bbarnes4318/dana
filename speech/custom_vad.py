@@ -408,6 +408,7 @@ class ElderlySileroVADStream(silero.VADStream):
                 samples = np.frombuffer(input_frame.data, dtype=np.int16)
                 if len(samples) > 0:
                     rms = np.sqrt(np.mean(samples.astype(np.float64) ** 2))
+                    logger.info(f"VAD INBOUND AUDIO: rms={rms:.2f} samples={len(samples)}")
                     if rms > 0.0 and "inbound_audio_rms_nonzero" not in recorder.events:
                         recorder.mark("inbound_audio_rms_nonzero")
                 
@@ -469,6 +470,7 @@ class ElderlySileroVADStream(silero.VADStream):
                     # Run inference on the actual ONNX session
                     p = await self._loop.run_in_executor(None, self._model, self._inference_f32_data)
                     p = self._exp_filter.apply(exp=1.0, sample=p)
+                    logger.info(f"VAD INFERENCE: p={p:.4f}")
                     
                     recorder = getattr(self._agent, "_latency_recorder", None)
                     if recorder and "vad_inference_done" not in recorder.events:
