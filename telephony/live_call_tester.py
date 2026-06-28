@@ -141,6 +141,23 @@ class LiveCallTester:
         if campaign_id:
             meta_dict["campaign_id"] = campaign_id
 
+        # Ensure lead exists in campaign_leads to satisfy foreign key constraint
+        await self.repository.save_campaign_lead(
+            id="manual-test",
+            campaign_id=campaign_id,
+            first_name="Manual",
+            last_name="Test",
+            phone_number=config.phone_number,
+            state="TN",
+            timezone="America/New_York",
+            status="new",
+            priority=1,
+            attempt_count=0,
+            max_attempts=1,
+            created_at=now,
+            updated_at=now
+        )
+
         # 6. Save CallAttempt before dialing
         attempt = {
             "id": attempt_id,
