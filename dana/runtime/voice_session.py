@@ -978,12 +978,41 @@ class VoiceSession:
                 async def chat_fn(instructions: str) -> str:
                     new_ctx = llm.ChatContext()
                     
+                    # Determine dynamic constraint based on current stage and classification
+                    stage = agent.adapter.state_machine.call_state.current_stage if agent.adapter else None
+                    
+                    is_objection = False
+                    if agent.adapter and hasattr(agent.adapter, "runtime") and agent.adapter.runtime:
+                        for ev in agent.adapter.runtime.events:
+                            if getattr(ev, "event_type", "") == "objection_detected":
+                                is_objection = True
+                                break
+                                
+                    is_confusion = False
+                    text_lower = transcript_text.lower().strip()
+                    confusion_keywords = ["what", "who is this", "repeat", "huh", "pardon", "dont understand", "don't understand", "explain"]
+                    if any(k in text_lower for k in confusion_keywords):
+                        is_confusion = True
+
+                    from core.call_state import CallStage
+                    
+                    if is_confusion:
+                        constraint = "IMPORTANT: You MUST respond in EXACTLY one or two short sentences. Keep it brief and clear."
+                    elif is_objection:
+                        constraint = "IMPORTANT: You MUST respond in a MAXIMUM of two short sentences. Address the objection directly and concisely."
+                    elif stage in (CallStage.OPENING, CallStage.INTEREST_CHECK):
+                        constraint = "IMPORTANT: You MUST respond in EXACTLY one short sentence. Keep it extremely brief."
+                    elif stage in (CallStage.DNC, CallStage.DISQUALIFIED):
+                        constraint = "IMPORTANT: You MUST respond in EXACTLY one sentence to politely end the conversation."
+                    elif stage == CallStage.TRANSFER_CONSENT:
+                        constraint = "IMPORTANT: You MUST respond in EXACTLY one sentence asking for or confirming consent to transfer."
+                    else:
+                        constraint = "IMPORTANT: Keep your response short, brief, and natural."
+
                     # Prepend static system prompt prefix
                     loader = agent.prompt_loader or (agent.adapter and agent.adapter.prompt_loader)
                     static_prompt = loader.build_system_prompt() if loader else ""
-                    # Force short, one-sentence response without monologues
-                    short_constraint = "\n\nIMPORTANT: You MUST respond in EXACTLY one short sentence. Do NOT use filler monologues, introductory phrases, or say anything else."
-                    combined_prompt = f"{static_prompt}\n\n{instructions}{short_constraint}"
+                    combined_prompt = f"{static_prompt}\n\n{instructions}\n\n{constraint}"
                     
                     new_ctx.add_message(
                         role="system",
@@ -1024,12 +1053,19 @@ class VoiceSession:
                     prompt_str = instructions + "".join(get_msg_text(m) for m in new_ctx.messages if get_msg_text(m))
                     agent.prompt_tokens += estimate_llm_tokens(prompt_str)
 
-                    # Run LLM chat directly - limiting max_tokens to 45
+                    # Dynamic max_tokens configuration from environment
+                    try:
+                        max_tokens_val = int(os.getenv("DANA_DIRECT_RESPONSE_MAX_TOKENS", "70").strip())
+                    except ValueError:
+                        max_tokens_val = 70
+                    max_tokens_val = min(max_tokens_val, 90)
+
+                    # Run LLM chat directly
                     stream = agent.llm.chat(
                         chat_ctx=new_ctx,
                         temperature=0.2,
                         top_p=agent._config.top_p if hasattr(agent, "_config") else 0.7,
-                        max_tokens=45,
+                        max_tokens=max_tokens_val,
                         frequency_penalty=0.15,
                     )
                     
