@@ -34,13 +34,15 @@ class DeepgramSTTProvider(STTProvider):
         api_key = os.getenv("DEEPGRAM_API_KEY")
         if not api_key:
             return False
-        # Do a simple projects query on deepgram API to verify API key
-        url = "https://api.deepgram.com/v1/projects"
+        # POST to /v1/listen to check credentials and credit balance
+        url = "https://api.deepgram.com/v1/listen"
         headers = {"Authorization": f"Token {api_key}"}
         try:
             async with aiohttp.ClientSession() as session:
-                async with session.get(url, headers=headers, timeout=2.0) as resp:
-                    return resp.status == 200
+                async with session.post(url, headers=headers, timeout=2.0) as resp:
+                    # 401 (Unauthorized) and 402 (Payment Required) mean unhealthy/inactive.
+                    # 400 (Bad Request) or 415 (Unsupported Media Type) indicate valid key/payment but empty payload.
+                    return resp.status not in (401, 402)
         except Exception:
             return False
 
