@@ -474,11 +474,17 @@ class ElderlySileroVADStream(silero.VADStream):
                     
                     # Convert to float32 without allocating new array
                     gain = float(os.getenv("DANA_INPUT_GAIN", "1.0"))
+                    win_data = self._input_buffer[:512]
+                    win_min = win_data.min()
+                    win_max = win_data.max()
+                    win_rms = np.sqrt(np.mean(win_data.astype(np.float64) ** 2))
+                    logger.info(f"VAD EVAL WINDOW: min={win_min} max={win_max} rms={win_rms:.2f} gain={gain}")
+                    
                     if gain != 1.0:
-                        np.divide(self._input_buffer[:512], 32768.0 / gain, out=self._inference_f32_data, dtype=np.float32)
+                        np.divide(win_data, 32768.0 / gain, out=self._inference_f32_data, dtype=np.float32)
                         np.clip(self._inference_f32_data, -1.0, 1.0, out=self._inference_f32_data)
                     else:
-                        np.divide(self._input_buffer[:512], 32768.0, out=self._inference_f32_data, dtype=np.float32)
+                        np.divide(win_data, 32768.0, out=self._inference_f32_data, dtype=np.float32)
                     
                     # Run inference on the actual ONNX session
                     p = await self._loop.run_in_executor(None, self._model, self._inference_f32_data)
