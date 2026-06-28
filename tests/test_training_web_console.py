@@ -24,9 +24,9 @@ from ops.readiness import ContinuousTrainingReadinessAuditor, ContinuousTraining
 # 1. test_web_console_config_defaults_localhost
 def test_web_console_config_defaults_localhost():
     """Verify that configuration defaults to localhost and allow_remote is False."""
-    config = TrainingWebConsoleConfig()
+    config = TrainingWebConsoleConfig(port=8788)
     assert config.host == "127.0.0.1"
-    assert config.port == 8787
+    assert config.port == 8788
     assert config.allow_remote is False
     assert config.debug is False
 

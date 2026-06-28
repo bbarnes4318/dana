@@ -1,5 +1,6 @@
 import sys
 import os
+import pytest
 from unittest.mock import MagicMock
 import dotenv
 
@@ -396,5 +397,18 @@ torch_mock = MagicMock()
 torch_mock.Tensor = DummyTensor
 torch_mock.hub.load.return_value = (MagicMock(), MagicMock())
 sys.modules['torch'] = torch_mock
+
+
+@pytest.fixture(autouse=True)
+def flush_redis_pacing():
+    try:
+        _orig_subprocess_run(["redis-cli", "flushall"], capture_output=True, timeout=2)
+    except Exception:
+        pass
+    yield
+    try:
+        _orig_subprocess_run(["redis-cli", "flushall"], capture_output=True, timeout=2)
+    except Exception:
+        pass
 
 

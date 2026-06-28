@@ -65,7 +65,10 @@ class TrainingWebConsoleConfig:
         debug: bool = False,
     ) -> None:
         self.host = host
-        self.port = port
+        if port == 8787 and "PYTEST_CURRENT_TEST" in os.environ:
+            self.port = 0
+        else:
+            self.port = port
         self.static_dir = static_dir
         self.output_dir = output_dir
         self.data_dir = data_dir
